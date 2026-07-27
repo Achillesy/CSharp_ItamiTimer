@@ -1,5 +1,4 @@
 using Avalonia.Controls;
-using Avalonia.Controls.Primitives;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
 using Avalonia.Styling;
@@ -35,11 +34,6 @@ public partial class MainWindow : Window
         Icon = TomatoIcon.Make();
 
         LoadRules();
-        this.FindControl<Slider>("Minutes")!.PropertyChanged += (_, e) =>
-        {
-            if (e.Property == RangeBase.ValueProperty) UpdateMinutesText();
-        };
-        UpdateMinutesText();
         RefreshStartButton();
 
         _frame.Tick += (_, _) => this.FindControl<DialControl>("Dial")!.InvalidateVisual();
@@ -111,10 +105,6 @@ public partial class MainWindow : Window
     private void RefreshStartButton()
         => this.FindControl<Button>("StartBtn")!.IsEnabled =
             _awReady && _rules is not null && _goalBoxes.Any(b => b.IsChecked == true);
-
-    private void UpdateMinutesText()
-        => this.FindControl<TextBlock>("MinutesText")!.Text =
-            ((int)this.FindControl<Slider>("Minutes")!.Value).ToString();
 
     private void OnStart(object? sender, RoutedEventArgs e)
     {

@@ -51,14 +51,11 @@
 
       <Button x:Name="StartBtn" Classes="start" Click="OnStart" Content="开始"/>
 
-      <!-- 取值控件，不解释不说明。只露一个数字，连单位都不写 -->
-      <Grid ColumnDefinitions="*,Auto" Margin="2,4,2,0">
-        <Slider Grid.Column="0" x:Name="Minutes"
-                Minimum="10" Maximum="50" TickFrequency="5"
-                IsSnapToTickEnabled="True" TickPlacement="BottomRight" Value="25"/>
-        <TextBlock Grid.Column="1" x:Name="MinutesText" VerticalAlignment="Center"
-                   Margin="12,0,0,0" FontSize="17" FontFamily="Consolas" MinWidth="30"/>
-      </Grid>
+      <!-- 取值控件。不解释、不说明、连数字都不给（用户 2026-07-27：主打一个猜）。
+           只有九个刻度，自己拖去。 -->
+      <Slider x:Name="Minutes" Margin="2,4,2,0"
+              Minimum="10" Maximum="50" TickFrequency="5"
+              IsSnapToTickEnabled="True" TickPlacement="BottomRight" Value="25"/>
 
       <!-- 小目标列表。rules.json 有几个就排几行，窗口高度跟着变 -->
       <ItemsControl x:Name="Goals"/>
