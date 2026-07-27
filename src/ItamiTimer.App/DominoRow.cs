@@ -212,20 +212,20 @@ public class DominoRow : Control
             var right = padX + shadowSpan;
             var top = baseY - T * scale * 1.15;
             var bottom = baseY;
-            // 圆角而不是方角：一条硬边的矩形会读成"贴了一块灰纸"，两端收圆之后
-            // 才像影子自己在地上淡开。圆角取带高的四成，不做成整颗药丸。
-            var bandH = bottom - top;
-            list.Add((new RectangleGeometry(new Rect(left, top, right - left, bandH),
-                                            bandH * 0.40, bandH * 0.40),
+            list.Add((Quad(new Point(left, top), new Point(right, top),
+                           new Point(right, bottom), new Point(left, bottom)),
                 new LinearGradientBrush
                 {
                     StartPoint = new RelativePoint(0, 0, RelativeUnit.Relative),
                     EndPoint = new RelativePoint(0, 1, RelativeUnit.Relative),
                     GradientStops =
                     {
-                        new GradientStop(Color.FromArgb(0x00, 0, 0, 0), 0.00),
-                        new GradientStop(Color.FromArgb(0x18, 0, 0, 0), 0.55),
-                        new GradientStop(Color.FromArgb(0x30, 0, 0, 0), 1.00),
+                        // **上深下浅**（用户 2026-07-27）。原来反着来，最深的一档正好
+                        // 落在带子的底边上，那里必然切出一条硬边 —— 试过用圆角去救，
+                        // 治标而已。翻过来之后底边本身就是全透明，边界自己消失了。
+                        new GradientStop(Color.FromArgb(0x34, 0, 0, 0), 0.00),
+                        new GradientStop(Color.FromArgb(0x1A, 0, 0, 0), 0.45),
+                        new GradientStop(Color.FromArgb(0x00, 0, 0, 0), 1.00),
                     }
                 }));
         }
