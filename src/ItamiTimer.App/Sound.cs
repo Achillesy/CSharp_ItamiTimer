@@ -43,12 +43,9 @@ public static class Sound
     /// 按名字放一声。名字为空、文件不存在、播放失败 —— 一律安静收场。
     /// **提示音绝不能把程序搞挂**，跟日志同一个原则。
     /// </summary>
-    /// <summary>右上角喇叭按下去之后，所有声音都不出（滴答那边另有判断）。</summary>
-    public static bool Muted { get; set; }
-
     public static void Play(string? name)
     {
-        if (Muted || string.IsNullOrWhiteSpace(name)) return;
+        if (string.IsNullOrWhiteSpace(name)) return;
         try
         {
             var path = Path.Combine(MediaDir, name + ".wav");

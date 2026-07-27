@@ -5,8 +5,14 @@ using Avalonia.Markup.Xaml;
 namespace ItamiTimer.App;
 
 /// <summary>
-/// 设置窗口。三条声音：任务结束、休息结束、键鼠空闲（照 Windows 时钟应用的
-/// 「专注时段」设置页排版）。
+/// 设置窗口。三条通知音（任务结束 / 休息结束 / 键鼠空闲）各带开关和音色，
+/// 外加滴答的**音量**。照 Windows 时钟应用的「专注时段」设置页排版。
+///
+/// **滴答的开关不在这里** —— 它在钟的右上角那个喇叭上（用户 2026-07-28）。
+/// 滴答是钟本身的功能，跟督促学习那三声不是一类东西，混在一页里会让人以为
+/// 它也是任务的一部分。
+///
+/// **一个字的说明都没有**（用户 2026-07-28）：标题 + 控件，剩下的自己猜。
 ///
 /// 没有「确定 / 取消」：改一下存一下，跟系统设置一个路数。选中音色立刻试听一次 ——
 /// 从一串文件名里盲选是选不出来的。
@@ -31,7 +37,6 @@ public partial class SettingsWindow : Window
         var focusSound = this.FindControl<ComboBox>("FocusSound")!;
         var restSound = this.FindControl<ComboBox>("RestSound")!;
         var idleSound = this.FindControl<ComboBox>("IdleSound")!;
-        var tickOn = this.FindControl<ToggleSwitch>("TickOn")!;
         var tickVol = this.FindControl<Slider>("TickVol")!;
 
         focusSound.ItemsSource = names;
@@ -46,9 +51,7 @@ public partial class SettingsWindow : Window
         focusSound.IsEnabled = settings.FocusDoneEnabled;
         restSound.IsEnabled = settings.RestDoneEnabled;
         idleSound.IsEnabled = settings.IdleEnabled;
-        tickOn.IsChecked = settings.TickEnabled;
         tickVol.Value = settings.TickVolume;
-        tickVol.IsEnabled = settings.TickEnabled;
 
         focusOn.IsCheckedChanged += (_, _) =>
         {
@@ -62,28 +65,21 @@ public partial class SettingsWindow : Window
             restSound.IsEnabled = settings.RestDoneEnabled;
             Persist();
         };
-        tickOn.IsCheckedChanged += (_, _) =>
-        {
-            settings.TickEnabled = tickOn.IsChecked == true;
-            tickVol.IsEnabled = settings.TickEnabled;
-            if (!_loading && settings.TickEnabled) Tick.Play(0, settings.TickVolume);
-            Persist();
-        };
         tickVol.PropertyChanged += (_, e) =>
         {
             if (e.Property != RangeBase.ValueProperty) return;
             settings.TickVolume = (int)Math.Round(tickVol.Value);
-            // 拖动时实时试听：音量是唯一一个"不听见就调不准"的设置
-            if (!_loading && settings.TickEnabled) Tick.Play(0, settings.TickVolume);
+            // 拖动时实时试听：音量是唯一一个"不听见就调不准"的设置。
+            // 这里【不看】TickEnabled —— 用户正在调音量，就是要听见，
+            // 哪怕此刻喇叭是关着的。
+            if (!_loading) Tick.Play(0, settings.TickVolume);
             Persist();
         };
         idleOn.IsCheckedChanged += (_, _) =>
         {
             settings.IdleEnabled = idleOn.IsChecked == true;
             idleSound.IsEnabled = settings.IdleEnabled;
-        tickOn.IsChecked = settings.TickEnabled;
         tickVol.Value = settings.TickVolume;
-        tickVol.IsEnabled = settings.TickEnabled;
             Persist();
         };
         idleSound.SelectionChanged += (_, _) =>

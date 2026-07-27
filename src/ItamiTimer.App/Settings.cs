@@ -26,12 +26,15 @@ public sealed class Settings
     [JsonPropertyName("idleEnabled")] public bool IdleEnabled { get; set; } = true;
     [JsonPropertyName("idleSound")] public string? IdleSound { get; set; }
 
-    /// <summary>滴答声开关与音量（0~100）。音色是合成的，没有可选项（<see cref="Tick"/>）。</summary>
+    /// <summary>
+    /// 滴答声开关。**就是右上角那个喇叭**，设置窗口里没有它 —— 滴答是
+    /// **钟本身**的功能，跟督促学习无关，所以开关摆在钟上，随手一点（§8.3.7）。
+    /// 设置窗口只管它的音量。
+    /// </summary>
     [JsonPropertyName("tickEnabled")] public bool TickEnabled { get; set; }
-    [JsonPropertyName("tickVolume")] public int TickVolume { get; set; } = 35;
 
-    /// <summary>右上角那个喇叭：总静音。管住所有声音，不只是滴答。</summary>
-    [JsonPropertyName("muted")] public bool Muted { get; set; }
+    /// <summary>滴答音量 0~100。音色是合成的，没有可选项（<see cref="Tick"/>）。</summary>
+    [JsonPropertyName("tickVolume")] public int TickVolume { get; set; } = 35;
 
     /// <summary>右上角那个图钉：窗口置顶。手动开关，没有任何自动收放（<see cref="Win32Topmost"/>）。</summary>
     [JsonPropertyName("pinned")] public bool Pinned { get; set; }

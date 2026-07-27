@@ -53,7 +53,7 @@ public partial class MainWindow : Window
         LoadRules();
         RefreshStartButton();
         F<Button>("SettingsBtn").Click += OnSettings;
-        F<Button>("MuteBtn").Click += (_, _) => { _settings.Muted = !_settings.Muted; ApplyChrome(); _settings.Save(); };
+        F<Button>("MuteBtn").Click += (_, _) => { _settings.TickEnabled = !_settings.TickEnabled; ApplyChrome(); _settings.Save(); };
         F<Button>("PinBtn").Click += (_, _) => { _settings.Pinned = !_settings.Pinned; ApplyChrome(); _settings.Save(); };
         ApplyChrome();
 
@@ -83,6 +83,9 @@ public partial class MainWindow : Window
     /// <summary>
     /// 33ms 一帧。两件事：让秒针的跳变及时（延迟 ≤33ms），以及**在秒边界上放一声滴答**。
     ///
+    /// **窗口收起来照样响**（用户 2026-07-28）：滴答是钟本身在走，跟你有没有在看它
+    /// 没关系。只有重绘会因为看不见而跳过 —— 那纯粹是省电，不影响声音。
+    ///
     /// 滴答挂在这个已有的定时器上，不另起一个：它天然对齐墙钟、不会漂，而 33ms 的
     /// 抖动对一声 35ms 的"咔"完全听不出来。另一条路是做个整 1 秒的缓冲交给
     /// `SND_LOOP` 循环 —— 零 CPU，但音频时钟会跟系统时钟慢慢漂开，一小时后
@@ -96,20 +99,21 @@ public partial class MainWindow : Window
         var sec = DateTime.Now.Second;
         if (sec == _tickedSecond) return;
         _tickedSecond = sec;
-        // 窗口收起来了就不响 —— 看不见的钟没有理由在耳边走
-        if (visible && _settings.TickEnabled && !_settings.Muted)
-            Tick.Play(sec, _settings.TickVolume);
+        if (_settings.TickEnabled) Tick.Play(sec, _settings.TickVolume);
     }
 
     /// <summary>
     /// 把右上角两个开关的图标和窗口的置顶状态刷成设置里的样子。
+    ///
+    /// **喇叭只管滴答声**（用户 2026-07-28）：滴答是钟本身的功能，跟督促学习那三声
+    /// 通知无关，所以它不是"总静音"。那三声各有各的开关，在设置窗口里。
     ///
     /// 图标用 Segoe Fluent / MDL2 的字形，**状态靠图形本身和明度双重表达**，
     /// 不用文字（分割线以上一个字都没有）：
     ///
     /// | | 关 | 开 |
     /// |---|---|---|
-    /// | 喇叭 | `E767` 喇叭 | `E74F` 打叉的喇叭 |
+    /// | 喇叭 | `E74F` 打叉的喇叭 | `E767` 喇叭 |
     /// | 图钉 | `E718` 空心图钉 | `E840` 实心图钉 |
     ///
     /// 图钉那一格**刻意不用 `E77A`（打叉的图钉）**：打叉在满不透明度下会读成
@@ -121,13 +125,12 @@ public partial class MainWindow : Window
         var mute = F<Button>("MuteBtn");
         var pin = F<Button>("PinBtn");
 
-        mute.Content = _settings.Muted ? "\uE74F" : "\uE767";   // 静音 / 喇叭
-        mute.Classes.Set("on", _settings.Muted);
+        mute.Content = _settings.TickEnabled ? "\uE767" : "\uE74F";   // 喇叭 / 打叉的喇叭
+        mute.Classes.Set("on", _settings.TickEnabled);
         pin.Content = _settings.Pinned ? "\uE840" : "\uE718";    // 实心图钉 / 空心图钉
         pin.Classes.Set("on", _settings.Pinned);
 
-        Sound.Muted = _settings.Muted;
-        if (_settings.Muted) Tick.Stop();     // 掐断正在响的那一声，别等它自己完
+        if (!_settings.TickEnabled) Tick.Stop();   // 掐断正在响的那一声，别等它自己完
         Win32Topmost.Set(this, _settings.Pinned);
     }
 

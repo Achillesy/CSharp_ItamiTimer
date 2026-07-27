@@ -2,16 +2,21 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="ItamiTimer.App.SettingsWindow"
         Title="设置"
-        Width="520"
+        Width="460"
         SizeToContent="Height"
         CanResize="False"
         ShowInTaskbar="False"
         WindowStartupLocation="CenterOwner"
+        Topmost="True"
         Background="#D7DBE0">
+  <!-- Topmost：主窗口可能被用户用图钉钉住了（§8.3.7），那时普通的模态窗口会
+       整个沉到它下面 —— 屏幕上什么都不出现，点了齿轮像没反应。模态窗口本来
+       就该压在一切之上，直接钉死。2026-07-28 实测撞到。 -->
 
   <Window.Styles>
-    <!-- 一张「卡片」= 一条设置。照 Windows 时钟应用的设置页排：
-         图标 / 标题 + 说明 / 右侧开关，展开后是那一条的取值。 -->
+    <!-- 一张卡片 = 一条设置。照 Windows 时钟应用的设置页排。
+         **一个字的说明都没有**（用户 2026-07-28）：标题 + 控件，剩下的自己猜 ——
+         跟主界面分割线以下不给提示字、不给数字是同一条。 -->
     <Style Selector="Border.card">
       <Setter Property="Background" Value="#E8EBEE"/>
       <Setter Property="CornerRadius" Value="8"/>
@@ -22,12 +27,7 @@
     <Style Selector="TextBlock.title">
       <Setter Property="FontSize" Value="15"/>
       <Setter Property="FontWeight" Value="SemiBold"/>
-    </Style>
-    <Style Selector="TextBlock.sub">
-      <Setter Property="FontSize" Value="12.5"/>
-      <Setter Property="Opacity" Value="0.65"/>
-      <Setter Property="Margin" Value="0,2,0,0"/>
-      <Setter Property="TextWrapping" Value="Wrap"/>
+      <Setter Property="VerticalAlignment" Value="Center"/>
     </Style>
   </Window.Styles>
 
@@ -38,10 +38,7 @@
     <Border Classes="card">
       <StackPanel Spacing="12">
         <Grid ColumnDefinitions="*,Auto">
-          <StackPanel>
-            <TextBlock Classes="title" Text="任务结束声音"/>
-            <TextBlock Classes="sub" Text="专注时长攒够时响一声"/>
-          </StackPanel>
+          <TextBlock Classes="title" Text="任务结束声音"/>
           <ToggleSwitch x:Name="FocusOn" Grid.Column="1" VerticalAlignment="Center"
                         OnContent="开" OffContent="关"/>
         </Grid>
@@ -52,10 +49,7 @@
     <Border Classes="card">
       <StackPanel Spacing="12">
         <Grid ColumnDefinitions="*,Auto">
-          <StackPanel>
-            <TextBlock Classes="title" Text="休息结束声音"/>
-            <TextBlock Classes="sub" Text="休息走完、这一轮终结时响一声"/>
-          </StackPanel>
+          <TextBlock Classes="title" Text="休息结束声音"/>
           <ToggleSwitch x:Name="RestOn" Grid.Column="1" VerticalAlignment="Center"
                         OnContent="开" OffContent="关"/>
         </Grid>
@@ -66,13 +60,7 @@
     <Border Classes="card">
       <StackPanel Spacing="12">
         <Grid ColumnDefinitions="*,Auto">
-          <StackPanel>
-            <TextBlock Classes="title" Text="键鼠空闲声音"/>
-            <!-- 说明里必须写清"为什么"：这一声跟另外两声不同，它是【来得及补救】的
-                 提醒 —— 再不动键鼠，这段时间就要被 AW 判成离开而作废了。 -->
-            <TextBlock Classes="sub"
-                       Text="一分钟没动键鼠时响一声。再安静下去，这段时间会被判成「人不在」而不计入。"/>
-          </StackPanel>
+          <TextBlock Classes="title" Text="键鼠空闲声音"/>
           <ToggleSwitch x:Name="IdleOn" Grid.Column="1" VerticalAlignment="Center"
                         OnContent="开" OffContent="关"/>
         </Grid>
@@ -80,25 +68,15 @@
       </StackPanel>
     </Border>
 
+    <!-- 滴答**只有音量**，没有开关（用户 2026-07-28）：开关是钟上那个喇叭，
+         滴答是钟本身的功能，跟督促学习无关，不该混进这一页。 -->
     <Border Classes="card">
       <StackPanel Spacing="12">
-        <Grid ColumnDefinitions="*,Auto">
-          <StackPanel>
-            <TextBlock Classes="title" Text="滴答声"/>
-            <TextBlock Classes="sub"
-                       Text="秒针每跳一次响一声。音色是算出来的，没有可选项；拖动滑块会试听。"/>
-          </StackPanel>
-          <ToggleSwitch x:Name="TickOn" Grid.Column="1" VerticalAlignment="Center"
-                        OnContent="开" OffContent="关"/>
-        </Grid>
-        <!-- 这一条是唯一有音量的：另外三声一小时响不了几次，滴答一小时响 3600 次 -->
+        <TextBlock Classes="title" Text="滴答声音量"/>
         <Slider x:Name="TickVol" Minimum="0" Maximum="100" TickFrequency="10"
                 IsSnapToTickEnabled="True" HorizontalAlignment="Stretch"/>
       </StackPanel>
     </Border>
-
-    <!-- 选中就立刻放一遍，跟 Windows 自己的声音设置一样。没有"试听"按钮要点。 -->
-    <TextBlock Classes="sub" Text="选择音色时会立刻试听一次。改动即时生效，无需确认。"/>
 
   </StackPanel>
 </Window>

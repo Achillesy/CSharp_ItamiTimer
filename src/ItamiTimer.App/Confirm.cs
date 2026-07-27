@@ -47,6 +47,9 @@ public static class Confirm
             CanResize = false,
             ShowInTaskbar = false,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            // 主窗口可能被图钉钉住了（§8.3.7），普通模态窗口会沉到它下面，
+            // 表现成"点了 × 什么都没发生"。模态本来就该压在一切之上。
+            Topmost = true,
             Background = new SolidColorBrush(Color.FromRgb(0xD7, 0xDB, 0xE0)),
             Content = new StackPanel
             {
