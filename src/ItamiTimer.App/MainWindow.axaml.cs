@@ -40,7 +40,15 @@ public partial class MainWindow : Window
     private bool _awReady;
 
     private TaskSession? _session;
-    private bool _popped;          // 当前是不是因为提醒而弹出来的
+    /// <summary>
+    /// 上一次把窗口顶上去的时刻；没顶着就是 null。
+    ///
+    /// **置顶的生命周期归窗口管，不归会话管**（2026-07-28 重构）。原来撤销写在
+    /// TaskSession 的 tick 里，于是"休息结束"那一次置顶永远撤不掉 —— 会话到那一刻
+    /// 就 <c>_tick.Stop()</c> 了，没人再盯着键鼠。放到 <see cref="OnFrame"/> 里就没这问题：
+    /// 那个 33ms 的定时器从程序启动到关闭一直在跑。
+    /// </summary>
+    private DateTimeOffset? _poppedAt;
 
     public MainWindow()
     {
@@ -74,9 +82,15 @@ public partial class MainWindow : Window
         row.Fallen = DominoRow.FallenForToday(DateTime.Now);
     }
 
-    /// <summary>秒针只在窗口真的看得见时才重绘（§8.2.6）。</summary>
+    /// <summary>
+    /// 33ms 一帧。两件事：秒针只在窗口真的看得见时才重绘（§8.2.6）；
+    /// 以及盯着键鼠，一有动作就撤销置顶（<see cref="RetractIfInput"/>）。
+    ///
+    /// 这个定时器从启动到关闭一直在跑，所以撤销的判断活得比任何一轮任务都久。
+    /// </summary>
     private void OnFrame(object? sender, EventArgs e)
     {
+        RetractIfInput();
         if (WindowState != WindowState.Minimized && IsVisible)
             F<DialControl>("Dial").InvalidateVisual();
     }
@@ -179,7 +193,6 @@ public partial class MainWindow : Window
         _session = new TaskSession(task, _rules);
         _session.Updated += OnSessionUpdated;
         _session.Interrupted += OnInterrupted;
-        _session.Retract += OnRetract;
 
         // 点下按钮的那一刻盘面就要有东西：整段灰弧立刻摆上去，不等第一次 AW 回来
         var dial = F<DialControl>("Dial");
@@ -191,7 +204,7 @@ public partial class MainWindow : Window
 
         RefreshStartButton();
         // §8.3 原本要求"任务一开始就收进任务栏"，用户 2026-07-27 改成**留在原地**。
-        // 连带：回到正轨时也只撤销置顶、不再缩起来（见 OnRetract）。
+        // 连带：回到正轨时也只撤销置顶、不再缩起来（见 OnFrame 里的看门狗）。
     }
 
     private void OnSessionUpdated()
@@ -216,25 +229,6 @@ public partial class MainWindow : Window
 
     }
 
-    /// <summary>
-    /// 回到正轨就**撤销置顶**（§0.5 问题 3）：用户已经用行动回应了提醒，继续压在
-    /// 最上面是在惩罚正确行为。
-    ///
-    /// 只撤销置顶、**不最小化** —— 用户 2026-07-27 定的"开始之后窗口就放那儿"。
-    /// 从来没缩起来过，回落时自然也不该缩。
-    ///
-    /// **用户正在看这个窗口时不动它**：窗口是用 SW_SHOWNOACTIVATE 弹的、本来拿不到
-    /// 焦点，所以它一旦成了前台窗口，就说明是用户自己点进来的。
-    /// </summary>
-    private void OnRetract()
-    {
-        if (!_popped) return;
-        // 不再守"窗口已是前台就别撤" —— 撤销现在只是【取消置顶】，窗口不会消失，
-        // 用户正看着它的时候撤掉也毫无副作用。何况用户点进这个窗口本身就是键鼠动作。
-        _popped = false;
-        Win32Topmost.ClearTopmost(this);
-    }
-
     private void OnInterrupted(TaskSession.Interrupt why)
     {
         if (_session is not { } s) return;
@@ -244,20 +238,23 @@ public partial class MainWindow : Window
             case TaskSession.Interrupt.Deviated:
             case TaskSession.Interrupt.Idle:
                 // 置顶但**绝不抢焦点**：用户在切走的那个应用里继续打字，字要落在那边（§13 第 6 条）
-                _popped = true;
                 Pop(topmost: true);
                 break;
 
             case TaskSession.Interrupt.FocusDone:
                 // 达成这一刻【什么都不给】（用户 2026-07-27）：不弹账单、不报数字。
                 // 表盘上那圈弧就是全部答案，自己看，自己猜。
-                _popped = false;
-                Pop(topmost: false);
+                // 达成也要**置顶**（用户 2026-07-28："任务完成之后，置顶没有做"）。
+                // §0.5 问题 4 原本写的是"弹出但不置顶"，实机跑下来那是句空话：
+                // 我们刻意不抢焦点（§13 第 6 条），于是"不抢焦点 + 不置顶"= 窗口
+                // 根本浮不上来，用户在 PDF 里坐着，什么都没看见。在这个约束下，
+                // 置顶是**唯一**能让人注意到的手段。撤销照旧只认键鼠。
+                Pop(topmost: true);
                 RefreshStartButton();
                 break;
 
             case TaskSession.Interrupt.RestDone:
-                Pop(topmost: false);
+                Pop(topmost: true);   // 同上：不置顶就等于没弹
                 EndSession();
                 break;
         }
@@ -276,6 +273,27 @@ public partial class MainWindow : Window
         WindowState = WindowState.Normal;
         CenterOnPrimary();
         Win32Topmost.ShowNoActivate(this, topmost);
+        _poppedAt = topmost ? DateTimeOffset.Now : null;
+    }
+
+    /// <summary>
+    /// 撤销置顶的看门狗。**任何键鼠动作都撤，不管用户在干什么**（用户 2026-07-27）。
+    ///
+    /// 判据是"顶上去之后**又**有过输入"：<c>GetLastInputInfo</c> 报的最后输入时刻晚于
+    /// <see cref="_poppedAt"/>。所以顶上去的那一瞬不会因为用户刚好在打字就立刻撤掉，
+    /// 必须真的再动一下。
+    ///
+    /// 挂在 33ms 的渲染帧上而不是会话的秒级 tick 上，两个原因：撤销要立刻（等一个
+    /// 60 秒节拍用户会觉得"动了鼠标也不消失"），以及**它必须活得比会话久** ——
+    /// "休息结束"那一次置顶发生在会话终结的同一刻。
+    /// </summary>
+    private void RetractIfInput()
+    {
+        if (_poppedAt is not { } p) return;
+        if (DateTimeOffset.Now - InputIdle.Elapsed() <= p) return;
+        _poppedAt = null;
+        Log.Info("键鼠有动作，撤销置顶");
+        Win32Topmost.ClearTopmost(this);
     }
 
     /// <summary>任务终结：回到空盘。**色环 = 当前任务的投影，没有任务就没有色环**（§8.4.5a）。</summary>
@@ -283,7 +301,7 @@ public partial class MainWindow : Window
     {
         _session?.Dispose();
         _session = null;
-        _popped = false;
+        _poppedAt = null;
 
         var dial = F<DialControl>("Dial");
         dial.Cells = [];
@@ -318,7 +336,7 @@ public partial class MainWindow : Window
         // **先撤销置顶再问**。偏离提醒会把主窗口设成 HWND_TOPMOST，而确认框是普通窗口
         // —— 不撤销的话它会被主窗口整个盖住，用户看到的就是"点了 × 什么都没发生"。
         // （测试时踩到过：对话框确实创建了、也是前台窗口，但屏幕上看不见。）
-        _popped = false;
+        _poppedAt = null;
         Win32Topmost.ClearTopmost(this);
 
         if (await Confirm.AskAsync(this, "任务尚未完成，你确定退出？"))
@@ -338,7 +356,7 @@ public partial class MainWindow : Window
     private async Task AskAbandonAsync()
     {
         // 先撤销置顶：偏离提醒会把主窗口设成 HWND_TOPMOST，普通的确认框会被它整个盖住
-        _popped = false;
+        _poppedAt = null;
         Win32Topmost.ClearTopmost(this);
 
         if (!await Confirm.AskAsync(this, "任务尚未完成，你确定放弃？")) return;

@@ -85,20 +85,6 @@ public sealed class TaskSession : IDisposable
     public event Action? Updated;
     public event Action<Interrupt>? Interrupted;
 
-    /// <summary>
-    /// 可以缩回去了。
-    ///
-    /// **必须独立于 <see cref="Updated"/>**：因为键鼠督促那一支是在【查 AW 之前】就
-    /// return 的，所以窗口一旦因为"没动键鼠"弹出来，Updated 就再也不响，缩回的判断
-    /// 根本没机会执行 —— 这正是 2026-07-27 实机撞到的「动了鼠标窗口也不消失」。
-    ///
-    /// 现在两条路各走各的：
-    /// <list type="bullet">
-    /// <item>因空闲弹出的 → **一动键鼠就缩**，秒级、纯本地、不用等 AW</item>
-    /// <item>因偏离弹出的 → 下一个 AW 节拍确认那一格干净了再缩（§0.5 问题 3）</item>
-    /// </list>
-    /// </summary>
-    public event Action? Retract;
 
     public TaskSession(TaskRecord task, GroupRules rules)
     {
@@ -139,14 +125,7 @@ public sealed class TaskSession : IDisposable
     /// </summary>
     private DateTimeOffset _lastAwMinute;
     private int _lastCellCount = -1;
-    private DateTimeOffset _lastIdleNudge = DateTimeOffset.MinValue;
 
-    /// <summary>
-    /// 上一次把窗口顶上去的时刻；没顶着就是 null。
-    ///
-    /// 撤销置顶**只看键鼠**：这个时刻之后有过任何输入，就撤（见 <see cref="OnTick"/> 开头）。
-    /// </summary>
-    private DateTimeOffset? _poppedAt;
 
     private async void OnTick(object? sender, EventArgs e)
     {
@@ -170,40 +149,32 @@ public sealed class TaskSession : IDisposable
             return;
         }
 
-        // ---- 0：撤销置顶。**任何键鼠动作都撤，不管用户在干什么**（用户 2026-07-27）。
+        // ---- 计时点：每跨过一个整分钟一次。**所有判断都在这里做**（用户 2026-07-28）。
         //
-        // 这是"继续减小痛感"那一刀：整分钟检查发现问题时，程序唯一做的事就是把自己
-        // 顶到最上面（不抢焦点）；用户动一下键鼠就撤下去。不问他撤到哪个应用、
-        // 不等 AW 确认下一格干净、不管是空闲弹的还是偏离弹的 —— 一视同仁。
+        // 原来键鼠空闲是每秒判、满 60 秒就催，于是督促出现在 00:52:38、00:54:33 这种
+        // 随机时刻，跟整分钟的节拍对不上。用户要的是**一个计时点、一次判断**：
+        // 「整分钟检查的时候，发现问题唯一要做的就是把这个 APP 放置到窗口最上面」。
         //
-        // 秒级、纯本地。等 AW 就要等满一个 60 秒节拍，用户会觉得"动了鼠标也不消失"。
-        if (_poppedAt is { } poppedAt && now - InputIdle.Elapsed() > poppedAt)
-        {
-            _poppedAt = null;
-            Log.Info("键鼠有动作，撤销置顶");
-            Retract?.Invoke();
-        }
-
-        // ---- 1/2：键鼠空闲。必须在查 AW 之前，它决定本轮还要不要往下走。
-        var idle = InputIdle.Elapsed().TotalSeconds;
-        if (idle >= IdleNudgeSeconds)
-        {
-            // AW 要安静满 180 秒才翻成 afk，且事件起点会回填到最后一次输入（§14.4a T5）。
-            // 必须赶在那条截止线【之前】把人叫醒 —— 事后再叫是救不回来的。
-            if ((now - _lastIdleNudge).TotalSeconds >= TickSeconds)
-            {
-                _lastIdleNudge = now;
-                _poppedAt = now;
-                Log.Info($"{idle:F0} 秒没动键鼠，催一下（再过 {Math.Max(0, AwAfkTimeoutSeconds - idle):F0} 秒就白费）");
-                Interrupted?.Invoke(Interrupt.Idle);
-            }
-            return;
-        }
-
-        // ---- 3：查 AW、重放。**每跨过一个整分钟查一次**，1 秒的 tick 保证误差 ≤1 秒。
+        // 置顶之后什么时候撤销，不归这里管 —— 那是窗口的事，MainWindow 有自己的
+        // 秒级看门狗盯着键鼠（撤销必须立刻，等下一个整分钟用户会觉得"动了也不消失"）。
         var minute = TimeGrid.FloorToMinute(now);
         if (minute <= _lastAwMinute) return;
         _lastAwMinute = minute;
+
+        // 1) 键鼠空闲。放在查 AW **之前**算，这样 AW 连不上时也不会把它一起吞掉。
+        //
+        // AW 要安静满 180 秒才翻成 afk，且事件起点会回填到最后一次输入（§14.4a T5）。
+        // 必须赶在那条截止线【之前】把人叫醒 —— 事后再叫是救不回来的。改到整分钟判
+        // 之后，最坏情况是安静了将近 120 秒才被发现（上一个整分钟差一点没到 60 秒），
+        // 离 180 秒仍有 60 秒余量。
+        var idle = InputIdle.Elapsed().TotalSeconds;
+        var idleProblem = idle >= IdleNudgeSeconds;
+        if (idleProblem)
+            Log.Info($"{idle:F0} 秒没动键鼠，催一下（再过 {Math.Max(0, AwAfkTimeoutSeconds - idle):F0} 秒就白费）");
+
+        // 2) 查 AW、重放。
+        var deviated = false;
+        var focusDone = false;
 
         _busy = true;
         try
@@ -227,26 +198,22 @@ public sealed class TaskSession : IDisposable
 
             if (State.FocusCompletedAt is not null)
             {
+                focusDone = true;
                 RingOpacity = 1;
                 Log.Info($"专注达成于 {State.FocusCompletedAt.Value.ToLocalTime():HH:mm:ss}，" +
                          $"实际耗时 {(State.FocusCompletedAt.Value - Task.StartedAt).TotalMinutes:F1} 分钟");
-                Interrupted?.Invoke(Interrupt.FocusDone);
-                return;
             }
-
             // 用【刚走完的那一格】当触发条件，不是【此刻在干什么】。否则 10:00:10 切走、
             // 10:00:50 切回这种短切换会整个从提醒里溜掉 —— 而它在色块上明明是红的。
-            if (Cells.Count > 0 && Cells.Count != _lastCellCount)
+            else if (Cells.Count > 0 && Cells.Count != _lastCellCount)
             {
                 _lastCellCount = Cells.Count;
                 var last = Cells[^1];
                 if (last.OffTaskSeconds >= NudgeFloorSeconds)
                 {
                     Log.Info($"刚过去那一分钟有 {last.OffTaskSeconds:F0} 秒跑偏");
-                    _poppedAt = now;
-                    Interrupted?.Invoke(Interrupt.Deviated);
+                    deviated = true;
                 }
-                // 没有 else：那一格干净【不再】是撤销置顶的条件。撤销只认键鼠（见开头）。
             }
         }
         catch (Exception ex)
@@ -256,6 +223,11 @@ public sealed class TaskSession : IDisposable
             Log.Error("本轮查询 AW 失败，本轮跳过（不影响最终结果，§6.2）", ex);
         }
         finally { _busy = false; }
+
+        // 3) 一个计时点最多提醒一次。达成优先，其次偏离，最后空闲。
+        if (focusDone) Interrupted?.Invoke(Interrupt.FocusDone);
+        else if (deviated) Interrupted?.Invoke(Interrupt.Deviated);
+        else if (idleProblem) Interrupted?.Invoke(Interrupt.Idle);
     }
 
     /// <summary>放弃任务。退出程序等价于此（§2、§9）。</summary>

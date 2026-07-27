@@ -76,6 +76,10 @@ internal static class DialSpecimens
 
         using var bmp = new RenderTargetBitmap(new PixelSize(Size, Size), new Vector(96, 96));
         bmp.Render(dial);
+        // Avalonia 12 把无参 Save 标了过时，新重载要一个编码器选项对象。
+        // 这里是调试出口，默认 PNG 就够，不值得为它引一层。
+#pragma warning disable CS0618
         bmp.Save(Path.Combine(dir, name + ".png"));
+#pragma warning restore CS0618
     }
 }
