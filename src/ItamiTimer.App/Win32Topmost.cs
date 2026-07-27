@@ -44,12 +44,17 @@ public static class Win32Topmost
     private static IntPtr Handle(Window w) => w.TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
 
     /// <summary>显示并置顶，不抢焦点。</summary>
-    public static void ShowNoActivate(Window w)
+    /// <param name="topmost">
+    /// true = 顶到最上面（偏离 / 键鼠空闲的督促）。
+    /// false = 只是显示出来，不压别人（专注达成、休息结束 —— §0.5 定的"不置顶"）。
+    /// 两种情况都**绝不抢焦点**。
+    /// </param>
+    public static void ShowNoActivate(Window w, bool topmost = true)
     {
         var h = Handle(w);
         if (h == IntPtr.Zero) return;
         ShowWindow(h, SW_SHOWNOACTIVATE);
-        SetWindowPos(h, HWND_TOPMOST, 0, 0, 0, 0,
+        SetWindowPos(h, topmost ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0,
             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
     }
 

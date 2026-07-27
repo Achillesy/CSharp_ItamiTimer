@@ -229,7 +229,8 @@ public partial class MainWindow : Window
     private void OnRetract()
     {
         if (!_popped) return;
-        if (Win32Topmost.IsForeground(this)) return;
+        // 不再守"窗口已是前台就别撤" —— 撤销现在只是【取消置顶】，窗口不会消失，
+        // 用户正看着它的时候撤掉也毫无副作用。何况用户点进这个窗口本身就是键鼠动作。
         _popped = false;
         Win32Topmost.ClearTopmost(this);
     }
@@ -244,31 +245,37 @@ public partial class MainWindow : Window
             case TaskSession.Interrupt.Idle:
                 // 置顶但**绝不抢焦点**：用户在切走的那个应用里继续打字，字要落在那边（§13 第 6 条）
                 _popped = true;
-                Pop();
+                Pop(topmost: true);
                 break;
 
             case TaskSession.Interrupt.FocusDone:
                 // 达成这一刻【什么都不给】（用户 2026-07-27）：不弹账单、不报数字。
                 // 表盘上那圈弧就是全部答案，自己看，自己猜。
                 _popped = false;
-                Win32Topmost.ClearTopmost(this);
-                Pop();
+                Pop(topmost: false);
                 RefreshStartButton();
                 break;
 
             case TaskSession.Interrupt.RestDone:
-                Win32Topmost.ClearTopmost(this);
-                Pop();
+                Pop(topmost: false);
                 EndSession();
                 break;
         }
     }
 
-    private void Pop()
+    /// <summary>
+    /// 把窗口摆到屏幕正中显示出来，**绝不抢焦点**（§13 第 6 条）。
+    ///
+    /// <paramref name="topmost"/> 必须显式传：达成和休息结束那两次弹出是
+    /// **不置顶**的（§0.5）。原来这里无条件设 HWND_TOPMOST，先 ClearTopmost
+    /// 再 Pop 等于白清一次 —— 达成之后窗口会一直压在所有应用上，而那时
+    /// 已经没有任何东西会去撤它了。
+    /// </summary>
+    private void Pop(bool topmost)
     {
         WindowState = WindowState.Normal;
         CenterOnPrimary();
-        Win32Topmost.ShowNoActivate(this);
+        Win32Topmost.ShowNoActivate(this, topmost);
     }
 
     /// <summary>任务终结：回到空盘。**色环 = 当前任务的投影，没有任务就没有色环**（§8.4.5a）。</summary>

@@ -122,7 +122,13 @@ public sealed class TaskSession : IDisposable
     private DateTimeOffset _lastAwAt = DateTimeOffset.MinValue;
     private int _lastCellCount = -1;
     private DateTimeOffset _lastIdleNudge = DateTimeOffset.MinValue;
-    private bool _nudgedIdle;
+
+    /// <summary>
+    /// 上一次把窗口顶上去的时刻；没顶着就是 null。
+    ///
+    /// 撤销置顶**只看键鼠**：这个时刻之后有过任何输入，就撤（见 <see cref="OnTick"/> 开头）。
+    /// </summary>
+    private DateTimeOffset? _poppedAt;
 
     private async void OnTick(object? sender, EventArgs e)
     {
@@ -146,6 +152,20 @@ public sealed class TaskSession : IDisposable
             return;
         }
 
+        // ---- 0：撤销置顶。**任何键鼠动作都撤，不管用户在干什么**（用户 2026-07-27）。
+        //
+        // 这是"继续减小痛感"那一刀：整分钟检查发现问题时，程序唯一做的事就是把自己
+        // 顶到最上面（不抢焦点）；用户动一下键鼠就撤下去。不问他撤到哪个应用、
+        // 不等 AW 确认下一格干净、不管是空闲弹的还是偏离弹的 —— 一视同仁。
+        //
+        // 秒级、纯本地。等 AW 就要等满一个 60 秒节拍，用户会觉得"动了鼠标也不消失"。
+        if (_poppedAt is { } poppedAt && now - InputIdle.Elapsed() > poppedAt)
+        {
+            _poppedAt = null;
+            Log.Info("键鼠有动作，撤销置顶");
+            Retract?.Invoke();
+        }
+
         // ---- 1/2：键鼠空闲。必须在查 AW 之前，它决定本轮还要不要往下走。
         var idle = InputIdle.Elapsed().TotalSeconds;
         if (idle >= IdleNudgeSeconds)
@@ -155,20 +175,11 @@ public sealed class TaskSession : IDisposable
             if ((now - _lastIdleNudge).TotalSeconds >= TickSeconds)
             {
                 _lastIdleNudge = now;
-                _nudgedIdle = true;
+                _poppedAt = now;
                 Log.Info($"{idle:F0} 秒没动键鼠，催一下（再过 {Math.Max(0, AwAfkTimeoutSeconds - idle):F0} 秒就白费）");
                 Interrupted?.Invoke(Interrupt.Idle);
             }
             return;
-        }
-
-        // 人动了 —— 因空闲弹出的窗口立刻可以缩回去。这一步是秒级的、纯本地的，
-        // **不等 AW**：等 AW 就要等满一个 60 秒节拍，用户会觉得"动了鼠标也不消失"。
-        if (_nudgedIdle)
-        {
-            _nudgedIdle = false;
-            Log.Info("键鼠恢复，收回督促窗");
-            Retract?.Invoke();
         }
 
         // ---- 3：查 AW、重放。60 秒一次。
@@ -213,12 +224,10 @@ public sealed class TaskSession : IDisposable
                 if (last.OffTaskSeconds >= NudgeFloorSeconds)
                 {
                     Log.Info($"刚过去那一分钟有 {last.OffTaskSeconds:F0} 秒跑偏");
+                    _poppedAt = now;
                     Interrupted?.Invoke(Interrupt.Deviated);
                 }
-                else
-                {
-                    Retract?.Invoke();   // 那一格干净了，因偏离弹出的窗口可以缩回去
-                }
+                // 没有 else：那一格干净【不再】是撤销置顶的条件。撤销只认键鼠（见开头）。
             }
         }
         catch (Exception ex)
