@@ -230,6 +230,28 @@ public class ReplayTests
         Assert.Equal(TaskPhase.NotStarted, s.Phase);
     }
 
+    // ---------------------------------------------------------------- §8.4.5a 色环是当前任务的投影
+
+    /// <summary>
+    /// 用户 2026-07-27：新开任务色环清除是必做的。这不是一个功能，是一条不能写错的
+    /// 不变量——色环 = 当前任务重放结果的投影。只要 ToMinuteCells 保持纯函数、不藏
+    /// 跨任务缓存，新任务就自动是空盘。这条测试守着"不藏缓存"。
+    /// </summary>
+    [Fact]
+    public void 新任务的色环必须是空的_哪怕历史里全是上一轮的事件()
+    {
+        // 事件列表来自"上一轮"：整段都在读经济学
+        List<AwEvent> oldEvents = [Win(0, 30, "SumatraPDF.exe", "经济学.pdf")];
+
+        // 新任务从第 30 分钟才开始，此前的事件一格都不该带进来
+        var fresh = Task() with { StartedAt = At(30) };
+        var s = Replay.Run(fresh, Rules, oldEvents, Present(30), At(30));
+
+        Assert.Empty(Replay.ToMinuteCells(fresh, s));
+        Assert.Equal(0, s.FocusedSeconds, 1);
+        Assert.Null(s.FocusCompletedAt);
+    }
+
     // ---------------------------------------------------------------- T4 零时长事件
 
     /// <summary>

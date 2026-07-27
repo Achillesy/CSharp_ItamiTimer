@@ -13,16 +13,14 @@ const int TickSeconds = 60;
 const int IdleNudgeSeconds = 60;
 // 刚走完那一分钟里偏离超过这个数才提醒，滤掉通知抢焦点之类的噪音。
 const int NudgeFloorSeconds = 5;
+const int AwAfkTimeoutSeconds = 180;
 
 try
 {
     return cmd switch
     {
         "start" => await StartAsync(),
-        "watch" => await WatchAsync(),
-        "status" => await StatusAsync(),
         "replay" => await ReplayPastAsync(),
-        "stop" => Stop(),
         "idle" => Idle(),
         _ => Help(),
     };
@@ -41,6 +39,13 @@ catch (Exception e)
 
 // ---------------------------------------------------------------- 命令
 
+/// <summary>
+/// 提交任务并一直跑到结束。
+///
+/// **任务只活在这个进程里，不落盘（§2）。** 所以没有 watch / status / stop 这些
+/// 子命令——退出这个进程就等于放弃任务。Ctrl+C 会先给账单再退出，对应 §9 里
+/// GUI 版本"退出前弹窗确认"那条。
+/// </summary>
 async Task<int> StartAsync()
 {
     var minutes = int.Parse(opt.GetValueOrDefault("minutes", "25"));
@@ -55,12 +60,8 @@ async Task<int> StartAsync()
     // §6.2：提交任务时 AW 不可达 → 拒绝提交。不允许开始一个从一开始就没法核算的任务。
     using var aw = new AwClient();
     var host = await aw.ProbeAsync();
-    await aw.FindBucketIdAsync(AwClient.WindowBucketType);
-    await aw.FindBucketIdAsync(AwClient.AfkBucketType);   // 缺 afk 同样拒绝，不降级（§6.1.1）
-
-    var store = new TaskStore();
-    if (store.LoadCurrent() is { Status: RecordStatus.Committed })
-        throw new InvalidOperationException("已经有一个进行中的任务。先 `itami stop` 放弃它。");
+    var winId = await aw.FindBucketIdAsync(AwClient.WindowBucketType);
+    var afkId = await aw.FindBucketIdAsync(AwClient.AfkBucketType);   // 缺 afk 同样拒绝，不降级（§6.1.1）
 
     // §14.1：进位到下一个整分钟。绝不向后取整——那会把点击「开始」之前的时间也算进来。
     var task = new TaskRecord
@@ -69,128 +70,94 @@ async Task<int> StartAsync()
         FocusMinutes = minutes,
         Groups = groups,
     };
-    store.SaveCurrent(task);
 
-    Console.WriteLine($"\nAW: {host}   任务已提交");
+    Console.WriteLine($"\nAW: {host}   任务已提交（只在内存里，退出即放弃）");
     Console.WriteLine($"小目标：{string.Join("、", groups)}");
     Console.WriteLine($"专注 {minutes} 分钟，之后休息 {task.RestMinutes} 分钟");
     Console.WriteLine($"开始时刻：{task.StartedAt:HH:mm:ss}（进位到整分钟）\n");
-    return await WatchAsync();
-}
-
-/// <summary>
-/// §8.3.5 的单循环。整个程序只有这一个节拍（60 秒）：
-///
-///   1. 查本地键鼠空闲时间（一个系统调用，不花钱）
-///   2. 空闲 ≥ 60 秒 → 催用户动一下，本轮到此为止
-///   3. 否则查 AW、重放、更新色块
-///        刚走完的那一格偏离超过 5 秒 → 提醒
-///
-/// 专注达成之后**不再查 AW**（§8.4.4a）：休息阶段纯本地计时，只有一个按分钟
-/// 走的淡出和一个到点提示。一个任务对 AW 的最后一次查询就发生在达成那一刻。
-/// </summary>
-async Task<int> WatchAsync()
-{
-    var store = new TaskStore();
-    var task = store.LoadCurrent() ?? throw new InvalidOperationException("没有进行中的任务。先 `itami start`。");
-    var rules = LoadRules();
-    using var aw = new AwClient();
-
-    var winId = await aw.FindBucketIdAsync(AwClient.WindowBucketType);
-    var afkId = await aw.FindBucketIdAsync(AwClient.AfkBucketType);
-
     Console.WriteLine(Renderer.Legend());
-    Console.WriteLine($"节拍 {TickSeconds} 秒；超过 {IdleNudgeSeconds} 秒没动键鼠会催你一下\n");
+    Console.WriteLine($"节拍 {TickSeconds} 秒；超过 {IdleNudgeSeconds} 秒没动键鼠会催你一下");
+    Console.WriteLine("Ctrl+C = 放弃任务（会先给你看账单）\n");
 
+    // Ctrl+C 对应 GUI 的"点关闭"：§9 要求退出前把账摆出来，不能默默丢掉。
+    TaskState? last = null;
+    Console.CancelKeyPress += (_, e) =>
+    {
+        e.Cancel = true;
+        Console.WriteLine("\n\n=== 放弃任务 ===\n");
+        if (last is not null) Console.WriteLine(Renderer.Bill(task, last));
+        Console.WriteLine("这一轮作废了。\n");
+        Environment.Exit(130);
+    };
+
+    // ---- §8.3.5 的单循环
     while (true)
     {
         var now = DateTimeOffset.Now;
 
-        // ---- 1/2：键鼠空闲。必须在查 AW 之前，因为它决定了本轮还要不要往下走。
-        var idle = InputIdle.Elapsed();
-        if (idle.TotalSeconds >= IdleNudgeSeconds)
+        // 1/2：键鼠空闲。必须在查 AW 之前——它决定本轮还要不要往下走。
+        var idle = InputIdle.Elapsed().TotalSeconds;
+        if (idle >= IdleNudgeSeconds)
         {
-            // AW 要安静满 180 秒才会翻成 afk，且起点会回填到最后一次输入（§14.4a T5）。
-            // 所以这里必须赶在那条截止线【之前】把人叫醒——事后再叫是救不回来的。
-            Console.WriteLine($"\n⚠ {idle.TotalSeconds:F0} 秒没动键鼠了，动一下——" +
-                              $"再过 {180 - idle.TotalSeconds:F0} 秒这段时间就白费了。");
+            // AW 要安静满 180 秒才翻成 afk，且事件起点会回填到最后一次输入（§14.4a T5）。
+            // 所以必须赶在那条截止线【之前】把人叫醒——事后再叫是救不回来的。
+            Console.WriteLine($"\n⚠ {idle:F0} 秒没动键鼠了，动一下——" +
+                              $"再过 {Math.Max(0, AwAfkTimeoutSeconds - idle):F0} 秒这段时间就白费了。");
             await Task.Delay(TickSeconds * 1000);
             continue;
         }
 
-        // ---- 3：查 AW、重放
+        // 3：查 AW、重放
         var win = await aw.FetchEventsAsync(winId, task.StartedAt, now);
         var afk = await aw.FetchEventsAsync(afkId, task.StartedAt, now);
         var state = Replay.Run(task, rules, win, afk, now);
+        last = state;
         var cells = Replay.ToMinuteCells(task, state);
 
         Console.Write($"\r{new string(' ', Math.Max(1, Console.WindowWidth - 1))}\r");
         Console.Write($"{Renderer.Cells(cells)}  {Renderer.PhaseText(state.Phase)}  " +
                       $"{state.FocusedSeconds / 60:F1}/{task.FocusMinutes} 分钟");
 
-        // 刚走完的那一格脏了就提醒。用【格子】而不是【此刻在干什么】当触发条件，
-        // 否则 10:00:10 切走、10:00:50 切回这种短切换会整个从提醒里溜掉——而它
-        // 在色块上明明是红的（核算走 AW 完整事件流，一秒不漏）。
+        // 用【刚走完的那一格】当触发条件，不是【此刻在干什么】。否则 10:00:10 切走、
+        // 10:00:50 切回这种短切换会整个从提醒里溜掉——而它在色块上明明是红的。
         if (cells.Count > 0 && cells[^1].OffTaskSeconds >= NudgeFloorSeconds)
             Console.WriteLine($"\n⚠ 刚过去那一分钟有 {cells[^1].OffTaskSeconds:F0} 秒跑偏了。");
 
-        if (state.FocusCompletedAt is { } done)
-            return Rest(store, task, state, done);
+        if (state.FocusCompletedAt is { } done) return Rest(task, state, done);
 
         await Task.Delay(TickSeconds * 1000);
     }
 }
 
 /// <summary>
-/// 休息阶段（§8.4.4a）：**纯本地计时，零 AW 访问**。只做一件事——上一个任务的
-/// 色环按分钟淡化，淡完正好是休息结束。
+/// 休息阶段（§8.4.4a）：**纯本地计时，零 AW 访问**。
+/// 一个任务对 AW 的最后一次查询就发生在专注达成那一刻。
 /// </summary>
-int Rest(TaskStore store, TaskRecord task, TaskState state, DateTimeOffset completedAt)
+int Rest(TaskRecord task, TaskState state, DateTimeOffset completedAt)
 {
     Console.WriteLine("\n");
     Console.WriteLine(Renderer.Bill(task, state));   // 账单在【达成】这一刻给，不在休息结束时给
 
-    var restEnds = completedAt.AddMinutes(task.RestMinutes);
+    var rest = TimeSpan.FromMinutes(task.RestMinutes);
+    var restEnds = completedAt + rest;
     Console.WriteLine($"进入休息 {task.RestMinutes} 分钟。这段时间去哪、干什么都不重要。\n");
 
     while (DateTimeOffset.Now < restEnds)
     {
         // 每分钟淡掉 100%/休息分钟数（§8.4.4）。不是固定 10%——那样 25 分钟的任务
         // 休息结束时盘上还挂着半个色环，跟「没有色环就是邀请」打架。
-        var left = 1 - (DateTimeOffset.Now - completedAt) / TimeSpan.FromMinutes(task.RestMinutes);
+        var left = rest > TimeSpan.Zero ? 1 - (DateTimeOffset.Now - completedAt) / rest : 0;
         Console.Write($"\r☕ 休息中，色环还剩 {Math.Max(0, left) * 100:F0}%   ");
         Thread.Sleep(1000);
     }
 
-    store.Archive(task with { Status = RecordStatus.Completed });
     Console.WriteLine("\n\n休息结束。要再来一轮就自己再开一次 —— 程序不会替你开始。\n");
-    return 0;
-}
-
-async Task<int> StatusAsync()
-{
-    var store = new TaskStore();
-    var task = store.LoadCurrent();
-    if (task is null) { Console.WriteLine("没有进行中的任务。"); return 0; }
-
-    var rules = LoadRules();
-    using var aw = new AwClient();
-    var now = DateTimeOffset.Now;
-    var win = await aw.FetchEventsAsync(await aw.FindBucketIdAsync(AwClient.WindowBucketType), task.StartedAt, now);
-    var afk = await aw.FetchEventsAsync(await aw.FindBucketIdAsync(AwClient.AfkBucketType), task.StartedAt, now);
-    var state = Replay.Run(task, rules, win, afk, now);
-
-    Console.WriteLine();
-    Console.WriteLine(Renderer.Legend());
-    Console.WriteLine(Renderer.Cells(Replay.ToMinuteCells(task, state)));
-    Console.WriteLine();
-    Console.WriteLine(Renderer.Bill(task, state));
     return 0;
 }
 
 /// <summary>
 /// 拿过去的真实历史干跑一遍，不写盘、不需要等。
-/// 这是验证规则写得对不对最快的办法 —— §0.1 那类决定就该这么定。
+/// 这是验证规则写得对不对最快的办法。
 /// </summary>
 async Task<int> ReplayPastAsync()
 {
@@ -219,30 +186,18 @@ async Task<int> ReplayPastAsync()
     Console.WriteLine(Renderer.Legend());
     Console.WriteLine(Renderer.Cells(Replay.ToMinuteCells(task, state)));
     Console.WriteLine();
-    if (state.FocusCompletedAt is { } done)
-        Console.WriteLine($"专注达成于 {done:HH:mm:ss}\n");
     Console.WriteLine(Renderer.Bill(task, state));
-    return 0;
-}
-
-int Stop()
-{
-    var store = new TaskStore();
-    var task = store.LoadCurrent();
-    if (task is null) { Console.WriteLine("没有进行中的任务。"); return 0; }
-    store.Archive(task with { Status = RecordStatus.Abandoned, AbandonedAt = DateTimeOffset.Now });
-    Console.WriteLine("已放弃当前任务。");
     return 0;
 }
 
 /// <summary>盯着键鼠空闲读数看，用来给 §8.3.6 的阈值找一个真实合适的值。</summary>
 int Idle()
 {
-    Console.WriteLine($"\n阈值 {IdleNudgeSeconds} 秒催你，{180} 秒（AW 默认）之后这段时间就白费了。Ctrl+C 退出。\n");
+    Console.WriteLine($"\n{IdleNudgeSeconds} 秒催你，{AwAfkTimeoutSeconds} 秒（AW 默认）之后这段时间就白费了。Ctrl+C 退出。\n");
     while (true)
     {
         var s = InputIdle.Elapsed().TotalSeconds;
-        var mark = s >= 180 ? "已白费" : s >= IdleNudgeSeconds ? "该催了" : "";
+        var mark = s >= AwAfkTimeoutSeconds ? "已白费" : s >= IdleNudgeSeconds ? "该催了" : "";
         Console.Write($"\r空闲 {s,6:F1} 秒  {mark,-8}");
         Thread.Sleep(500);
     }
@@ -254,13 +209,12 @@ int Help()
 
         一袋米要扛几楼 —— 命令行原子层
 
-          itami start  --minutes 5 --group 学习经济学     提交任务并开始监视
-          itami watch                                    继续监视进行中的任务
-          itami status                                   看一眼当前进度和账单
-          itami stop                                     放弃当前任务
+          itami start  --minutes 5 --group 学习经济学     提交任务，跑到结束
           itami replay --since "2026-07-26 20:00" [--until ...] --minutes 25 --group 学习经济学
-                                                         拿过去的真实历史干跑，不写盘
+                                                         拿过去的真实历史干跑
+          itami idle                                     盯着键鼠空闲读数看
 
+        任务只活在进程里，不落盘：退出 itami 就等于放弃当前任务（DESIGN.md §2）。
         规则文件默认找 ./rules.json，可用 --rules <路径> 指定。
 
         """);
