@@ -32,6 +32,12 @@
       <Setter Property="Foreground" Value="#E4E8EC"/>
     </Style>
 
+    <!-- 放弃是危险动作，用偷懒那个红（§8.2.3 的 slack） -->
+    <Style Selector="Button.danger /template/ ContentPresenter">
+      <Setter Property="Background" Value="#D6453F"/>
+      <Setter Property="Foreground" Value="#FFFFFF"/>
+    </Style>
+
     <Style Selector="CheckBox">
       <Setter Property="FontSize" Value="15"/>
       <Setter Property="MinHeight" Value="34"/>
@@ -57,8 +63,19 @@
               Minimum="10" Maximum="50" TickFrequency="5"
               IsSnapToTickEnabled="True" TickPlacement="BottomRight" Value="25"/>
 
-      <!-- 小目标列表。rules.json 有几个就排几行，窗口高度跟着变 -->
+      <!-- 小目标列表。rules.json 有几个就排几行，窗口高度跟着变。
+           任务进行中仍然可点：补勾一个小目标是【追溯生效】的（§5.4）。 -->
       <ItemsControl x:Name="Goals"/>
+
+      <!-- §7.1 的账单。平时藏着，专注达成 / 放弃确认时才出来 -->
+      <TextBlock x:Name="BillText" IsVisible="False" FontFamily="Consolas" FontSize="13"
+                 LineHeight="20" TextWrapping="Wrap" Margin="2,4,2,0"/>
+
+      <!-- 专注中点关闭 = 放弃任务，先把账摆出来再问一次（§9） -->
+      <StackPanel x:Name="ConfirmRow" IsVisible="False" Orientation="Horizontal" Spacing="10">
+        <Button x:Name="ConfirmQuit" Classes="start danger" Width="150" Click="OnConfirmQuit" Content="放弃并退出"/>
+        <Button x:Name="CancelQuit" Classes="start" Width="150" Click="OnCancelQuit" Content="继续"/>
+      </StackPanel>
     </StackPanel>
   </StackPanel>
 </Window>

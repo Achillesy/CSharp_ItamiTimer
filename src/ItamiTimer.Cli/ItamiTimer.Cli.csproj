@@ -18,4 +18,10 @@
     <ProjectReference Include="..\ItamiTimer.Core\ItamiTimer.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- 键鼠空闲读数（§8.3.6）App 和 Cli 都要用。源码放在 App（§8.5：平台特定
+         代码归那一层），这里链接过来 —— 同一份文件两边编译，不复制。 -->
+    <Compile Include="..\ItamiTimer.App\InputIdle.cs" Link="InputIdle.cs" />
+  </ItemGroup>
+
 </Project>

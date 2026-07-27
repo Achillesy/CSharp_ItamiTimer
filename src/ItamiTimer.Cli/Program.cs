@@ -1,3 +1,4 @@
+using ItamiTimer;
 using ItamiTimer.Cli;
 using ItamiTimer.Core;
 
