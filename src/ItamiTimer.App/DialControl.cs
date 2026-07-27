@@ -382,7 +382,11 @@ public class DialControl : Control
     private void DrawHands(DrawingContext ctx, Point c, Func<double, double> R, double rFace)
     {
         var now = DateTime.Now;
-        var sec = now.Second + now.Millisecond / 1000.0;
+        // **秒针一秒一跳**（用户 2026-07-28）。原来是亚秒连续扫（§8.2.6），
+        // 但扫秒针的钟是不会响的 —— 扫来自连续驱动的机芯，滴答来自步进擒纵，
+        // 真实世界里这两件事互斥。既然要滴答，秒针就得跟着步进，否则声音和
+        // 画面各说各话。33ms 的重绘保留：它现在的作用是让跳变及时（延迟 ≤33ms）。
+        var sec = (double)now.Second;
         var min = now.Minute + sec / 60.0;
         var hour = now.Hour % 12 + min / 60.0;
 

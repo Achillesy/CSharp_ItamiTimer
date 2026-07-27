@@ -4,9 +4,10 @@ using System.Text.Json.Serialization;
 namespace ItamiTimer.App;
 
 /// <summary>
-/// 用户设置。三条声音：任务结束、休息结束、键鼠空闲（参照 Windows 时钟应用的
-/// 「专注时段」设置页排版）。第三条是用户 2026-07-28 想过之后加回来的 ——
-/// 空闲检测本身不该砍，砍的只是它原来那个"置顶提醒"的表达方式。
+/// 用户设置。三条通知音（任务结束、休息结束、键鼠空闲）+ 滴答声的开关与音量，
+/// 外加两个直接摆在窗口右上角的开关：总静音、窗口置顶。
+///
+/// 排版参照 Windows 时钟应用的「专注时段」设置页。
 ///
 /// ⚠️ **这是本程序第二样会写盘的东西**，跟 DESIGN.md §8.1「完全不写盘」不冲突 ——
 /// 那一条禁的是**任务状态**落盘（不要 current-task.json、不要累加值、退出即放弃），
@@ -24,6 +25,16 @@ public sealed class Settings
     [JsonPropertyName("restDoneSound")] public string? RestDoneSound { get; set; }
     [JsonPropertyName("idleEnabled")] public bool IdleEnabled { get; set; } = true;
     [JsonPropertyName("idleSound")] public string? IdleSound { get; set; }
+
+    /// <summary>滴答声开关与音量（0~100）。音色是合成的，没有可选项（<see cref="Tick"/>）。</summary>
+    [JsonPropertyName("tickEnabled")] public bool TickEnabled { get; set; }
+    [JsonPropertyName("tickVolume")] public int TickVolume { get; set; } = 35;
+
+    /// <summary>右上角那个喇叭：总静音。管住所有声音，不只是滴答。</summary>
+    [JsonPropertyName("muted")] public bool Muted { get; set; }
+
+    /// <summary>右上角那个图钉：窗口置顶。手动开关，没有任何自动收放（<see cref="Win32Topmost"/>）。</summary>
+    [JsonPropertyName("pinned")] public bool Pinned { get; set; }
 
     private static string Path_ => System.IO.Path.Combine(Log.Directory, "settings.json");
 

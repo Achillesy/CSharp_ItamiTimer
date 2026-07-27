@@ -80,6 +80,23 @@
       </StackPanel>
     </Border>
 
+    <Border Classes="card">
+      <StackPanel Spacing="12">
+        <Grid ColumnDefinitions="*,Auto">
+          <StackPanel>
+            <TextBlock Classes="title" Text="滴答声"/>
+            <TextBlock Classes="sub"
+                       Text="秒针每跳一次响一声。音色是算出来的，没有可选项；拖动滑块会试听。"/>
+          </StackPanel>
+          <ToggleSwitch x:Name="TickOn" Grid.Column="1" VerticalAlignment="Center"
+                        OnContent="开" OffContent="关"/>
+        </Grid>
+        <!-- 这一条是唯一有音量的：另外三声一小时响不了几次，滴答一小时响 3600 次 -->
+        <Slider x:Name="TickVol" Minimum="0" Maximum="100" TickFrequency="10"
+                IsSnapToTickEnabled="True" HorizontalAlignment="Stretch"/>
+      </StackPanel>
+    </Border>
+
     <!-- 选中就立刻放一遍，跟 Windows 自己的声音设置一样。没有"试听"按钮要点。 -->
     <TextBlock Classes="sub" Text="选择音色时会立刻试听一次。改动即时生效，无需确认。"/>
 

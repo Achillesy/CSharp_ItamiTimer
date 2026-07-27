@@ -55,6 +55,29 @@
       <Setter Property="Opacity" Value="1"/>
     </Style>
 
+    <!-- 右上角那两个即时开关：喇叭（总静音）、图钉（置顶）。
+         跟齿轮同一族的字形，用 Windows 自带的图标字体，不打包任何图片。
+         关着的时候淡、开着的时候实 —— 状态一眼就看得出来。 -->
+    <Style Selector="Button.chrome">
+      <Setter Property="Width" Value="28"/>
+      <Setter Property="Height" Value="28"/>
+      <Setter Property="Padding" Value="0"/>
+      <Setter Property="FontFamily" Value="Segoe Fluent Icons, Segoe MDL2 Assets"/>
+      <Setter Property="FontSize" Value="14"/>
+      <Setter Property="Opacity" Value="0.40"/>
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="BorderThickness" Value="0"/>
+      <Setter Property="HorizontalContentAlignment" Value="Center"/>
+      <Setter Property="VerticalContentAlignment" Value="Center"/>
+      <Setter Property="CornerRadius" Value="14"/>
+    </Style>
+    <Style Selector="Button.chrome:pointerover">
+      <Setter Property="Opacity" Value="0.85"/>
+    </Style>
+    <Style Selector="Button.chrome.on">
+      <Setter Property="Opacity" Value="0.95"/>
+    </Style>
+
     <Style Selector="CheckBox">
       <Setter Property="FontSize" Value="15"/>
       <Setter Property="MinHeight" Value="34"/>
@@ -63,8 +86,17 @@
 
   <StackPanel Margin="18,14,18,16">
 
-    <!-- 表盘。任务进行中它是全部；空盘时它就是下一轮的邀请（§8.4.5a） -->
-    <app:DialControl x:Name="Dial" Height="330"/>
+    <!-- 表盘。任务进行中它是全部；空盘时它就是下一轮的邀请（§8.4.5a）。
+         右上角压两个即时开关：先喇叭后图钉（用户 2026-07-28 指定的顺序）。
+         钟是圆的，右上角那块是空的，正好摆。 -->
+    <Grid>
+      <app:DialControl x:Name="Dial" Height="330"/>
+      <StackPanel Orientation="Horizontal" Spacing="2"
+                  HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-4,-4,0">
+        <Button x:Name="MuteBtn" Classes="chrome" ToolTip.Tip="静音"/>
+        <Button x:Name="PinBtn" Classes="chrome" ToolTip.Tip="置顶"/>
+      </StackPanel>
+    </Grid>
 
     <!-- 七块骨牌 = 星期几。倒下几块就是周几，一个字都没有 -->
     <app:DominoRow x:Name="Dominoes" Height="76" Margin="0,2,0,10"/>

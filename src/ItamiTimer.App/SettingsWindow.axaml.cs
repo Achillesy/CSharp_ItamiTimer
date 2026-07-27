@@ -1,4 +1,5 @@
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Markup.Xaml;
 
 namespace ItamiTimer.App;
@@ -30,6 +31,8 @@ public partial class SettingsWindow : Window
         var focusSound = this.FindControl<ComboBox>("FocusSound")!;
         var restSound = this.FindControl<ComboBox>("RestSound")!;
         var idleSound = this.FindControl<ComboBox>("IdleSound")!;
+        var tickOn = this.FindControl<ToggleSwitch>("TickOn")!;
+        var tickVol = this.FindControl<Slider>("TickVol")!;
 
         focusSound.ItemsSource = names;
         restSound.ItemsSource = names;
@@ -43,6 +46,9 @@ public partial class SettingsWindow : Window
         focusSound.IsEnabled = settings.FocusDoneEnabled;
         restSound.IsEnabled = settings.RestDoneEnabled;
         idleSound.IsEnabled = settings.IdleEnabled;
+        tickOn.IsChecked = settings.TickEnabled;
+        tickVol.Value = settings.TickVolume;
+        tickVol.IsEnabled = settings.TickEnabled;
 
         focusOn.IsCheckedChanged += (_, _) =>
         {
@@ -56,10 +62,28 @@ public partial class SettingsWindow : Window
             restSound.IsEnabled = settings.RestDoneEnabled;
             Persist();
         };
+        tickOn.IsCheckedChanged += (_, _) =>
+        {
+            settings.TickEnabled = tickOn.IsChecked == true;
+            tickVol.IsEnabled = settings.TickEnabled;
+            if (!_loading && settings.TickEnabled) Tick.Play(0, settings.TickVolume);
+            Persist();
+        };
+        tickVol.PropertyChanged += (_, e) =>
+        {
+            if (e.Property != RangeBase.ValueProperty) return;
+            settings.TickVolume = (int)Math.Round(tickVol.Value);
+            // 拖动时实时试听：音量是唯一一个"不听见就调不准"的设置
+            if (!_loading && settings.TickEnabled) Tick.Play(0, settings.TickVolume);
+            Persist();
+        };
         idleOn.IsCheckedChanged += (_, _) =>
         {
             settings.IdleEnabled = idleOn.IsChecked == true;
             idleSound.IsEnabled = settings.IdleEnabled;
+        tickOn.IsChecked = settings.TickEnabled;
+        tickVol.Value = settings.TickVolume;
+        tickVol.IsEnabled = settings.TickEnabled;
             Persist();
         };
         idleSound.SelectionChanged += (_, _) =>
