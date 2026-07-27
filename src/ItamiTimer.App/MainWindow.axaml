@@ -3,44 +3,65 @@
         xmlns:app="using:ItamiTimer.App"
         x:Class="ItamiTimer.App.MainWindow"
         Title="一袋米要扛几楼"
-        Width="380" Height="690"
+        Width="380"
+        SizeToContent="Height"
         CanResize="False"
         WindowStartupLocation="CenterScreen"
         Background="#D7DBE0">
 
-  <DockPanel Margin="18">
+  <Window.Styles>
+    <!-- 「开始」既是按钮也是分割线：它以上是给眼睛的，以下是给手的 -->
+    <Style Selector="Button.start">
+      <Setter Property="Height" Value="42"/>
+      <Setter Property="HorizontalAlignment" Value="Stretch"/>
+      <Setter Property="HorizontalContentAlignment" Value="Center"/>
+      <Setter Property="FontSize" Value="16"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="CornerRadius" Value="6"/>
+    </Style>
+    <Style Selector="Button.start /template/ ContentPresenter">
+      <Setter Property="Background" Value="#2FA36B"/>
+      <Setter Property="Foreground" Value="#FFFFFF"/>
+    </Style>
+    <Style Selector="Button.start:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="#3BBA7D"/>
+      <Setter Property="Foreground" Value="#FFFFFF"/>
+    </Style>
+    <Style Selector="Button.start:disabled /template/ ContentPresenter">
+      <Setter Property="Background" Value="#AEB6BF"/>
+      <Setter Property="Foreground" Value="#E4E8EC"/>
+    </Style>
+
+    <Style Selector="CheckBox">
+      <Setter Property="FontSize" Value="15"/>
+      <Setter Property="MinHeight" Value="34"/>
+    </Style>
+  </Window.Styles>
+
+  <StackPanel Margin="18,14,18,16">
 
     <!-- 表盘。任务进行中它是全部；空盘时它就是下一轮的邀请（§8.4.5a） -->
-    <app:DialControl x:Name="Dial" DockPanel.Dock="Top" Height="330"/>
+    <app:DialControl x:Name="Dial" Height="330"/>
 
-    <!-- 七块骨牌 = 星期几。倒下几块就是周几，界面上一个字都没有 -->
-    <app:DominoRow x:Name="Dominoes" DockPanel.Dock="Top" Height="76" Margin="0,2,0,0"/>
+    <!-- 七块骨牌 = 星期几。倒下几块就是周几，一个字都没有 -->
+    <app:DominoRow x:Name="Dominoes" Height="76" Margin="0,2,0,10"/>
 
-    <TextBlock x:Name="Status" DockPanel.Dock="Top" Margin="0,10,0,0"
-               HorizontalAlignment="Center" FontSize="14"/>
+    <!-- ↓↓↓ 分割线以下：连不上 AW 时整块变灰，这个程序就只是一个钟（§6.2） -->
+    <StackPanel x:Name="Controls" Spacing="10">
 
-    <!-- 底部：开始任务的控件。任务进行中隐藏 -->
-    <StackPanel x:Name="Setup" DockPanel.Dock="Bottom" Spacing="10" Margin="0,14,0,0">
+      <Button x:Name="StartBtn" Classes="start" Click="OnStart" Content="开始"/>
 
-      <TextBlock Text="这一轮做什么" FontWeight="SemiBold" FontSize="13" Opacity="0.8"/>
-      <!-- 勾选的是【小目标】，不是 app 或 title —— 后者只能手改 rules.json（§5.2） -->
-      <ItemsControl x:Name="Goals"/>
-
-      <Grid ColumnDefinitions="Auto,*,Auto" Margin="0,4,0,0">
-        <TextBlock Grid.Column="0" Text="专注" VerticalAlignment="Center" Opacity="0.8"/>
-        <!-- §8.4.2a：10~50 分钟，步进 5，九个档 -->
-        <Slider Grid.Column="1" x:Name="Minutes" Margin="10,0"
+      <!-- 取值控件，不解释不说明。只露一个数字，连单位都不写 -->
+      <Grid ColumnDefinitions="*,Auto" Margin="2,4,2,0">
+        <Slider Grid.Column="0" x:Name="Minutes"
                 Minimum="10" Maximum="50" TickFrequency="5"
                 IsSnapToTickEnabled="True" TickPlacement="BottomRight" Value="25"/>
-        <TextBlock Grid.Column="2" x:Name="MinutesText" VerticalAlignment="Center"
-                   FontFamily="Consolas" MinWidth="86"/>
+        <TextBlock Grid.Column="1" x:Name="MinutesText" VerticalAlignment="Center"
+                   Margin="12,0,0,0" FontSize="17" FontFamily="Consolas" MinWidth="30"/>
       </Grid>
 
-      <Button x:Name="StartBtn" Click="OnStart" HorizontalAlignment="Stretch"
-              HorizontalContentAlignment="Center" Content="开始"/>
-      <TextBlock x:Name="Hint" FontSize="11" Opacity="0.6" TextWrapping="Wrap"/>
+      <!-- 小目标列表。rules.json 有几个就排几行，窗口高度跟着变 -->
+      <ItemsControl x:Name="Goals"/>
     </StackPanel>
-
-    <Border/>
-  </DockPanel>
+  </StackPanel>
 </Window>
