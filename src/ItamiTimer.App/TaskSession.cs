@@ -67,8 +67,13 @@ public sealed class TaskSession : IDisposable
     public TaskState? State { get; private set; }
     public IReadOnlyList<MinuteCell> Cells { get; private set; } = [];
 
-    /// <summary>专注阶段恒为 1；休息阶段按分钟线性淡到 0（§8.4.4）。</summary>
-    public double RingOpacity { get; private set; } = 1;
+    /// <summary>
+    /// 休息扇形的起点 = 专注达成那一刻；不在休息阶段就是 null。
+    ///
+    /// 配合 <see cref="TaskRecord.RestMinutes"/> 在表盘上画一块灰扇形（§8.4.4）。
+    /// **扇形是静止的，不缩不淡** —— 倒计时由分针免费提供：分针扫出扇形，休息就完了。
+    /// </summary>
+    public DateTimeOffset? RestFrom { get; private set; }
 
     /// <summary>
     /// 灰弧要画多长：从**写入头**（已走完的整分钟数）一直到**预计结束时刻**
@@ -144,12 +149,12 @@ public sealed class TaskSession : IDisposable
         if (State?.FocusCompletedAt is { } done)
         {
             var rest = TimeSpan.FromMinutes(Task.RestMinutes);
-            var left = rest > TimeSpan.Zero ? 1 - (now - done) / rest : 0;
-            RingOpacity = Math.Clamp(left, 0, 1);
+            RestFrom = done;
             Updated?.Invoke();
             if (now >= done + rest)
             {
                 Finished = true;
+                RestFrom = null;          // 扇形随休息一起消失
                 _tick.Stop();
                 Log.Info("休息结束，任务终结。程序不会替用户开始下一轮（原则 1）。");
                 Interrupted?.Invoke(Interrupt.RestDone);
@@ -159,7 +164,7 @@ public sealed class TaskSession : IDisposable
 
         // ---- 计时点：每跨过一个整分钟一次。**所有判断都在这里做**（用户 2026-07-28）。
         //
-        // 1 秒的 tick 只用来数休息的淡出；查 AW 与重放每整分钟一次，误差 ≤1 秒。
+        // 1 秒的 tick 只用来盯休息什么时候走完；查 AW 与重放每整分钟一次，误差 ≤1 秒。
         var minute = TimeGrid.FloorToMinute(now);
         if (minute <= _lastAwMinute) return;
         _lastAwMinute = minute;
@@ -201,7 +206,6 @@ public sealed class TaskSession : IDisposable
             if (State.FocusCompletedAt is not null)
             {
                 focusDone = true;
-                RingOpacity = 1;
                 Log.Info($"专注达成于 {State.FocusCompletedAt.Value.ToLocalTime():HH:mm:ss}，" +
                          $"实际耗时 {(State.FocusCompletedAt.Value - Task.StartedAt).TotalMinutes:F1} 分钟");
             }

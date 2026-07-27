@@ -27,6 +27,9 @@ public class DialControl : Control
     private const double RHour = 0.55, RMinute = 0.775, RSecond = 0.88;
     private const double RHub = 0.035;
 
+    /// <summary>休息扇形的外缘。压在刻度圈里侧，别盖住数字（§8.4.4）。</summary>
+    private const double RestWedgeOuter = 0.70;
+
     /// <summary>§8.2.5 螺旋三圈。超过 180 分钟不再内缩，在 lane 2 上原地覆盖。</summary>
     private static readonly (double In, double Out)[] Lanes =
     [
@@ -50,19 +53,25 @@ public class DialControl : Control
     public static readonly StyledProperty<double> RemainingMinutesProperty =
         AvaloniaProperty.Register<DialControl, double>(nameof(RemainingMinutes));
 
-    /// <summary>色环整体不透明度。休息阶段按分钟线性淡出到 0（§8.4.4）。</summary>
-    public static readonly StyledProperty<double> RingOpacityProperty =
-        AvaloniaProperty.Register<DialControl, double>(nameof(RingOpacity), 1.0);
+    /// <summary>休息扇形的起点（= 专注达成那一刻）。null = 不在休息，不画。</summary>
+    public static readonly StyledProperty<DateTimeOffset?> RestFromProperty =
+        AvaloniaProperty.Register<DialControl, DateTimeOffset?>(nameof(RestFrom));
+
+    /// <summary>休息多少分钟 = 承诺时长 ÷ 5。</summary>
+    public static readonly StyledProperty<double> RestMinutesProperty =
+        AvaloniaProperty.Register<DialControl, double>(nameof(RestMinutes));
+
 
     public DialPalette Palette { get => GetValue(PaletteProperty); set => SetValue(PaletteProperty, value); }
     public IReadOnlyList<MinuteCell> Cells { get => GetValue(CellsProperty); set => SetValue(CellsProperty, value); }
     public DateTimeOffset? StartedAt { get => GetValue(StartedAtProperty); set => SetValue(StartedAtProperty, value); }
     public double RemainingMinutes { get => GetValue(RemainingMinutesProperty); set => SetValue(RemainingMinutesProperty, value); }
-    public double RingOpacity { get => GetValue(RingOpacityProperty); set => SetValue(RingOpacityProperty, value); }
+    public DateTimeOffset? RestFrom { get => GetValue(RestFromProperty); set => SetValue(RestFromProperty, value); }
+    public double RestMinutes { get => GetValue(RestMinutesProperty); set => SetValue(RestMinutesProperty, value); }
 
     static DialControl()
         => AffectsRender<DialControl>(PaletteProperty, CellsProperty, StartedAtProperty,
-                                      RemainingMinutesProperty, RingOpacityProperty);
+                                      RemainingMinutesProperty, RestFromProperty, RestMinutesProperty);
 
     // 12 点为 0°，顺时针，分钟 × 6°（§8.2）
     private static Point At(Point c, double r, double deg)
@@ -88,6 +97,7 @@ public class DialControl : Control
         DrawDropShadow(ctx, c, R, rFace);
         DrawBezel(ctx, c, R);
         DrawFace(ctx, c, R);
+        DrawRestWedge(ctx, c, R);   // 在色环【之下】：它是背景上的一块光，不是记录
         DrawRing(ctx, c, R);
         DrawTicks(ctx, c, R, rFace);
         DrawNumerals(ctx, c, R, rFace);
@@ -171,9 +181,8 @@ public class DialControl : Control
     /// <summary>§8.2.3 + §8.2.4 + §8.2.5：色块、承诺弧、截止线、螺旋。</summary>
     private void DrawRing(DrawingContext ctx, Point c, Func<double, double> R)
     {
-        if (StartedAt is not { } start || RingOpacity <= 0.01) return;
+        if (StartedAt is not { } start) return;
 
-        using var _ = ctx.PushOpacity(RingOpacity);
         var cells = Cells;
         var p = Palette;
         // 起算时刻在表盘上的角位置（单位分钟）。startedAt 已经截断到整分钟（§14.1），
@@ -265,6 +274,75 @@ public class DialControl : Control
 
             from = segEnd;
         }
+    }
+
+    /// <summary>
+    /// §8.4.4 休息扇形：**你挣来的那块时间**。
+    ///
+    /// 用户 2026-07-28 换掉了原来的"色环线性淡出"：那套每秒改一次不透明度、
+    /// 有状态、还得跟休息时长精确对齐，而且实际用起来根本看不见（调试量程下
+    /// <c>RestMinutes = 2/5 = 0</c>，压根没有休息阶段）。现在换成一块静止的扇形。
+    ///
+    /// **为什么是从圆心出发的整块扇形，而不是又一条细环带**：盘面上所有别的东西
+    /// 都是细带（色块、承诺弧），再加一条就要靠颜色去区分，而颜色四个档位
+    /// （绿 / 琥珀 / 红 / 灰）已经全部占满、各有含义。**留给我们的只有形状。**
+    /// 一整块从圆心切出来的扇形，读起来就是"这一块归你了"—— 跟"记录"根本不是
+    /// 一类东西，不会看错。
+    ///
+    /// **为什么不缩、不淡、不画倒计时**：分针本来就在扫。分针扫出这块扇形的那一刻
+    /// 就是休息结束。倒计时是**免费**的，不需要任何额外的动画状态 —— 这正是
+    /// "分针即写入头"（§8.2.2）那条几何约定第二次白送东西。
+    ///
+    /// **为什么不是灰**：灰在这个盘面上已经有含义了 —— `Absent`（人不在）和承诺弧
+    /// （还欠着的时间）都是灰。拿灰画奖励，等于让奖励长得像欠账。绿 / 琥珀 / 红
+    /// 各有其主，**蓝是唯一还空着的色相**，而且它天然读作"歇一歇"。
+    /// （`Pending` 那个蓝当初为承诺弧定义过又被否掉，理由是"还欠着的时间不该有情绪"
+    /// —— 而休息扇形要的正是情绪。）
+    ///
+    /// 用**径向渐变**：靠盘沿浓、往圆心淡到没有。一来避免糊住指针轴和时针，
+    /// 二来让它看起来像一束光落在盘面上，而不是一块补丁。
+    /// </summary>
+    private void DrawRestWedge(DrawingContext ctx, Point c, Func<double, double> R)
+    {
+        if (RestFrom is not { } from || RestMinutes <= 0.001) return;
+
+        var d0 = (from.Minute + from.Second / 60.0) * 6;
+        var d1 = d0 + RestMinutes * 6;
+        var rOut = R(RestWedgeOuter);
+
+        var tint = Palette.Rest;
+        var brush = new RadialGradientBrush
+        {
+            Center = new RelativePoint(c, RelativeUnit.Absolute),
+            GradientOrigin = new RelativePoint(c, RelativeUnit.Absolute),
+            RadiusX = new RelativeScalar(rOut, RelativeUnit.Absolute),
+            RadiusY = new RelativeScalar(rOut, RelativeUnit.Absolute),
+            GradientStops =
+            {
+                new GradientStop(A(tint, 0x00), 0.00),
+                new GradientStop(A(tint, 0x1E), 0.55),
+                new GradientStop(A(tint, 0x4E), 1.00),
+            },
+        };
+        ctx.DrawGeometry(brush, null, Wedge(c, rOut, d0, d1));
+
+        // 盘沿那道稍实的边：把扇形"收口"，不然渐变的外缘会糊成一团
+        ctx.DrawGeometry(new SolidColorBrush(A(tint, 0x88)), null,
+            Annulus(c, R(RestWedgeOuter - 0.035), rOut, d0, d1));
+    }
+
+    /// <summary>一块从圆心切出去的扇形 [d0, d1)。</summary>
+    private static StreamGeometry Wedge(Point c, double rOut, double d0, double d1)
+    {
+        var g = new StreamGeometry();
+        using var s = g.Open();
+        var large = d1 - d0 > 180;
+        s.BeginFigure(c, true);
+        s.LineTo(At(c, rOut, d0));
+        s.ArcTo(At(c, rOut, d1), new Size(rOut, rOut), 0, large, SweepDirection.Clockwise);
+        s.LineTo(c);
+        s.EndFigure(true);
+        return g;
     }
 
     private void DrawTicks(DrawingContext ctx, Point c, Func<double, double> R, double rFace)

@@ -47,9 +47,22 @@ internal static class DialSpecimens
         for (var i = 0; i < 58; i++) many.Add(Cell(i, t1010, i % 7 == 0 ? 20 : 60, i % 7 == 0 ? 40 : 0));
         Save(outDir, "05-承诺弧跨圈-末尾应内缩到第二圈", t1010, many, remaining: 6);
 
-        Save(outDir, "06-休息中-色环淡出到三成", t1010,
+        // 休息：色环留在原地不淡，后面接一块灰扇形 = 你挣来的时间（§8.4.4）
+        Save(outDir, "06-休息中-色环之后接一块休息扇形", t1010,
             [Cell(0, t1010, 60, 0), Cell(1, t1010, 60, 0), Cell(2, t1010, 60, 0)],
-            remaining: 0, ringOpacity: 0.3);
+            remaining: 0, restFrom: t1010.AddMinutes(3), restMinutes: 5);
+
+        Save(outDir, "06b-休息扇形-灰色版对照", t1010,
+            [Cell(0, t1010, 60, 0), Cell(1, t1010, 60, 0), Cell(2, t1010, 60, 0)],
+            remaining: 0, restFrom: t1010.AddMinutes(3), restMinutes: 5,
+            palette: DialPalette.Light with { Rest = DialPalette.Light.Tick });
+
+        Save(outDir, "07-休息扇形跨过12点", t2359,
+            [Cell(0, t2359, 60, 0)], remaining: 0, restFrom: t2359.AddMinutes(1), restMinutes: 5);
+
+        Save(outDir, "08-休息扇形-夜面", t1010,
+            [Cell(0, t1010, 60, 0), Cell(1, t1010, 60, 0), Cell(2, t1010, 60, 0)],
+            remaining: 0, restFrom: t1010.AddMinutes(3), restMinutes: 5, palette: DialPalette.Dark);
 
         Console.WriteLine($"表盘样张已写入 {outDir}");
     }
@@ -59,17 +72,20 @@ internal static class DialSpecimens
         => new(i, t0.AddMinutes(i), counted, off, absent, gap);
 
     private static void Save(string dir, string name, DateTimeOffset startedAt,
-                             IReadOnlyList<MinuteCell> cells, double remaining, double ringOpacity = 1.0)
+                             IReadOnlyList<MinuteCell> cells, double remaining,
+                             DateTimeOffset? restFrom = null, double restMinutes = 0,
+                             DialPalette? palette = null)
     {
         var dial = new DialControl
         {
             Width = Size,
             Height = Size,
-            Palette = DialPalette.Light,
+            Palette = palette ?? DialPalette.Light,
             StartedAt = startedAt,
             Cells = cells,
             RemainingMinutes = remaining,
-            RingOpacity = ringOpacity,
+            RestFrom = restFrom,
+            RestMinutes = restMinutes,
         };
         dial.Measure(new Size(Size, Size));
         dial.Arrange(new Rect(0, 0, Size, Size));

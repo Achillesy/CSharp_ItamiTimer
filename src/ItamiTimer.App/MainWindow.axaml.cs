@@ -186,7 +186,7 @@ public partial class MainWindow : Window
         dial.StartedAt = task.StartedAt;
         dial.Cells = [];
         dial.RemainingMinutes = task.FocusMinutes;
-        dial.RingOpacity = 1;
+        dial.RestFrom = null;
         dial.InvalidateVisual();
 
         RefreshStartButton();
@@ -202,7 +202,8 @@ public partial class MainWindow : Window
         dial.StartedAt = s.Task.StartedAt;
         dial.Cells = s.Cells;
         dial.RemainingMinutes = s.RemainingMinutes;
-        dial.RingOpacity = s.RingOpacity;
+        dial.RestFrom = s.RestFrom;
+        dial.RestMinutes = s.Task.RestMinutes;
         dial.InvalidateVisual();
 
         // §8.3.2：任务栏图标是【聚合投影】——角度 = 完成度，颜色 = 整体纯度。
@@ -259,7 +260,7 @@ public partial class MainWindow : Window
         dial.Cells = [];
         dial.StartedAt = null;
         dial.RemainingMinutes = 0;
-        dial.RingOpacity = 1;
+        dial.RestFrom = null;
         dial.InvalidateVisual();
 
         Icon = TomatoIcon.Make();

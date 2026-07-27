@@ -15,7 +15,7 @@ namespace ItamiTimer.App;
 public sealed record DialPalette(
     Color Face, Color FaceRim, Color Ink, Color Tick,
     Color BezelLit, Color BezelMid, Color BezelDark,
-    Color Focus, Color Amber, Color Slack, Color Absent, Color Pending, Color Sweep,
+    Color Focus, Color Amber, Color Slack, Color Absent, Color Pending, Color Sweep, Color Rest,
     Color DominoTop, Color DominoFace, Color DominoSide)
 {
     /// <summary>日面：素白盘 + 木质边框（对着用户给的那张实物照片调的）。</summary>
@@ -37,6 +37,10 @@ public sealed record DialPalette(
         // 会消失，而且会教育眼睛"红 = 正常"。独立 token，而且要【轻】——
         // 它是装饰，不该跟时分针抢。
         Sweep: Color.FromRgb(0x33, 0x40, 0x4B),
+        // §8.4.4 休息扇形。**不能是灰**：灰在这个盘面上已经是"不计入"的意思
+        // （离开、还欠着的时间），拿它画奖励等于让奖励长得像欠账。
+        // 蓝是唯一还空着的色相，而且它天然读作"歇一歇"。
+        Rest: Color.FromRgb(0x4E, 0x8C, 0xC8),
         // 骨牌：**木质**（用户 2026-07-27 定），比表盘的木框浅一档，免得抢。
         // 镜像之后侧面落在【左】边正对左上的光，所以侧面是向光面 ——
         // 但**只需要稍微亮一点**，明暗拉太开就不像同一块木头了。
@@ -60,6 +64,7 @@ public sealed record DialPalette(
         Absent: Color.FromRgb(0x6E, 0x7A, 0x87),
         Pending: Color.FromRgb(0x5C, 0x97, 0xE8),
         Sweep: Color.FromRgb(0xB8, 0xC4, 0xD0),
+        Rest: Color.FromRgb(0x63, 0xA6, 0xE0),      // 夜面提亮一档，见 §8.4.4
         DominoTop: Color.FromRgb(0x8A, 0x6E, 0x50),
         DominoFace: Color.FromRgb(0x6E, 0x56, 0x3C),
         DominoSide: Color.FromRgb(0x93, 0x77, 0x57));
