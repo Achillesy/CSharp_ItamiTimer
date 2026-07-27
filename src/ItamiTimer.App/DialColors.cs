@@ -15,7 +15,8 @@ namespace ItamiTimer.App;
 public sealed record DialPalette(
     Color Face, Color FaceRim, Color Ink, Color Tick,
     Color BezelLit, Color BezelMid, Color BezelDark,
-    Color Focus, Color Amber, Color Slack, Color Absent, Color Pending, Color Sweep)
+    Color Focus, Color Amber, Color Slack, Color Absent, Color Pending, Color Sweep,
+    Color DominoTop, Color DominoLit, Color DominoFront)
 {
     /// <summary>日面：素白盘 + 木质边框（对着用户给的那张实物照片调的）。</summary>
     public static readonly DialPalette Light = new(
@@ -35,7 +36,11 @@ public sealed record DialPalette(
         // §8.2.6：秒针【不能】用 slack 红。红是"偷懒"的语义色，色带全红时秒针
         // 会消失，而且会教育眼睛"红 = 正常"。独立 token，而且要【轻】——
         // 它是装饰，不该跟时分针抢。
-        Sweep: Color.FromRgb(0x33, 0x40, 0x4B));
+        Sweep: Color.FromRgb(0x33, 0x40, 0x4B),
+        // 骨牌：白色塑料。光源在左上，所以顶面最亮、左侧面次之、正面最暗
+        DominoTop: Color.FromRgb(0xFF, 0xFF, 0xFF),
+        DominoLit: Color.FromRgb(0xF0, 0xF1, 0xF3),
+        DominoFront: Color.FromRgb(0xDA, 0xDD, 0xE1));
 
     /// <summary>夜面：深灰盘 + 深色金属边框。</summary>
     public static readonly DialPalette Dark = new(
@@ -51,7 +56,10 @@ public sealed record DialPalette(
         Slack: Color.FromRgb(0xE9, 0x63, 0x5C),
         Absent: Color.FromRgb(0x6E, 0x7A, 0x87),
         Pending: Color.FromRgb(0x5C, 0x97, 0xE8),
-        Sweep: Color.FromRgb(0xB8, 0xC4, 0xD0));
+        Sweep: Color.FromRgb(0xB8, 0xC4, 0xD0),
+        DominoTop: Color.FromRgb(0x9A, 0xA5, 0xB2),
+        DominoLit: Color.FromRgb(0x78, 0x84, 0x92),
+        DominoFront: Color.FromRgb(0x55, 0x5F, 0x6B));
 
     /// <summary>
     /// §8.2.3 的三段过渡：focus → amber → slack。

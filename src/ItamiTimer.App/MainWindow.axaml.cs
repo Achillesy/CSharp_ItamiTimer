@@ -41,8 +41,13 @@ public partial class MainWindow : Window
 
     /// <summary>§8.2.7：盘面跟随主题——白天素白、夜里深灰，是同一套东西的日面与夜面。</summary>
     private void ApplyTheme()
-        => this.FindControl<DialControl>("Dial")!.Palette =
-            ActualThemeVariant == ThemeVariant.Dark ? DialPalette.Dark : DialPalette.Light;
+    {
+        var palette = ActualThemeVariant == ThemeVariant.Dark ? DialPalette.Dark : DialPalette.Light;
+        this.FindControl<DialControl>("Dial")!.Palette = palette;
+        var row = this.FindControl<DominoRow>("Dominoes")!;
+        row.Palette = palette;
+        row.Fallen = DominoRow.FallenForToday(DateTime.Now);
+    }
 
     private void LoadRules()
     {

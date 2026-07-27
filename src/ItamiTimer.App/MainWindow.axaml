@@ -3,7 +3,7 @@
         xmlns:app="using:ItamiTimer.App"
         x:Class="ItamiTimer.App.MainWindow"
         Title="一袋米要扛几楼"
-        Width="380" Height="620"
+        Width="380" Height="690"
         CanResize="False"
         WindowStartupLocation="CenterScreen"
         Background="#D7DBE0">
@@ -12,6 +12,9 @@
 
     <!-- 表盘。任务进行中它是全部；空盘时它就是下一轮的邀请（§8.4.5a） -->
     <app:DialControl x:Name="Dial" DockPanel.Dock="Top" Height="330"/>
+
+    <!-- 七块骨牌 = 星期几。倒下几块就是周几，界面上一个字都没有 -->
+    <app:DominoRow x:Name="Dominoes" DockPanel.Dock="Top" Height="76" Margin="0,2,0,0"/>
 
     <TextBlock x:Name="Status" DockPanel.Dock="Top" Margin="0,10,0,0"
                HorizontalAlignment="Center" FontSize="14"/>
