@@ -107,15 +107,14 @@
       <Button x:Name="StartBtn" Classes="start" Click="OnStart" Content="开始"/>
 
       <!-- 取值控件。不解释、不说明、连数字都不给（用户 2026-07-27：主打一个猜）。
-           自己拖去。
+           只有九个刻度，自己拖去。
 
-           ⚠️ 【调试量程】2~10 分钟、步进 1、默认 5（用户 2026-07-27）。
-           跑一轮完整任务只要五分钟，不用真坐 25 分钟才看到达成那一刻。
-           **调通之后要改回 §10 的正式量程：Minimum=10 Maximum=50
-           TickFrequency=5 Value=25**。这里是本文件里唯一一处临时值。 -->
+           §8.4.2a 的正式量程：10~50 分钟、步进 5、默认 25。
+           （2026-07-27~28 期间这里临时是 2~10 分钟，为了不用每次真坐 25 分钟
+           才看到达成那一刻；核心循环跑通后已经改回来了。） -->
       <Slider x:Name="Minutes" Margin="2,4,2,0"
-              Minimum="2" Maximum="10" TickFrequency="1"
-              IsSnapToTickEnabled="True" TickPlacement="BottomRight" Value="5"/>
+              Minimum="10" Maximum="50" TickFrequency="5"
+              IsSnapToTickEnabled="True" TickPlacement="BottomRight" Value="25"/>
 
       <!-- 小目标列表 + 齿轮。rules.json 有几个就排几行，窗口高度跟着变。
            任务进行中仍然可点：补勾一个小目标是【追溯生效】的（§5.4）。
