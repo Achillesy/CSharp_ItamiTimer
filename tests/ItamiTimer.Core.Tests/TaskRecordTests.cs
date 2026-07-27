@@ -27,13 +27,30 @@ public class TaskRecordTests
 
     /// <summary>
     /// §8.4.2a：范围约束属于 UI 层，Core 必须接受任意时长——否则 §13 的手动
-    /// 验证每跑一次要枯坐 10 分钟。1 分钟任务算出 0 分钟休息，专注达成即
-    /// Completed，测试时正好方便。
+    /// 验证每跑一次要枯坐 10 分钟。
     /// </summary>
     [Fact]
     public void Core_接受滑块范围之外的短时长_用于验证()
     {
-        Assert.Equal(0, WithFocus(1).RestMinutes);
+        Assert.Equal(1, WithFocus(1).RestMinutes);
+    }
+
+    /// <summary>
+    /// 休息是**向上**取整（用户 2026-07-28）。原来是整除，于是 FocusMinutes ≤ 4
+    /// 全部算出 0 分钟休息 —— 调试量程（2~10）下最常用的那几档根本没有休息阶段，
+    /// 休息扇形（§8.4.4）就永远看不见。方向也说得通：休息是奖励，零头该给用户。
+    /// </summary>
+    [Theory]
+    [InlineData(1, 1)]
+    [InlineData(2, 1)]
+    [InlineData(4, 1)]
+    [InlineData(6, 2)]
+    [InlineData(9, 2)]
+    [InlineData(11, 3)]
+    public void 不满五分钟的零头也给一分钟休息_绝不算出零(int focus, int rest)
+    {
+        Assert.Equal(rest, WithFocus(focus).RestMinutes);
+        Assert.True(WithFocus(focus).RestMinutes >= 1, "任何非零时长的任务都该有休息");
     }
 
     [Fact]

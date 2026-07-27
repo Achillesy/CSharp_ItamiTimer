@@ -72,14 +72,17 @@ public sealed record TaskRecord
     public DateTimeOffset? AbandonedAt { get; init; }
 
     /// <summary>
-    /// 休息时长（分钟）= 专注 ÷ 5（§8.4.2）。推导而不是存储：滑块步进 5
-    /// 保证了它恒为整数分钟（10→2、25→5、50→10），不需要取整规则。
+    /// 休息时长（分钟）= ⌈专注 ÷ 5⌉（§8.4.2，用户 2026-07-28 定为**向上**取整）。
     ///
-    /// 注意验证用的短任务（FocusMinutes = 1~2）会算出 0 分钟休息，即专注
-    /// 达成后立刻 Completed。这对测试正好方便，不是 bug。
+    /// 正式量程下取不取整都一样（滑块步进 5：10→2、25→5、50→10）。
+    /// **向上取整是为了短任务**：原来的整除让 `FocusMinutes ≤ 4` 算出 0 分钟休息，
+    /// 于是调试量程（2~10 分钟）下最常用的那几档根本没有休息阶段 —— 休息扇形
+    /// （§8.4.4）就永远看不见。现在 2→1、5→1、10→2，每一档都有得歇。
+    ///
+    /// 方向也说得通：休息是**奖励**，零头该给用户，不该抹掉。
     ///
     /// **不落盘**：推导值写进 JSON 会让人以为它可以手改，改了又不生效。
     /// </summary>
     [JsonIgnore]
-    public int RestMinutes => FocusMinutes / 5;
+    public int RestMinutes => (int)Math.Ceiling(FocusMinutes / 5.0);
 }

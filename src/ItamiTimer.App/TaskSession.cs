@@ -86,6 +86,9 @@ public sealed class TaskSession : IDisposable
         get
         {
             if (State is not { } st) return Task.FocusMinutes;
+            // 达成之后什么都不欠了。这一条必须显式写：色环已经清空，
+            // 写入头退回 StartedAt，不挡一下的话灰弧会整段重新冒出来。
+            if (st.FocusCompletedAt is not null) return 0;
             var head = Task.StartedAt.AddMinutes(Cells.Count);
             return Math.Max(0, (Replay.ProjectedEnd(Task, st) - head).TotalMinutes);
         }
@@ -192,14 +195,19 @@ public sealed class TaskSession : IDisposable
             var afk = await _aw.FetchEventsAsync(_afkBucket, Task.StartedAt, now);
 
             State = Replay.Run(Task, _rules, win, afk, now);
-            Cells = Replay.ToMinuteCells(Task, State);
+            var cells = Replay.ToMinuteCells(Task, State);
+
+            // **达成之后色环就撤掉**（用户 2026-07-28）：任务已经结束、不再查 AW，
+            // 那一圈记录没有继续画的理由了。盘面只留休息扇形（§8.4.4）——
+            // 空出来的盘面本身就是"这一块归你了"的底子。
+            Cells = State.FocusCompletedAt is null ? cells : [];
             Updated?.Invoke();
 
             // 每拍记一行。这是这个程序**唯一**能让人事后看出"它到底有没有在数"的地方
             // ——界面对用户是沉默的，日志就得把过程留下来。一分钟一行，一轮任务
             // 最多五十行，1MB 的滚动上限绰绰有余。
             Log.Info($"{State.FocusedSeconds / 60,5:F1}/{Task.FocusMinutes} 分钟  " +
-                     $"{State.Phase}  格子 {Cells.Count}  " +
+                     $"{State.Phase}  格子 {cells.Count}  " +
                      $"偷懒 {State.Violations.Count} 次 {State.OffTaskSecondsByApp.Values.Sum() / 60:F1} 分  " +
                      $"离开 {State.AbsentSeconds / 60:F1} 分  无数据 {State.GapSeconds / 60:F1} 分");
 
@@ -211,10 +219,10 @@ public sealed class TaskSession : IDisposable
             }
             // 用【刚走完的那一格】当触发条件，不是【此刻在干什么】。否则 10:00:10 切走、
             // 10:00:50 切回这种短切换会整个从提醒里溜掉 —— 而它在色块上明明是红的。
-            else if (Cells.Count > 0 && Cells.Count != _lastCellCount)
+            else if (cells.Count > 0 && cells.Count != _lastCellCount)
             {
-                _lastCellCount = Cells.Count;
-                var last = Cells[^1];
+                _lastCellCount = cells.Count;
+                var last = cells[^1];
                 // 跑偏**只记一行日志**，不打断用户（用户 2026-07-28）。
                 // 提醒的活交给表盘：那一格是红的，灰弧往前滑了一截。
                 if (last.OffTaskSeconds >= NudgeFloorSeconds)

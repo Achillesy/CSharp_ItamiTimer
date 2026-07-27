@@ -47,22 +47,17 @@ internal static class DialSpecimens
         for (var i = 0; i < 58; i++) many.Add(Cell(i, t1010, i % 7 == 0 ? 20 : 60, i % 7 == 0 ? 40 : 0));
         Save(outDir, "05-承诺弧跨圈-末尾应内缩到第二圈", t1010, many, remaining: 6);
 
-        // 休息：色环留在原地不淡，后面接一块灰扇形 = 你挣来的时间（§8.4.4）
-        Save(outDir, "06-休息中-色环之后接一块休息扇形", t1010,
-            [Cell(0, t1010, 60, 0), Cell(1, t1010, 60, 0), Cell(2, t1010, 60, 0)],
-            remaining: 0, restFrom: t1010.AddMinutes(3), restMinutes: 5);
-
-        Save(outDir, "06b-休息扇形-灰色版对照", t1010,
-            [Cell(0, t1010, 60, 0), Cell(1, t1010, 60, 0), Cell(2, t1010, 60, 0)],
-            remaining: 0, restFrom: t1010.AddMinutes(3), restMinutes: 5,
-            palette: DialPalette.Light with { Rest = DialPalette.Light.Tick });
+        // 休息：**色环已经撤掉**（用户 2026-07-28：任务结束就不查 AW 了，不用画），
+        // 盘面上只剩一块扇形 = 你挣来的时间（§8.4.4）
+        Save(outDir, "06-休息中-盘面只剩休息扇形", t1010,
+            [], remaining: 0, restFrom: t1010.AddMinutes(25), restMinutes: 5);
 
         Save(outDir, "07-休息扇形跨过12点", t2359,
-            [Cell(0, t2359, 60, 0)], remaining: 0, restFrom: t2359.AddMinutes(1), restMinutes: 5);
+            [], remaining: 0, restFrom: t2359.AddMinutes(1), restMinutes: 5);
 
         Save(outDir, "08-休息扇形-夜面", t1010,
-            [Cell(0, t1010, 60, 0), Cell(1, t1010, 60, 0), Cell(2, t1010, 60, 0)],
-            remaining: 0, restFrom: t1010.AddMinutes(3), restMinutes: 5, palette: DialPalette.Dark);
+            [], remaining: 0, restFrom: t1010.AddMinutes(25), restMinutes: 5,
+            palette: DialPalette.Dark);
 
         Console.WriteLine($"表盘样张已写入 {outDir}");
     }
