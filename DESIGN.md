@@ -63,7 +63,7 @@
 
 #### ⚠️ 第 1 项的修正：那个选择从来没有真正呈现过
 
-用户 2026-07-27 反馈"看不出素白和深灰的区别"。查了样板页，**是样板页的 bug**：`design/dial-specimens.html` 里画盘面的那一行把填充写死成 `var(--dial-face)`，完全没有分支到 `o.face`——
+用户 2026-07-27 反馈"看不出素白和深灰的区别"。查了样板页，**是样板页的 bug**：那个 HTML 里画盘面的那一行把填充写死成 `var(--dial-face)`，完全没有分支到 `o.face`——
 
 ```js
 svg.appendChild(el("circle", { cx: C, cy: C, r: rFace, fill: "var(--dial-face)" }));
@@ -86,7 +86,7 @@ svg.appendChild(el("circle", { cx: C, cy: C, r: rFace, fill: "var(--dial-face)" 
 
 **⚠️ 样板页已作废，不要拿它当实现依据**（2026-07-27）：它有个 bug（画盘面那行没分支到 `o.face`，「素白」和「深灰」渲染结果逐字节相同），色带位置也跟 §8.2.1 定稿的 [0.50, 0.68] 不符，更没有休息态的淡出和真的在扫的秒针。正式规格以 §8.2 为准；视觉迭代直接在 Avalonia 里做，那才是最终产物。
 
-**样板页**：`design/dial-specimens.html`（本地可直接双击打开），已发布为 Artifact：
+**样板页**（2026-07-28 已删除，见下方说明）曾发布为 Artifact：
 **https://claude.ai/code/artifact/8b803438-9eba-41c0-a296-5c98848abbe6**
 （顶部表盘会 60× 速度自动跑一遍 30 分钟的一轮，可重播、可切深浅色。）
 
@@ -838,7 +838,7 @@ lane 2 内缘（0.14）仍在中心毂（0.045）之外。**超过 180 分钟不
 
 ### 8.2.7 两套配色
 
-- 两份 token 在 `design/dial-specimens.html` 的 `:root` 与 `[data-theme=dark]` 里已定义并调过，直接搬成 Avalonia 的两份 `ResourceDictionary`。
+- 两份 token 最终落在 `DialColors.cs` 的 `DialPalette.Light` / `DialPalette.Dark`，实现时按需微调过（木框、骨牌、休息扇形都是后加的）。
 - 盘面四个 token（`--dial-face/-edge/-ink/-tick`）**两套主题共用深色那份**（待 §0.5 问题 1 确认）：表盘是一个恒定的物件，白天它是浮在浅色窗口上的一块深色仪表；顺带绿/琥珀/红只需为一种底色调一次。
 - 切换跟随系统（`ActualThemeVariant`），设置里可强制。
 
@@ -949,7 +949,8 @@ lane 2 内缘（0.14）仍在中心毂（0.045）之外。**超过 180 分钟不
 |---|---|---|
 | 程序本体 | `%LOCALAPPDATA%\Programs\ItamiTimer\` | 发布时覆盖 |
 | 默认规则 | 同上，`rules.json` | 发布时覆盖 |
-| **用户的规则** | `%LOCALAPPDATA%\ItamiTimerules.json` | **只有用户**，发布碰不到 |
+| **用户的规则** | `%LOCALAPPDATA%\ItamiTimer
+ules.json` | **只有用户**，发布碰不到 |
 | 设置 | `%LOCALAPPDATA%\ItamiTimer\settings.json` | 程序（§8.3.3） |
 | 日志 | 同上，`itami.log` | 程序，**仅 Debug** |
 
