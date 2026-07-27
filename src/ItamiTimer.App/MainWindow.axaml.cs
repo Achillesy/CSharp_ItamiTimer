@@ -38,17 +38,9 @@ public partial class MainWindow : Window
     private GroupRules? _rules;
     private readonly List<CheckBox> _goalBoxes = [];
     private bool _awReady;
+    private readonly Settings _settings = Settings.Load();
 
     private TaskSession? _session;
-    /// <summary>
-    /// 上一次把窗口顶上去的时刻；没顶着就是 null。
-    ///
-    /// **置顶的生命周期归窗口管，不归会话管**（2026-07-28 重构）。原来撤销写在
-    /// TaskSession 的 tick 里，于是"休息结束"那一次置顶永远撤不掉 —— 会话到那一刻
-    /// 就 <c>_tick.Stop()</c> 了，没人再盯着键鼠。放到 <see cref="OnFrame"/> 里就没这问题：
-    /// 那个 33ms 的定时器从程序启动到关闭一直在跑。
-    /// </summary>
-    private DateTimeOffset? _poppedAt;
 
     public MainWindow()
     {
@@ -60,6 +52,7 @@ public partial class MainWindow : Window
 
         LoadRules();
         RefreshStartButton();
+        F<Button>("SettingsBtn").Click += OnSettings;
 
         _frame.Tick += OnFrame;
         _frame.Start();
@@ -82,15 +75,9 @@ public partial class MainWindow : Window
         row.Fallen = DominoRow.FallenForToday(DateTime.Now);
     }
 
-    /// <summary>
-    /// 33ms 一帧。两件事：秒针只在窗口真的看得见时才重绘（§8.2.6）；
-    /// 以及盯着键鼠，一有动作就撤销置顶（<see cref="RetractIfInput"/>）。
-    ///
-    /// 这个定时器从启动到关闭一直在跑，所以撤销的判断活得比任何一轮任务都久。
-    /// </summary>
+    /// <summary>秒针只在窗口真的看得见时才重绘（§8.2.6）。</summary>
     private void OnFrame(object? sender, EventArgs e)
     {
-        RetractIfInput();
         if (WindowState != WindowState.Minimized && IsVisible)
             F<DialControl>("Dial").InvalidateVisual();
     }
@@ -229,71 +216,32 @@ public partial class MainWindow : Window
 
     }
 
+    /// <summary>
+    /// 只剩两件事会打断用户，而且**只用一声系统音**（用户 2026-07-28「极致简化」）。
+    ///
+    /// 整套"置顶但不抢焦点"已经删干净了 —— 用户原话：「不要再纠结窗口置顶这种事情了。
+    /// 逻辑混乱，又容易出错。」它确实一直在出错：先是达成那次根本没置顶（不抢焦点
+    /// 又不置顶等于没弹），修好之后又变成永远撤不掉。声音没有这些状态。
+    ///
+    /// 跑偏不再有任何提醒，**只写日志**。表盘上那格是红的、灰弧往前滑了一截，
+    /// 自己看，自己猜 —— 跟不给账单是同一条思路。
+    /// </summary>
     private void OnInterrupted(TaskSession.Interrupt why)
     {
-        if (_session is not { } s) return;
+        if (_session is null) return;
 
         switch (why)
         {
-            case TaskSession.Interrupt.Deviated:
-            case TaskSession.Interrupt.Idle:
-                // 置顶但**绝不抢焦点**：用户在切走的那个应用里继续打字，字要落在那边（§13 第 6 条）
-                Pop(topmost: true);
-                break;
-
             case TaskSession.Interrupt.FocusDone:
-                // 达成这一刻【什么都不给】（用户 2026-07-27）：不弹账单、不报数字。
-                // 表盘上那圈弧就是全部答案，自己看，自己猜。
-                // 达成也要**置顶**（用户 2026-07-28："任务完成之后，置顶没有做"）。
-                // §0.5 问题 4 原本写的是"弹出但不置顶"，实机跑下来那是句空话：
-                // 我们刻意不抢焦点（§13 第 6 条），于是"不抢焦点 + 不置顶"= 窗口
-                // 根本浮不上来，用户在 PDF 里坐着，什么都没看见。在这个约束下，
-                // 置顶是**唯一**能让人注意到的手段。撤销照旧只认键鼠。
-                Pop(topmost: true);
+                if (_settings.FocusDoneEnabled) Sound.Play(_settings.FocusDoneSound);
                 RefreshStartButton();
                 break;
 
             case TaskSession.Interrupt.RestDone:
-                Pop(topmost: true);   // 同上：不置顶就等于没弹
+                if (_settings.RestDoneEnabled) Sound.Play(_settings.RestDoneSound);
                 EndSession();
                 break;
         }
-    }
-
-    /// <summary>
-    /// 把窗口摆到屏幕正中显示出来，**绝不抢焦点**（§13 第 6 条）。
-    ///
-    /// <paramref name="topmost"/> 必须显式传：达成和休息结束那两次弹出是
-    /// **不置顶**的（§0.5）。原来这里无条件设 HWND_TOPMOST，先 ClearTopmost
-    /// 再 Pop 等于白清一次 —— 达成之后窗口会一直压在所有应用上，而那时
-    /// 已经没有任何东西会去撤它了。
-    /// </summary>
-    private void Pop(bool topmost)
-    {
-        WindowState = WindowState.Normal;
-        CenterOnPrimary();
-        Win32Topmost.ShowNoActivate(this, topmost);
-        _poppedAt = topmost ? DateTimeOffset.Now : null;
-    }
-
-    /// <summary>
-    /// 撤销置顶的看门狗。**任何键鼠动作都撤，不管用户在干什么**（用户 2026-07-27）。
-    ///
-    /// 判据是"顶上去之后**又**有过输入"：<c>GetLastInputInfo</c> 报的最后输入时刻晚于
-    /// <see cref="_poppedAt"/>。所以顶上去的那一瞬不会因为用户刚好在打字就立刻撤掉，
-    /// 必须真的再动一下。
-    ///
-    /// 挂在 33ms 的渲染帧上而不是会话的秒级 tick 上，两个原因：撤销要立刻（等一个
-    /// 60 秒节拍用户会觉得"动了鼠标也不消失"），以及**它必须活得比会话久** ——
-    /// "休息结束"那一次置顶发生在会话终结的同一刻。
-    /// </summary>
-    private void RetractIfInput()
-    {
-        if (_poppedAt is not { } p) return;
-        if (DateTimeOffset.Now - InputIdle.Elapsed() <= p) return;
-        _poppedAt = null;
-        Log.Info("键鼠有动作，撤销置顶");
-        Win32Topmost.ClearTopmost(this);
     }
 
     /// <summary>任务终结：回到空盘。**色环 = 当前任务的投影，没有任务就没有色环**（§8.4.5a）。</summary>
@@ -301,14 +249,6 @@ public partial class MainWindow : Window
     {
         _session?.Dispose();
         _session = null;
-
-        // ⚠️ 这里【不能】清 _poppedAt。置顶是窗口的状态，不是会话的状态：
-        // 「休息结束」走的是 Pop(topmost: true) → EndSession()，先顶上去、紧接着
-        // 把"我顶着呢"这个记号抹掉，看门狗就再也不会去撤 —— 窗口永远压在所有应用
-        // 上面。2026-07-28 实测抓到（动了键鼠仍然是"置顶"）。
-        //
-        // 真正需要收回置顶的两条路径（放弃、关窗口）都会自己先 ClearTopmost，
-        // 那里清记号是对的。
 
         var dial = F<DialControl>("Dial");
         dial.Cells = [];
@@ -340,12 +280,6 @@ public partial class MainWindow : Window
 
         e.Cancel = true;
 
-        // **先撤销置顶再问**。偏离提醒会把主窗口设成 HWND_TOPMOST，而确认框是普通窗口
-        // —— 不撤销的话它会被主窗口整个盖住，用户看到的就是"点了 × 什么都没发生"。
-        // （测试时踩到过：对话框确实创建了、也是前台窗口，但屏幕上看不见。）
-        _poppedAt = null;
-        Win32Topmost.ClearTopmost(this);
-
         if (await Confirm.AskAsync(this, "任务尚未完成，你确定退出？"))
         {
             _session?.Abandon();
@@ -362,28 +296,15 @@ public partial class MainWindow : Window
     /// </summary>
     private async Task AskAbandonAsync()
     {
-        // 先撤销置顶：偏离提醒会把主窗口设成 HWND_TOPMOST，普通的确认框会被它整个盖住
-        _poppedAt = null;
-        Win32Topmost.ClearTopmost(this);
-
         if (!await Confirm.AskAsync(this, "任务尚未完成，你确定放弃？")) return;
         _session?.Abandon();
         EndSession();
     }
 
-    /// <summary>
-    /// 每次弹出前摆回**主屏正中**。双屏实测：用户把窗口拖到副屏之后，后续每次弹出都
-    /// 出现在副屏——提醒弹到你没在看的那块屏上，等于没提醒（§8.5）。
-    /// Position 是物理像素而 Width/Height 是 DIP，高 DPI 下必须乘 Scaling。
-    /// </summary>
-    private void CenterOnPrimary()
+    /// <summary>齿轮：打开设置。两条声音，改一下存一下（见 <see cref="SettingsWindow"/>）。</summary>
+    private async void OnSettings(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
-        var s = Screens.Primary ?? (Screens.ScreenCount > 0 ? Screens.All[0] : null);
-        if (s is null) return;
-        var w = (int)(Bounds.Width * s.Scaling);
-        var h = (int)(Bounds.Height * s.Scaling);
-        Position = new PixelPoint(
-            s.WorkingArea.X + (s.WorkingArea.Width - w) / 2,
-            s.WorkingArea.Y + (s.WorkingArea.Height - h) / 2);
+        try { await new SettingsWindow(_settings).ShowDialog(this); }
+        catch (Exception ex) { Log.Error("打开设置窗口失败", ex); }
     }
 }

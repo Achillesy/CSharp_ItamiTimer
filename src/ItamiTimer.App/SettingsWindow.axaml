@@ -1,0 +1,70 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="ItamiTimer.App.SettingsWindow"
+        Title="设置"
+        Width="520"
+        SizeToContent="Height"
+        CanResize="False"
+        ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner"
+        Background="#D7DBE0">
+
+  <Window.Styles>
+    <!-- 一张「卡片」= 一条设置。照 Windows 时钟应用的设置页排：
+         图标 / 标题 + 说明 / 右侧开关，展开后是那一条的取值。 -->
+    <Style Selector="Border.card">
+      <Setter Property="Background" Value="#E8EBEE"/>
+      <Setter Property="CornerRadius" Value="8"/>
+      <Setter Property="Padding" Value="16,14"/>
+      <Setter Property="BorderBrush" Value="#C7CDD4"/>
+      <Setter Property="BorderThickness" Value="1"/>
+    </Style>
+    <Style Selector="TextBlock.title">
+      <Setter Property="FontSize" Value="15"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+    </Style>
+    <Style Selector="TextBlock.sub">
+      <Setter Property="FontSize" Value="12.5"/>
+      <Setter Property="Opacity" Value="0.65"/>
+      <Setter Property="Margin" Value="0,2,0,0"/>
+      <Setter Property="TextWrapping" Value="Wrap"/>
+    </Style>
+  </Window.Styles>
+
+  <StackPanel Margin="22,18,22,20" Spacing="12">
+
+    <TextBlock Text="设置" FontSize="26" FontWeight="Bold" Margin="0,0,0,6"/>
+
+    <Border Classes="card">
+      <StackPanel Spacing="12">
+        <Grid ColumnDefinitions="*,Auto">
+          <StackPanel>
+            <TextBlock Classes="title" Text="任务结束声音"/>
+            <TextBlock Classes="sub" Text="专注时长攒够时响一声"/>
+          </StackPanel>
+          <ToggleSwitch x:Name="FocusOn" Grid.Column="1" VerticalAlignment="Center"
+                        OnContent="开" OffContent="关"/>
+        </Grid>
+        <ComboBox x:Name="FocusSound" HorizontalAlignment="Stretch" MaxDropDownHeight="320"/>
+      </StackPanel>
+    </Border>
+
+    <Border Classes="card">
+      <StackPanel Spacing="12">
+        <Grid ColumnDefinitions="*,Auto">
+          <StackPanel>
+            <TextBlock Classes="title" Text="休息结束声音"/>
+            <TextBlock Classes="sub" Text="休息走完、这一轮终结时响一声"/>
+          </StackPanel>
+          <ToggleSwitch x:Name="RestOn" Grid.Column="1" VerticalAlignment="Center"
+                        OnContent="开" OffContent="关"/>
+        </Grid>
+        <ComboBox x:Name="RestSound" HorizontalAlignment="Stretch" MaxDropDownHeight="320"/>
+      </StackPanel>
+    </Border>
+
+    <!-- 选中就立刻放一遍，跟 Windows 自己的声音设置一样。没有"试听"按钮要点。 -->
+    <TextBlock Classes="sub" Text="选择音色时会立刻试听一次。改动即时生效，无需确认。"/>
+
+  </StackPanel>
+</Window>

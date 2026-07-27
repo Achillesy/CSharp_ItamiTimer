@@ -27,27 +27,24 @@ namespace ItamiTimer.App;
 public sealed class TaskSession : IDisposable
 {
     /// <summary>为什么需要把窗口弹出来。</summary>
+    /// <summary>
+    /// 只剩两件事值得打断用户（用户 2026-07-28「极致简化」）。
+    ///
+    /// 原来还有 <c>Deviated</c>（跑偏）和 <c>Idle</c>（键鼠不动）两种，靠"置顶但不抢焦点"
+    /// 来提醒。用户把整套置顶机制否了：「不要再纠结窗口置顶这种事情了。逻辑混乱，
+    /// 又容易出错。」跑偏现在**只写日志**，用户从表盘上的红格子和越滑越远的灰弧
+    /// 自己看出来 —— 跟"不给账单"是同一条思路。
+    /// </summary>
     public enum Interrupt
     {
-        /// <summary>刚走完的那一分钟跑偏了（§8.3.5）。置顶、不抢焦点。</summary>
-        Deviated,
-        /// <summary>超过阈值没动键鼠，赶在 AW 判 afk 之前叫醒（§8.3.6）。置顶。</summary>
-        Idle,
-        /// <summary>专注达成，进入休息（§8.4.3）。**不置顶**，也不给账单。</summary>
+        /// <summary>专注达成，进入休息（§8.4.3）。响一声「任务结束」。</summary>
         FocusDone,
-        /// <summary>休息结束，任务终结（§8.4.3）。**不置顶**，纯提示。</summary>
+        /// <summary>休息结束，任务终结（§8.4.3）。响一声「休息结束」。</summary>
         RestDone,
     }
 
     // §8.3.5 / §8.3.6 / §10
-    /// <summary>
-    /// 督促的最小间隔（秒）。**不再是 AW 查询的节拍** —— 查询锚在整分钟上，
-    /// 见 <c>_lastAwMinute</c>。这里只用来给"键鼠空闲"的督促限流，免得每秒弹一次。
-    /// </summary>
-    public const int TickSeconds = 60;
-    public const int IdleNudgeSeconds = 60;
     public const int NudgeFloorSeconds = 5;
-    private const int AwAfkTimeoutSeconds = 180;
 
     private readonly GroupRules _rules;
     private readonly AwClient _aw = new();
@@ -151,29 +148,12 @@ public sealed class TaskSession : IDisposable
 
         // ---- 计时点：每跨过一个整分钟一次。**所有判断都在这里做**（用户 2026-07-28）。
         //
-        // 原来键鼠空闲是每秒判、满 60 秒就催，于是督促出现在 00:52:38、00:54:33 这种
-        // 随机时刻，跟整分钟的节拍对不上。用户要的是**一个计时点、一次判断**：
-        // 「整分钟检查的时候，发现问题唯一要做的就是把这个 APP 放置到窗口最上面」。
-        //
-        // 置顶之后什么时候撤销，不归这里管 —— 那是窗口的事，MainWindow 有自己的
-        // 秒级看门狗盯着键鼠（撤销必须立刻，等下一个整分钟用户会觉得"动了也不消失"）。
+        // 1 秒的 tick 只用来数休息的淡出；查 AW 与重放每整分钟一次，误差 ≤1 秒。
         var minute = TimeGrid.FloorToMinute(now);
         if (minute <= _lastAwMinute) return;
         _lastAwMinute = minute;
 
-        // 1) 键鼠空闲。放在查 AW **之前**算，这样 AW 连不上时也不会把它一起吞掉。
-        //
-        // AW 要安静满 180 秒才翻成 afk，且事件起点会回填到最后一次输入（§14.4a T5）。
-        // 必须赶在那条截止线【之前】把人叫醒 —— 事后再叫是救不回来的。改到整分钟判
-        // 之后，最坏情况是安静了将近 120 秒才被发现（上一个整分钟差一点没到 60 秒），
-        // 离 180 秒仍有 60 秒余量。
-        var idle = InputIdle.Elapsed().TotalSeconds;
-        var idleProblem = idle >= IdleNudgeSeconds;
-        if (idleProblem)
-            Log.Info($"{idle:F0} 秒没动键鼠，催一下（再过 {Math.Max(0, AwAfkTimeoutSeconds - idle):F0} 秒就白费）");
-
-        // 2) 查 AW、重放。
-        var deviated = false;
+        // 查 AW、重放。
         var focusDone = false;
 
         _busy = true;
@@ -209,11 +189,10 @@ public sealed class TaskSession : IDisposable
             {
                 _lastCellCount = Cells.Count;
                 var last = Cells[^1];
+                // 跑偏**只记一行日志**，不打断用户（用户 2026-07-28）。
+                // 提醒的活交给表盘：那一格是红的，灰弧往前滑了一截。
                 if (last.OffTaskSeconds >= NudgeFloorSeconds)
-                {
                     Log.Info($"刚过去那一分钟有 {last.OffTaskSeconds:F0} 秒跑偏");
-                    deviated = true;
-                }
             }
         }
         catch (Exception ex)
@@ -224,10 +203,7 @@ public sealed class TaskSession : IDisposable
         }
         finally { _busy = false; }
 
-        // 3) 一个计时点最多提醒一次。达成优先，其次偏离，最后空闲。
         if (focusDone) Interrupted?.Invoke(Interrupt.FocusDone);
-        else if (deviated) Interrupted?.Invoke(Interrupt.Deviated);
-        else if (idleProblem) Interrupted?.Invoke(Interrupt.Idle);
     }
 
     /// <summary>放弃任务。退出程序等价于此（§2、§9）。</summary>

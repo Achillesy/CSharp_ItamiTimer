@@ -11,10 +11,8 @@ var opt = ParseOptions(args);
 const int TickSeconds = 60;
 // §8.3.6：必须【小于】aw-watcher-afk 的 timeout（默认 180 秒）。那个值在另一个
 // 程序的配置文件里，API 读不到，改了这边不会有任何报错。
-const int IdleNudgeSeconds = 60;
 // 刚走完那一分钟里偏离超过这个数才提醒，滤掉通知抢焦点之类的噪音。
 const int NudgeFloorSeconds = 5;
-const int AwAfkTimeoutSeconds = 180;
 
 try
 {
@@ -22,7 +20,6 @@ try
     {
         "start" => await StartAsync(),
         "replay" => await ReplayPastAsync(),
-        "idle" => Idle(),
         _ => Help(),
     };
 }
@@ -77,7 +74,7 @@ async Task<int> StartAsync()
     Console.WriteLine($"专注 {minutes} 分钟，之后休息 {task.RestMinutes} 分钟");
     Console.WriteLine($"开始时刻：{Renderer.Clock(task.StartedAt)}（进位到整分钟）\n");
     Console.WriteLine(Renderer.Legend());
-    Console.WriteLine($"节拍 {TickSeconds} 秒；超过 {IdleNudgeSeconds} 秒没动键鼠会催你一下");
+    Console.WriteLine($"节拍 {TickSeconds} 秒");
     Console.WriteLine("Ctrl+C = 放弃任务（会先给你看账单）\n");
 
     // Ctrl+C 对应 GUI 的"点关闭"：§9 要求退出前把账摆出来，不能默默丢掉。
@@ -95,18 +92,6 @@ async Task<int> StartAsync()
     while (true)
     {
         var now = DateTimeOffset.Now;
-
-        // 1/2：键鼠空闲。必须在查 AW 之前——它决定本轮还要不要往下走。
-        var idle = InputIdle.Elapsed().TotalSeconds;
-        if (idle >= IdleNudgeSeconds)
-        {
-            // AW 要安静满 180 秒才翻成 afk，且事件起点会回填到最后一次输入（§14.4a T5）。
-            // 所以必须赶在那条截止线【之前】把人叫醒——事后再叫是救不回来的。
-            Console.WriteLine($"{Renderer.Clock(now, "HH:mm")}  ⚠ {idle:F0} 秒没动键鼠了，动一下——" +
-                              $"再过 {Math.Max(0, AwAfkTimeoutSeconds - idle):F0} 秒这段时间就白费了。");
-            await Task.Delay(TickSeconds * 1000);
-            continue;
-        }
 
         // 3：查 AW、重放
         var win = await aw.FetchEventsAsync(winId, task.StartedAt, now);
@@ -193,19 +178,6 @@ async Task<int> ReplayPastAsync()
     return 0;
 }
 
-/// <summary>盯着键鼠空闲读数看，用来给 §8.3.6 的阈值找一个真实合适的值。</summary>
-int Idle()
-{
-    Console.WriteLine($"\n{IdleNudgeSeconds} 秒催你，{AwAfkTimeoutSeconds} 秒（AW 默认）之后这段时间就白费了。Ctrl+C 退出。\n");
-    while (true)
-    {
-        var s = InputIdle.Elapsed().TotalSeconds;
-        var mark = s >= AwAfkTimeoutSeconds ? "已白费" : s >= IdleNudgeSeconds ? "该催了" : "";
-        Console.Write($"\r空闲 {s,6:F1} 秒  {mark,-8}");
-        Thread.Sleep(500);
-    }
-}
-
 int Help()
 {
     Console.WriteLine("""
@@ -215,7 +187,6 @@ int Help()
           itami start  --minutes 5 --group 学习经济学     提交任务，跑到结束
           itami replay --since "2026-07-26 20:00" [--until ...] --minutes 25 --group 学习经济学
                                                          拿过去的真实历史干跑
-          itami idle                                     盯着键鼠空闲读数看
 
         任务只活在进程里，不落盘：退出 itami 就等于放弃当前任务（DESIGN.md §2）。
         规则文件默认找 ./rules.json，可用 --rules <路径> 指定。
