@@ -176,6 +176,8 @@ public class DialControl : Control
         using var _ = ctx.PushOpacity(RingOpacity);
         var cells = Cells;
         var p = Palette;
+        // 起算时刻在表盘上的角位置（单位分钟）。startedAt 已经截断到整分钟（§14.1），
+        // 所以 Second 恒为 0；留着这一项是为了万一将来起点不再对齐时不至于悄悄画错。
         var m0 = start.Minute + start.Second / 60.0;
 
         foreach (var cell in cells)
@@ -211,7 +213,7 @@ public class DialControl : Control
             }
         }
 
-        DrawPendingArc(ctx, c, R, m0 + cells.Count);
+        DrawPendingArc(ctx, c, R, m0 + cells.Count, cells.Count);
     }
 
     /// <summary>
@@ -225,17 +227,44 @@ public class DialControl : Control
     /// 理由是"偷懒时它往前滑，眼睛得追得住"；实际画出来那一小段线是多余的 ——
     /// 弧自己的末端已经把位置说清楚了。
     /// </summary>
-    private void DrawPendingArc(DrawingContext ctx, Point c, Func<double, double> R, double headMinute)
+    /// <param name="headDial">
+    /// 写入头在**表盘上**的位置，单位分钟（0~60 一圈）。= 起算时刻的分钟数 + 已走完的格数。
+    /// </param>
+    /// <param name="elapsedMinutes">
+    /// 任务**已经走了多少分钟**。圈号只能从这个数来。
+    ///
+    /// ⚠️ 2026-07-28 的 bug 就出在这里：原来写的是 `(int)(headDial / 60)`，拿表盘上的
+    /// 绝对分钟数当圈号。于是 23:59 起算的任务一走过 00:00，`60/60 = 1`，承诺弧就跳到
+    /// 第二圈去了，而色块（用的是 `cell.Index / 60`，口径正确）还在第一圈 —— 角度对、
+    /// 半径错，看着就是"弧线错位"。任何整点都会犯，零点只是碰巧也是整点。
+    /// </param>
+    private void DrawPendingArc(DrawingContext ctx, Point c, Func<double, double> R,
+                                double headDial, int elapsedMinutes)
     {
         if (RemainingMinutes <= 0.01) return;
-        var lane = Math.Min((int)(headMinute / 60), Lanes.Length - 1);
-        var (rIn, rOut) = Lanes[lane];
-        var d1 = (headMinute + RemainingMinutes) * 6;
 
-        // 灰色，不是蓝色：这段是"还欠着的时间"，它不该有任何情绪
-        using (ctx.PushOpacity(0.30))
-            ctx.DrawGeometry(new SolidColorBrush(Palette.Tick), null,
-                Annulus(c, R(rIn), R(rOut), headMinute * 6, d1));
+        // 承诺弧本身也可能跨过一圈的边界（50 分钟的任务加上补时很容易超过 60 分钟），
+        // 所以按圈切段分别画，跟色块的螺旋内缩对齐（§8.2.5）。
+        var from = (double)elapsedMinutes;
+        var to = from + RemainingMinutes;
+
+        while (from < to - 0.01)
+        {
+            var lap = Math.Min((int)(from / 60), Lanes.Length - 1);
+            // 最后一圈不再往里缩，剩下的全画在这一圈上
+            var segEnd = lap == Lanes.Length - 1 ? to : Math.Min(to, (lap + 1) * 60.0);
+            var (rIn, rOut) = Lanes[lap];
+
+            var d0 = (headDial + (from - elapsedMinutes)) * 6;
+            var d1 = (headDial + (segEnd - elapsedMinutes)) * 6;
+
+            // 灰色，不是蓝色：这段是"还欠着的时间"，它不该有任何情绪
+            using (ctx.PushOpacity(0.30))
+                ctx.DrawGeometry(new SolidColorBrush(Palette.Tick), null,
+                    Annulus(c, R(rIn), R(rOut), d0, d1));
+
+            from = segEnd;
+        }
     }
 
     private void DrawTicks(DrawingContext ctx, Point c, Func<double, double> R, double rFace)
