@@ -5,9 +5,14 @@
     TaskRecord / TaskEvaluator / TaskStore / Settings）不含任何 UI 代码、
     不含任何 Win32 调用。
 
-    这里的 net10.0（没有 -windows 后缀）就是让编译器来强制执行这条纪律：
-    一旦有人往这个项目里写 WinForms / Avalonia / P/Invoke，直接编不过。
-    绝对不要给这个项目加 UseWindowsForms、UseWPF 或任何 UI 包引用。
+    net10.0（没有 -windows 后缀）让编译器挡住 UI 那一半：WinForms / WPF /
+    Avalonia 这些桌面 SDK 在这个 target 上根本引不进来。绝对不要给这个项目
+    加 UseWindowsForms、UseWPF 或任何 UI 包引用。
+
+    ⚠️ 但要说准确：net10.0 【挡不住】 P/Invoke —— [DllImport("user32.dll")]
+    在这里是能正常编译的。所以"不碰 Win32"这半条是【纪律】，不是编译器强制。
+    需要平台特定调用（置顶不抢焦点、读键鼠空闲时间）时，写进 ItamiTimer.App
+    或 Cli，不要图省事塞进来。
   -->
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>

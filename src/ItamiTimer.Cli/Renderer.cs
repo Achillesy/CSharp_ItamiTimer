@@ -80,8 +80,15 @@ public static class Renderer
     {
         var sb = new StringBuilder();
         var elapsed = (s.FocusCompletedAt ?? s.Now) - task.StartedAt;
-        sb.AppendLine($"任务：{string.Join("、", task.Groups)}");
+        sb.AppendLine($"任务：{string.Join("、", task.Groups)}   {PhaseText(s.Phase)}");
         sb.AppendLine($"承诺专注 {task.FocusMinutes} 分钟，实际耗时 {elapsed.TotalMinutes:F1} 分钟");
+
+        // 最重要的一个数字：已经攒了多少。没有它，用户看不出还差多远。
+        var banked = s.FocusedSeconds / 60;
+        if (s.FocusCompletedAt is null)
+            sb.AppendLine($"**已专注 {banked:F1} / {task.FocusMinutes} 分钟，还差 {task.FocusMinutes - banked:F1} 分钟**");
+        else
+            sb.AppendLine($"专注已达成于 {s.FocusCompletedAt.Value:HH:mm:ss}");
         sb.AppendLine();
 
         if (s.Violations.Count > 0)
