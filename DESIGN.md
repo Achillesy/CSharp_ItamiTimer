@@ -1016,6 +1016,23 @@ now ≥ restEndsAt → status = Completed，归档 history.jsonl
 | **1** | **置顶但不抢焦点**，且能盖住浏览器/播放器的全屏（`ShowWindow(SW_SHOWNOACTIVATE)` + `SetWindowPos(HWND_TOPMOST, SWP_NOACTIVATE)`，从 Avalonia 调） | §8.3.3 的提醒、§8.3.6 的督促窗**全部失效**——这两个是这个产品干预用户的唯一手段 |
 | **2** | **任务栏按钮图标能按分钟动态重画**（Avalonia 运行时换 `Window.Icon`，看 Windows 任务栏是否真的跟着变） | §8.3.2 整节要重做；§0.5 问题 2 选任务栏按钮而不是托盘的前提也没了 |
 
+#### ✅ 两条都实测通过了（2026-07-27）
+
+用 Avalonia **12.1.0** 建了一次性 spike 实测，两条**全部成立**，§8.3 不需要重写：
+
+| 验的 | 结果 |
+|---|---|
+| 任务栏按钮图标动态重画 | ✅ 运行时给 `Window.Icon` 赋新的 `WindowIcon`，任务栏按钮**实时跟着变**。§8.3.2 成立 |
+| 置顶不抢焦点 · 浏览器全屏 | ✅ `ShowWindow(SW_SHOWNOACTIVATE)` + `SetWindowPos(HWND_TOPMOST, SWP_NOACTIVATE)` 从**最小化状态**弹出，盖住 F11 全屏视频，键盘输入仍落在浏览器 |
+| 置顶不抢焦点 · **MAME 全屏游戏** | ✅ **同样盖得住**。原先担心的"独占全屏盖不住"在实测中没有出现 |
+
+实测中发现并修掉的两个问题，都是产品本身要的，不是 spike 的问题：
+
+1. **双屏时必须每次摆回主屏正中。** 用户把窗口拖到副屏之后，后续每次弹出都出现在副屏——**提醒弹到你没在看的那块屏上等于没提醒**。所以位置不能沿用"上次用户放的地方"，每次弹出前重新定位。（实现坑：`Position` 是物理像素而 `Width`/`Height` 是 DIP，高 DPI 下不乘 `Scaling` 会偏向左上角。）
+2. **exe 不能带控制台窗口。** `<OutputType>WinExe</OutputType>` 已保证 PE subsystem = 2（Windows GUI，不分配控制台）；测试时看到的小黑窗来自 `dotnet run` 的宿主进程，不是应用本身。
+
+保留下来的产品代码：`Win32Topmost.cs`（模块 9）、`RingIcon.cs`（§8.3.2）。spike 窗口本身已删除。
+
 **先花半天把这两个做成能跑的最小 spike，再动表盘。** 表盘是几十行 XAML 加已经定死的几何数字（§8.2），画错了改一下就行；而上面两条要是做不到，§8.3 整章都要重写——那时候再发现，漂亮的表盘就白画了。
 
 **替换 App 项目时最容易手滑的一条**：`<AssemblyName>ItamiTimer</AssemblyName>` 必须保留。AW 上报的 `data.app` 就是 exe 名，§5.3 第 1 步的自身豁免靠它；改掉就会「提醒 → 用户看提醒 → 又违规 → 再提醒」死循环。换 csproj 正是最容易把这行弄丢的时刻。

@@ -1,25 +1,32 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!--
-    ⚠️ 这是 VS2026 生成的 WinForms 空脚手架，核心逻辑一行都没有。
-    DESIGN.md §0.2 已决定转 Avalonia —— 到时候这个项目整个换掉：
-    TargetFramework 去掉 -windows、UseWindowsForms 删掉、PainForm 重写成
-    XAML。留着它只是为了在原子层开发期间解决方案仍然能构建。
-    不要在这上面继续堆代码。
+    界面层（DESIGN.md §8 模块 8、9）。Avalonia 12。
 
-    AssemblyName 必须钉死成 ItamiTimer：AW 上报的 data.app 就是 exe 名，
-    而 DESIGN.md §5.3 第 1 步靠它硬编码自身豁免。改了这里，程序会把自己
-    判成 OffTask，陷入「提醒 → 用户看提醒 → 又违规 → 再提醒」死循环。
+    ⚠️ AssemblyName 必须钉死成 ItamiTimer：AW 上报的 data.app 就是 exe 名，
+    而 §5.3 第 1 步靠它硬编码自身豁免。改了这里，程序会把自己判成 OffTask，
+    陷入「提醒 → 用户看提醒 → 又违规 → 再提醒」死循环。
+    §8.5 专门提醒过：换 csproj 正是最容易把这行弄丢的时刻。
+
+    net10.0-windows：本层是唯一允许出现 Win32 调用的地方（置顶不抢焦点、
+    读键鼠空闲时间）。Core 保持 net10.0 且不含 P/Invoke。
   -->
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
-    <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>ItamiTimer</AssemblyName>
-    <RootNamespace>ItamiTimer</RootNamespace>
+    <RootNamespace>ItamiTimer.App</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
   </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="12.1.0" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.1.0" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.0" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\ItamiTimer.Core\ItamiTimer.Core.csproj" />
