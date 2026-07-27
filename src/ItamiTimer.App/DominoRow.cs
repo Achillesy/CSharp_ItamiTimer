@@ -220,12 +220,19 @@ public class DominoRow : Control
                     EndPoint = new RelativePoint(0, 1, RelativeUnit.Relative),
                     GradientStops =
                     {
-                        // **上深下浅**（用户 2026-07-27）。原来反着来，最深的一档正好
-                        // 落在带子的底边上，那里必然切出一条硬边 —— 试过用圆角去救，
-                        // 治标而已。翻过来之后底边本身就是全透明，边界自己消失了。
-                        new GradientStop(Color.FromArgb(0x34, 0, 0, 0), 0.00),
-                        new GradientStop(Color.FromArgb(0x1A, 0, 0, 0), 0.45),
-                        new GradientStop(Color.FromArgb(0x00, 0, 0, 0), 1.00),
+                        // **上浅下深**，但整体压软（用户 2026-07-27 最终定）。
+                        //
+                        // 关键不在方向而在**最深的那一档不能落在底边上** —— 落在底边就
+                        // 必然切出一条硬边。所以峰值放在 88% 处，最后一小段再淡回去，
+                        // 底边本身就不是最黑的地方，边界自己糊掉。
+                        // 峰值也从 0x30 降到 0x1C：影子只要"有"，不要"重"。
+                        //
+                        // 中间试过整个上下颠倒（上深下浅），边界确实没了，但读起来不对
+                        // ——影子该压在脚下，不该浮在骨牌腰上。
+                        new GradientStop(Color.FromArgb(0x00, 0, 0, 0), 0.00),
+                        new GradientStop(Color.FromArgb(0x0C, 0, 0, 0), 0.50),
+                        new GradientStop(Color.FromArgb(0x1C, 0, 0, 0), 0.88),
+                        new GradientStop(Color.FromArgb(0x0E, 0, 0, 0), 1.00),
                     }
                 }));
         }
