@@ -301,7 +301,14 @@ public partial class MainWindow : Window
     {
         _session?.Dispose();
         _session = null;
-        _poppedAt = null;
+
+        // ⚠️ 这里【不能】清 _poppedAt。置顶是窗口的状态，不是会话的状态：
+        // 「休息结束」走的是 Pop(topmost: true) → EndSession()，先顶上去、紧接着
+        // 把"我顶着呢"这个记号抹掉，看门狗就再也不会去撤 —— 窗口永远压在所有应用
+        // 上面。2026-07-28 实测抓到（动了键鼠仍然是"置顶"）。
+        //
+        // 真正需要收回置顶的两条路径（放弃、关窗口）都会自己先 ClearTopmost，
+        // 那里清记号是对的。
 
         var dial = F<DialControl>("Dial");
         dial.Cells = [];
