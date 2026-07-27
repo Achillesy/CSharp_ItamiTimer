@@ -22,6 +22,19 @@ public static class Renderer
     private const string Dim = "[2m";
 
     /// <summary>
+    /// **所有时刻都必须经过这里再显示。**
+    ///
+    /// 2026-07-27 踩过：账单把「专注已达成于」打成了 06:40:45，实际是 14:40:45。
+    /// 原因是同一份账单里混了两个时区 —— StartedAt 来自 DateTimeOffset.Now（本地
+    /// 偏移），而 FocusCompletedAt 是从 AW 事件推导来的；AW 返回 UTC，
+    /// DateTimeOffset.Parse 保留 +00:00，直接格式化出来就是 UTC 时钟。
+    ///
+    /// 指望每个显示点都记得写 .ToLocalTime() 是靠不住的（就是这么漏的），
+    /// 所以收口到一个函数。新增任何显示时刻的地方都走它。
+    /// </summary>
+    public static string Clock(DateTimeOffset t, string fmt = "HH:mm:ss") => t.ToLocalTime().ToString(fmt);
+
+    /// <summary>
     /// 经琥珀色的三段过渡（§0.4 选项 B）。RGB 直插在 50% 处会出现发脏的橄榄绿，
     /// 看着像画错了；经琥珀走一趟就干净，而且自带明度变化 —— 红绿色盲也能分辨。
     /// </summary>
@@ -88,7 +101,7 @@ public static class Renderer
         if (s.FocusCompletedAt is null)
             sb.AppendLine($"**已专注 {banked:F1} / {task.FocusMinutes} 分钟，还差 {task.FocusMinutes - banked:F1} 分钟**");
         else
-            sb.AppendLine($"专注已达成于 {s.FocusCompletedAt.Value:HH:mm:ss}");
+            sb.AppendLine($"专注已达成于 {Clock(s.FocusCompletedAt.Value)}");
         sb.AppendLine();
 
         if (s.Violations.Count > 0)
@@ -103,7 +116,7 @@ public static class Renderer
         if (s.AbsentSeconds > 0) sb.AppendLine($"  离开              {s.AbsentSeconds / 60:F1} 分钟");
         if (s.GapSeconds > 0) sb.AppendLine($"  AW 无数据          {s.GapSeconds / 60:F1} 分钟（不计入）");
         foreach (var ch in task.GroupChanges)
-            sb.AppendLine($"  中途添加小目标     {ch.At.ToLocalTime():HH:mm} → {string.Join("、", ch.Groups)}");
+            sb.AppendLine($"  中途添加小目标     {Clock(ch.At, "HH:mm")} → {string.Join("、", ch.Groups)}");
         return sb.ToString();
     }
 }

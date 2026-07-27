@@ -74,7 +74,7 @@ async Task<int> StartAsync()
     Console.WriteLine($"\nAW: {host}   任务已提交（只在内存里，退出即放弃）");
     Console.WriteLine($"小目标：{string.Join("、", groups)}");
     Console.WriteLine($"专注 {minutes} 分钟，之后休息 {task.RestMinutes} 分钟");
-    Console.WriteLine($"开始时刻：{task.StartedAt:HH:mm:ss}（进位到整分钟）\n");
+    Console.WriteLine($"开始时刻：{Renderer.Clock(task.StartedAt)}（进位到整分钟）\n");
     Console.WriteLine(Renderer.Legend());
     Console.WriteLine($"节拍 {TickSeconds} 秒；超过 {IdleNudgeSeconds} 秒没动键鼠会催你一下");
     Console.WriteLine("Ctrl+C = 放弃任务（会先给你看账单）\n");
@@ -101,7 +101,7 @@ async Task<int> StartAsync()
         {
             // AW 要安静满 180 秒才翻成 afk，且事件起点会回填到最后一次输入（§14.4a T5）。
             // 所以必须赶在那条截止线【之前】把人叫醒——事后再叫是救不回来的。
-            Console.WriteLine($"\n⚠ {idle:F0} 秒没动键鼠了，动一下——" +
+            Console.WriteLine($"{Renderer.Clock(now, "HH:mm")}  ⚠ {idle:F0} 秒没动键鼠了，动一下——" +
                               $"再过 {Math.Max(0, AwAfkTimeoutSeconds - idle):F0} 秒这段时间就白费了。");
             await Task.Delay(TickSeconds * 1000);
             continue;
@@ -114,14 +114,16 @@ async Task<int> StartAsync()
         last = state;
         var cells = Replay.ToMinuteCells(task, state);
 
-        Console.Write($"\r{new string(' ', Math.Max(1, Console.WindowWidth - 1))}\r");
-        Console.Write($"{Renderer.Cells(cells)}  {Renderer.PhaseText(state.Phase)}  " +
-                      $"{state.FocusedSeconds / 60:F1}/{task.FocusMinutes} 分钟");
+        // 节拍是 60 秒，所以每轮单独打一行，不用 \r 原地覆盖——覆盖是为 3 秒节拍设计
+        // 的，跟穿插的警告混在一起会糊成一团。一分钟一行正好是一份可读的日志。
+        Console.WriteLine($"{Renderer.Clock(now, "HH:mm")}  {Renderer.Cells(cells)}  " +
+                          $"{Renderer.PhaseText(state.Phase)}  " +
+                          $"{state.FocusedSeconds / 60:F1}/{task.FocusMinutes} 分钟");
 
         // 用【刚走完的那一格】当触发条件，不是【此刻在干什么】。否则 10:00:10 切走、
         // 10:00:50 切回这种短切换会整个从提醒里溜掉——而它在色块上明明是红的。
         if (cells.Count > 0 && cells[^1].OffTaskSeconds >= NudgeFloorSeconds)
-            Console.WriteLine($"\n⚠ 刚过去那一分钟有 {cells[^1].OffTaskSeconds:F0} 秒跑偏了。");
+            Console.WriteLine($"       ⚠ 刚过去那一分钟有 {cells[^1].OffTaskSeconds:F0} 秒跑偏了。");
 
         if (state.FocusCompletedAt is { } done) return Rest(task, state, done);
 
@@ -181,7 +183,7 @@ async Task<int> ReplayPastAsync()
     };
     var state = Replay.Run(task, rules, win, afk, until);
 
-    Console.WriteLine($"\n干跑：{task.StartedAt:MM-dd HH:mm} → {until:HH:mm}   小目标：{string.Join("、", groups)}");
+    Console.WriteLine($"\n干跑：{Renderer.Clock(task.StartedAt, "MM-dd HH:mm")} → {Renderer.Clock(until, "HH:mm")}   小目标：{string.Join("、", groups)}");
     Console.WriteLine($"窗口事件 {win.Count} 条，afk 事件 {afk.Count} 条\n");
     Console.WriteLine(Renderer.Legend());
     Console.WriteLine(Renderer.Cells(Replay.ToMinuteCells(task, state)));
