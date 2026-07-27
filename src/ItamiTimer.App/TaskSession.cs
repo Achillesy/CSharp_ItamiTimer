@@ -33,7 +33,7 @@ public sealed class TaskSession : IDisposable
         Deviated,
         /// <summary>超过阈值没动键鼠，赶在 AW 判 afk 之前叫醒（§8.3.6）。置顶。</summary>
         Idle,
-        /// <summary>专注达成，给账单、进入休息（§8.4.3）。**不置顶**。</summary>
+        /// <summary>专注达成，进入休息（§8.4.3）。**不置顶**，也不给账单。</summary>
         FocusDone,
         /// <summary>休息结束，任务终结（§8.4.3）。**不置顶**，纯提示。</summary>
         RestDone,

@@ -25,7 +25,7 @@ namespace ItamiTimer.App;
 /// 进行中·守规矩       收进任务栏，只剩色环图标
 /// 进行中·偏离         置顶弹出，不抢焦点；回到正轨后自动缩回
 /// 超过 60 秒没动键鼠  同上，赶在 AW 判 afk 之前叫醒
-/// 专注达成            弹出【不置顶】，给账单，进入休息
+/// 专注达成            弹出【不置顶】，进入休息。不给账单——盘面自己会说话
 /// 休息中              色环按分钟淡出，纯本地计时
 /// 休息结束            弹出【不置顶】，纯提示，停在这里等用户
 /// </code>
@@ -189,7 +189,6 @@ public partial class MainWindow : Window
         dial.RingOpacity = 1;
         dial.InvalidateVisual();
 
-        F<TextBlock>("BillText").IsVisible = false;
         RefreshStartButton();
         // §8.3 原本要求"任务一开始就收进任务栏"，用户 2026-07-27 改成**留在原地**。
         // 连带：回到正轨时也只撤销置顶、不再缩起来（见 OnRetract）。
@@ -249,10 +248,10 @@ public partial class MainWindow : Window
                 break;
 
             case TaskSession.Interrupt.FocusDone:
-                // 账单在【达成】这一刻给，不在休息结束时给（§8.4.3）
+                // 达成这一刻【什么都不给】（用户 2026-07-27）：不弹账单、不报数字。
+                // 表盘上那圈弧就是全部答案，自己看，自己猜。
                 _popped = false;
                 Win32Topmost.ClearTopmost(this);
-                ShowBill(Bill.Render(s.Task, s.State!));
                 Pop();
                 RefreshStartButton();
                 break;
@@ -288,13 +287,6 @@ public partial class MainWindow : Window
 
         Icon = TomatoIcon.Make();
         RefreshStartButton();
-    }
-
-    private void ShowBill(string text)
-    {
-        var b = F<TextBlock>("BillText");
-        b.Text = text;
-        b.IsVisible = true;
     }
 
     // ---------------------------------------------------------------- 退出 = 放弃（§9）
@@ -334,7 +326,7 @@ public partial class MainWindow : Window
     /// 界面里点「放弃」→ 跟关窗口用**同一个确认框**，只是措辞不同，而且**只放弃这一轮、
     /// 不退出程序**（用户 2026-07-27）。
     ///
-    /// 不再把账单摆出来 —— 用户明确说这里不需要那些总结。账单只在专注达成那一刻给（§8.4.3）。
+    /// 不摆账单 —— 界面**任何时候**都不给账单（用户 2026-07-27），达成时也不给。
     /// </summary>
     private async Task AskAbandonAsync()
     {

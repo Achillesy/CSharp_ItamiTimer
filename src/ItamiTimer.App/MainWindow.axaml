@@ -67,10 +67,6 @@
            任务进行中仍然可点：补勾一个小目标是【追溯生效】的（§5.4）。 -->
       <ItemsControl x:Name="Goals"/>
 
-      <!-- §7.1 的账单。平时藏着，专注达成 / 放弃确认时才出来 -->
-      <TextBlock x:Name="BillText" IsVisible="False" FontFamily="Consolas" FontSize="13"
-                 LineHeight="20" TextWrapping="Wrap" Margin="2,4,2,0"/>
-
     </StackPanel>
   </StackPanel>
 </Window>
