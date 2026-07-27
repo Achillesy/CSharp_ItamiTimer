@@ -21,6 +21,15 @@ internal static class Program
 
         try
         {
+            // 调试出口（不是产品功能）：离屏渲染几张表盘样张然后退出，不开窗口。
+            // 表盘在 App 层，Core 的测试碰不到它，有些几何错误只有看图才发现得了。
+            if (args is ["--dial-specimens", var outDir, ..])
+            {
+                BuildAvaloniaApp().SetupWithoutStarting();
+                DialSpecimens.Render(outDir);
+                return;
+            }
+
             BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
         }
         catch (Exception ex)
