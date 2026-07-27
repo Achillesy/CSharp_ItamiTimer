@@ -77,7 +77,9 @@ src/ItamiTimer.App/    net10.0-windows  ItamiTimer.exe  界面（WinForms 脚手
 
 测试项目 `tests/ItamiTimer.Core.Tests`（**xUnit**）已就位。§7 的重放算法是纯函数，喂合成事件就能穷举边界，不用真等 25 分钟。
 
-**原子清单和时间模型见 DESIGN.md §14**，那是命令行原子层的开工依据。
+**原子清单和时间模型见 DESIGN.md §14**。命令行原子层已跑通并用真实 AW 数据验证过（`itami start` / `replay` / `idle`），Core 的模块 1~4 可以直接给界面层复用。
+
+**下一步是 Avalonia 界面。开工前先读 DESIGN.md §8.5**：要按风险排序——先 spike「置顶不抢焦点」和「任务栏图标动态重画」这两件可能推翻设计的事，再画表盘。表盘几何已经在 §8.2 定死，画错了改一下就行；那两条做不到的话 §8.3 整章要重写。
 
 ## 构建 / 运行
 
