@@ -41,7 +41,6 @@ public partial class MainWindow : Window
 
     private TaskSession? _session;
     private bool _popped;          // 当前是不是因为提醒而弹出来的
-    private bool _confirmingQuit;
 
     public MainWindow()
     {
@@ -161,16 +160,18 @@ public partial class MainWindow : Window
         if (_session is { Finished: false })
         {
             if (_session.InRest) EndSession();
-            else { ShowQuitConfirm(); return; }
+            else { _ = AskAbandonAsync(); return; }
         }
 
         var picked = Picked();
         if (_rules is null || picked.Count == 0) return;
 
-        // §14.1：进位到下一个整分钟。绝不向后取整——那会把点「开始」之前的时间也算进来。
+        // §14.1（2026-07-27 改）：**截断**到当前这个整分钟，不是进位。
+        // 23:13:10 点的开始 → 23:13:00 起算。代价是点击前最多 59 秒也算进来，
+        // 换来的是点完立刻开始、不用干等。
         var task = new TaskRecord
         {
-            StartedAt = TimeGrid.CeilToMinute(DateTimeOffset.Now),
+            StartedAt = TimeGrid.FloorToMinute(DateTimeOffset.Now),
             FocusMinutes = (int)F<Slider>("Minutes").Value,
             Groups = picked,
         };
@@ -228,7 +229,7 @@ public partial class MainWindow : Window
     /// </summary>
     private void OnRetract()
     {
-        if (!_popped || _confirmingQuit) return;
+        if (!_popped) return;
         if (Win32Topmost.IsForeground(this)) return;
         _popped = false;
         Win32Topmost.ClearTopmost(this);
@@ -277,7 +278,6 @@ public partial class MainWindow : Window
         _session?.Dispose();
         _session = null;
         _popped = false;
-        _confirmingQuit = false;
 
         var dial = F<DialControl>("Dial");
         dial.Cells = [];
@@ -287,7 +287,6 @@ public partial class MainWindow : Window
         dial.InvalidateVisual();
 
         Icon = TomatoIcon.Make();
-        F<StackPanel>("ConfirmRow").IsVisible = false;
         RefreshStartButton();
     }
 
@@ -331,33 +330,21 @@ public partial class MainWindow : Window
         }
     }
 
-    private void ShowQuitConfirm()
+    /// <summary>
+    /// 界面里点「放弃」→ 跟关窗口用**同一个确认框**，只是措辞不同，而且**只放弃这一轮、
+    /// 不退出程序**（用户 2026-07-27）。
+    ///
+    /// 不再把账单摆出来 —— 用户明确说这里不需要那些总结。账单只在专注达成那一刻给（§8.4.3）。
+    /// </summary>
+    private async Task AskAbandonAsync()
     {
+        // 先撤销置顶：偏离提醒会把主窗口设成 HWND_TOPMOST，普通的确认框会被它整个盖住
         _popped = false;
         Win32Topmost.ClearTopmost(this);
-        if (_session?.State is { } st) ShowBill(Bill.Render(_session.Task, st));
-        F<StackPanel>("ConfirmRow").IsVisible = true;
-        F<Button>("StartBtn").IsEnabled = false;
-        _confirmingQuit = true;
-        Pop();
-    }
 
-    /// <summary>界面里点「放弃」→ 只放弃这一轮，**不退出程序**（用户 2026-07-27）。</summary>
-    private void OnConfirmQuit(object? sender, RoutedEventArgs e)
-    {
+        if (!await Confirm.AskAsync(this, "任务尚未完成，你确定放弃？")) return;
         _session?.Abandon();
         EndSession();
-        F<TextBlock>("BillText").IsVisible = false;
-        Win32Topmost.ClearTopmost(this);
-    }
-
-    private void OnCancelQuit(object? sender, RoutedEventArgs e)
-    {
-        _confirmingQuit = false;
-        F<StackPanel>("ConfirmRow").IsVisible = false;
-        F<TextBlock>("BillText").IsVisible = false;
-        RefreshStartButton();
-        Win32Topmost.ClearTopmost(this);
     }
 
     /// <summary>

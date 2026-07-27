@@ -58,10 +58,21 @@ public sealed class TaskSession : IDisposable
     /// <summary>专注阶段恒为 1；休息阶段按分钟线性淡到 0（§8.4.4）。</summary>
     public double RingOpacity { get; private set; } = 1;
 
-    /// <summary>还欠多少分钟专注，用来画承诺弧和截止线（§8.2.4）。</summary>
-    public double RemainingMinutes =>
-        State is null ? Task.FocusMinutes
-                      : Math.Max(0, Task.FocusMinutes - State.FocusedSeconds / 60.0);
+    /// <summary>
+    /// 灰弧要画多长：从**写入头**（已走完的整分钟数）一直到**预计结束时刻**
+    /// （<see cref="Replay.ProjectedEnd"/>）。
+    ///
+    /// 所以偷懒一分钟，灰弧就往前长一分钟 —— 用户看着截止线离自己越来越远。
+    /// </summary>
+    public double RemainingMinutes
+    {
+        get
+        {
+            if (State is not { } st) return Task.FocusMinutes;
+            var head = Task.StartedAt.AddMinutes(Cells.Count);
+            return Math.Max(0, (Replay.ProjectedEnd(Task, st) - head).TotalMinutes);
+        }
+    }
 
     public bool InRest => State?.FocusCompletedAt is not null;
     public bool Finished { get; private set; }

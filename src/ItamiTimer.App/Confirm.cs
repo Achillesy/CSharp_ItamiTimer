@@ -1,3 +1,5 @@
+using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
@@ -67,7 +69,29 @@ public static class Confirm
         yes.Click += (_, _) => { result = true; dlg.Close(); };
         no.Click += (_, _) => { result = false; dlg.Close(); };
 
+        // 确认框上的最小化按钮是没有意义的（它是模态的，缩起来只会让人找不到），
+        // 所以把它禁掉。Avalonia 没有对应属性，清掉 WS_MINIMIZEBOX 即可 ——
+        // 系统会把按钮画成灰的，而不是整个抹掉，正是"disable"。
+        dlg.Opened += (_, _) => DisableMinimize(dlg);
+
         await dlg.ShowDialog(owner);
         return result;
+    }
+
+    private const int GWL_STYLE = -16;
+    private const int WS_MINIMIZEBOX = 0x00020000;
+
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongW")]
+    private static extern int GetWindowLong(IntPtr hWnd, int index);
+
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongW")]
+    private static extern int SetWindowLong(IntPtr hWnd, int index, int newLong);
+
+    [SupportedOSPlatform("windows")]
+    private static void DisableMinimize(Window w)
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        if (w.TryGetPlatformHandle()?.Handle is not { } h || h == IntPtr.Zero) return;
+        SetWindowLong(h, GWL_STYLE, GetWindowLong(h, GWL_STYLE) & ~WS_MINIMIZEBOX);
     }
 }

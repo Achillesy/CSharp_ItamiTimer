@@ -6,7 +6,13 @@ namespace ItamiTimer.Core;
 /// </summary>
 public enum TaskPhase
 {
-    /// <summary>now &lt; StartedAt。点击「开始」到整分钟之间那不到 60 秒的缓冲（§14.1）。</summary>
+    /// <summary>
+    /// now &lt; StartedAt。
+    ///
+    /// ⚠️ 2026-07-27 起**实际上不可达**：起点改成截断到当前整分钟（§14.1），
+    /// 于是 now 永远 ≥ StartedAt。保留这个枚举值是为了让重放对合成事件仍然是全函数
+    /// （测试可以喂一个未来的 StartedAt），不是给真实任务用的。
+    /// </summary>
     NotStarted,
 
     /// <summary>专注阶段，此刻在做正事。</summary>

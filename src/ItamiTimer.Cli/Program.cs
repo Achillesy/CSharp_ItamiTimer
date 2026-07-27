@@ -64,10 +64,10 @@ async Task<int> StartAsync()
     var winId = await aw.FindBucketIdAsync(AwClient.WindowBucketType);
     var afkId = await aw.FindBucketIdAsync(AwClient.AfkBucketType);   // 缺 afk 同样拒绝，不降级（§6.1.1）
 
-    // §14.1：进位到下一个整分钟。绝不向后取整——那会把点击「开始」之前的时间也算进来。
+    // §14.1（2026-07-27 改）：**截断**到当前这个整分钟，不是进位。
     var task = new TaskRecord
     {
-        StartedAt = TimeGrid.CeilToMinute(DateTimeOffset.Now),
+        StartedAt = TimeGrid.FloorToMinute(DateTimeOffset.Now),
         FocusMinutes = minutes,
         Groups = groups,
     };

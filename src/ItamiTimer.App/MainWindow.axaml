@@ -71,11 +71,6 @@
       <TextBlock x:Name="BillText" IsVisible="False" FontFamily="Consolas" FontSize="13"
                  LineHeight="20" TextWrapping="Wrap" Margin="2,4,2,0"/>
 
-      <!-- 界面里点「放弃」：先把账摆出来再问一次。放弃的是这一轮，不是程序 -->
-      <StackPanel x:Name="ConfirmRow" IsVisible="False" Orientation="Horizontal" Spacing="10">
-        <Button x:Name="ConfirmQuit" Classes="start danger" Width="150" Click="OnConfirmQuit" Content="放弃"/>
-        <Button x:Name="CancelQuit" Classes="start" Width="150" Click="OnCancelQuit" Content="继续"/>
-      </StackPanel>
     </StackPanel>
   </StackPanel>
 </Window>

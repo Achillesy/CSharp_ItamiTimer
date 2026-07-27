@@ -286,6 +286,41 @@ public static class Replay
     }
 
     /// <summary>
+    /// **预计结束时刻**（用户 2026-07-27 定的模型）。
+    ///
+    /// <code>
+    /// 应该学习时间 = 当前时刻 − 开始时刻
+    /// 需要补的时间 = 应该学习时间 − 实际学到的时间
+    /// 预计结束    = 开始时刻 + 承诺时长 + ⌈需要补的时间⌉      ← 向上取整到整分钟
+    /// </code>
+    ///
+    /// 举例：23:13:00 起算、承诺 10 分钟。到 23:14:00 这个计时点，应该学 1 分钟而实际
+    /// 只学到 0.5 分钟，缺 0.5 分钟 → 向上取整成 1 分钟 → 预计结束
+    /// 23:13:00 + 10:00 + 1:00 = 23:24:00。灰弧就延伸到那里。
+    ///
+    /// 每分钟重算一次，所以偷懒时**用户是眼看着截止线一格一格往前滑的** —— 这正是
+    /// §0.4 说的那个痛感载体。
+    ///
+    /// 向上取整是刻意的：整条时间线都落在整分钟上（§14.1），预计结束也该如此。代价是
+    /// 不满一分钟的零头会被算成一整分钟的欠账；<see cref="TaskState.FocusedSeconds"/>
+    /// 里仍然是精确值，只有这个**投影**取整。
+    ///
+    /// ⚠️ **已知的一处紧张**：`Gap`（AW 没数据）也算进"没学到"，于是会把截止线推后。
+    /// 而 §6.3 写的是 Gap「既不计入也不惩罚」——推后截止线实质上就是一种惩罚。
+    /// 目前按用户给的公式字面实现（应该 − 实际），没有把 Gap 摘出去。
+    /// </summary>
+    public static DateTimeOffset ProjectedEnd(TaskRecord task, TaskState state)
+    {
+        // 已经达成了就不再推：结束时刻就是达成时刻
+        if (state.FocusCompletedAt is { } done) return done;
+
+        var shouldSeconds = (state.Now - task.StartedAt).TotalSeconds;
+        var shortfall = Math.Max(0, shouldSeconds - state.FocusedSeconds);
+        var makeUpMinutes = Math.Ceiling(shortfall / 60.0);
+        return task.StartedAt.AddMinutes(task.FocusMinutes + makeUpMinutes);
+    }
+
+    /// <summary>
     /// 把重放结果投影成每分钟一格（§8.2.3）。
     /// **是投影，不是逐分钟累加的数组**——判据：关掉界面再打开，每格颜色都要能原样重建（§0.4.2）。
     ///
