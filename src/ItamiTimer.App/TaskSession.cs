@@ -228,7 +228,7 @@ public sealed class TaskSession : IDisposable
             if (State.FocusCompletedAt is not null)
             {
                 RingOpacity = 1;
-                Log.Info($"专注达成于 {State.FocusCompletedAt:HH:mm:ss}，" +
+                Log.Info($"专注达成于 {State.FocusCompletedAt.Value.ToLocalTime():HH:mm:ss}，" +
                          $"实际耗时 {(State.FocusCompletedAt.Value - Task.StartedAt).TotalMinutes:F1} 分钟");
                 Interrupted?.Invoke(Interrupt.FocusDone);
                 return;

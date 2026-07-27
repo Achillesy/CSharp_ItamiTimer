@@ -11,6 +11,11 @@ namespace ItamiTimer.Core.Tests;
 ///
 /// 这里守的是根因：**从 AW 事件推导出来的时刻，会带着事件自己的偏移量**。
 /// 所以任何显示它的地方都必须先转本地（渲染层已收口到 Renderer.Clock）。
+///
+/// **2026-07-28 又犯了一次**：界面层的日志打出「专注达成于 16:37:35」，实际是本地
+/// 00:37:35。上一次只把 CLI 的渲染收了口，App 的日志行漏在外面 —— 说明"每个显示的
+/// 地方各自记得转"这个约定靠不住。现在改成**在边界上归一**：`AwClient` 解析
+/// 时间戳时直接 `ToLocalTime()`，两种偏移量根本不流进核心。
 /// </summary>
 public class ClockDisplayTests
 {
@@ -48,5 +53,17 @@ public class ClockDisplayTests
 
         Assert.Equal(utc, local);                       // 同一个瞬间
         Assert.NotEqual(utc.ToString("HH:mm:ss"), local.ToString("HH:mm:ss")); // 但显示出来不一样
+    }
+
+    [Fact]
+    public void 边界上归一_AwClient解析出来的时刻是本地偏移()
+    {
+        // 这是现在真正的防线：AwClient 在解析那一步就 ToLocalTime()，
+        // 所以从 AW 来的时刻不会再带着 +00:00 流进核心（见 AwClient.FetchEventsAsync）。
+        // 这里直接钉住那一行的语义，免得将来有人"顺手"把 ToLocalTime 去掉。
+        var utc = DateTimeOffset.Parse("2026-07-27T16:37:35.000Z");
+        Assert.Equal(TimeSpan.Zero, utc.Offset);                       // 解析出来是 UTC
+        Assert.Equal(TimeZoneInfo.Local.GetUtcOffset(utc), utc.ToLocalTime().Offset);
+        Assert.Equal(utc, utc.ToLocalTime());                          // 绝对时刻不变
     }
 }

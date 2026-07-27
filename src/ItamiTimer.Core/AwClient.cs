@@ -114,7 +114,16 @@ public sealed class AwClient : IDisposable
         {
             var data = e.GetProperty("data");
             events.Add(new AwEvent(
-                Start: DateTimeOffset.Parse(e.GetProperty("timestamp").GetString()!),
+                // ⚠️ 必须 ToLocalTime()。AW 的 timestamp 是 UTC（末尾 Z），Parse 出来
+                // 偏移量是 +00:00；这个偏移量会一路传到 FocusCompletedAt，于是日志里
+                // 打出「专注达成于 16:37:35」而实际是本地 00:37:35 —— 2026-07-28 实跑
+                // 抓到，跟 ClockDisplayTests 记的那次（06:40:45 / 14:40:45）同一个根因：
+                // 同一份输出里混了两个时区。StartedAt 来自 DateTimeOffset.Now（本地），
+                // 所以在**边界上**就把 AW 的时刻归一到本地，别让两种偏移量流进核心。
+                //
+                // 只影响【显示】：DateTimeOffset 的比较和减法本来就是按瞬时点算的，
+                // 所有时长核算在修之前就是对的。
+                Start: DateTimeOffset.Parse(e.GetProperty("timestamp").GetString()!).ToLocalTime(),
                 DurationSeconds: e.GetProperty("duration").GetDouble(),
                 App: data.TryGetProperty("app", out var a) ? a.GetString() : null,
                 Title: data.TryGetProperty("title", out var t) ? t.GetString() : null,

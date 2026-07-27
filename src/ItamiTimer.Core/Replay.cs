@@ -53,6 +53,14 @@ public static class Replay
     public const double AfkTimeoutSeconds = 180;
 
     /// <summary>
+    /// 判断"此刻在干什么"时，末尾允许有多少秒的 Gap 被当成 AW 的正常滞后而跳过。
+    ///
+    /// **只影响 <see cref="TaskPhase"/>（一个显示用的标签），不影响任何时长核算。**
+    /// GapSeconds 该记多少还记多少，色块该画虚线还画虚线。
+    /// </summary>
+    public const double AwLagToleranceSeconds = 30;
+
+    /// <summary>
     /// 相邻事件之间的微小空隙最多桥接多少秒。见 <see cref="Bridge"/>。
     /// 取 5 秒：足以吸收心跳节奏造成的亚秒空隙，又远小于任何值得报告的真实窟窿。
     /// </summary>
@@ -276,13 +284,36 @@ public static class Replay
             return now >= restEndsAt!.Value ? TaskPhase.Completed : TaskPhase.Resting;
         if (intervals.Count == 0) return TaskPhase.NoData;
 
-        return intervals[^1].Kind switch
+        // 从末尾往回找**第一段有数据的**区间，而不是直接取 intervals[^1]。
+        //
+        // 原因（2026-07-28 实测发现）：AW 的窗口监听总是落后 now 几秒（§14.4a T3），
+        // 所以时间线末尾**恒有**一小截 Gap。直接取最后一段的话 Phase 永远是 NoData ——
+        // 实跑 6 个计时点，6 行全是 NoData，一次例外都没有。后果是 CLI 永远打
+        // 「● AW 无数据」而不是「● 专注中」，§0.5 那条"断线换任务栏图标"接上去
+        // 也会永远显示断线，那个被动信号就废了。
+        //
+        // 容差 30 秒：正常心跳滞后实测 6~12 秒，远在其下；而 aw-server 真宕掉时
+        // 空洞会一路长过 30 秒，NoData 照样报得出来。
+        var trailingGap = 0.0;
+        for (var i = intervals.Count - 1; i >= 0; i--)
         {
-            IntervalKind.OnTask or IntervalKind.Neutral => TaskPhase.Focusing,
-            IntervalKind.OffTask => TaskPhase.Slacking,
-            IntervalKind.Absent => TaskPhase.Away,
-            _ => TaskPhase.NoData,
-        };
+            if (intervals[i].Kind == IntervalKind.Gap)
+            {
+                trailingGap += (intervals[i].End - intervals[i].Start).TotalSeconds;
+                if (trailingGap >= AwLagToleranceSeconds) return TaskPhase.NoData;
+                continue;
+            }
+
+            return intervals[i].Kind switch
+            {
+                IntervalKind.OnTask or IntervalKind.Neutral => TaskPhase.Focusing,
+                IntervalKind.OffTask => TaskPhase.Slacking,
+                IntervalKind.Absent => TaskPhase.Away,
+                _ => TaskPhase.NoData,
+            };
+        }
+
+        return TaskPhase.NoData;   // 整段都是 Gap
     }
 
     /// <summary>
