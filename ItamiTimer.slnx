@@ -4,4 +4,7 @@
     <Project Path="src/ItamiTimer.Cli/ItamiTimer.Cli.csproj" />
     <Project Path="src/ItamiTimer.App/ItamiTimer.App.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/ItamiTimer.Core.Tests/ItamiTimer.Core.Tests.csproj" />
+  </Folder>
 </Solution>

@@ -75,7 +75,9 @@ src/ItamiTimer.App/    net10.0-windows  ItamiTimer.exe  界面（WinForms 脚手
 
 转栈后表盘用手写 XAML 绘制（Shape/Transform/Path），**WPF 的纯 XAML 表盘项目是最可直接复用的参考**，两边几何模型一致。
 
-测试项目还没建，框架未选。§7 的重放算法是纯函数，喂合成事件就能穷举边界。
+测试项目 `tests/ItamiTimer.Core.Tests`（**xUnit**）已就位。§7 的重放算法是纯函数，喂合成事件就能穷举边界，不用真等 25 分钟。
+
+**原子清单和时间模型见 DESIGN.md §14**，那是命令行原子层的开工依据。
 
 ## 构建 / 运行
 
