@@ -70,6 +70,21 @@ public sealed class TaskSession : IDisposable
     public event Action? Updated;
     public event Action<Interrupt>? Interrupted;
 
+    /// <summary>
+    /// 可以缩回去了。
+    ///
+    /// **必须独立于 <see cref="Updated"/>**：因为键鼠督促那一支是在【查 AW 之前】就
+    /// return 的，所以窗口一旦因为"没动键鼠"弹出来，Updated 就再也不响，缩回的判断
+    /// 根本没机会执行 —— 这正是 2026-07-27 实机撞到的「动了鼠标窗口也不消失」。
+    ///
+    /// 现在两条路各走各的：
+    /// <list type="bullet">
+    /// <item>因空闲弹出的 → **一动键鼠就缩**，秒级、纯本地、不用等 AW</item>
+    /// <item>因偏离弹出的 → 下一个 AW 节拍确认那一格干净了再缩（§0.5 问题 3）</item>
+    /// </list>
+    /// </summary>
+    public event Action? Retract;
+
     public TaskSession(TaskRecord task, GroupRules rules)
     {
         Task = task;
@@ -96,6 +111,7 @@ public sealed class TaskSession : IDisposable
     private DateTimeOffset _lastAwAt = DateTimeOffset.MinValue;
     private int _lastCellCount = -1;
     private DateTimeOffset _lastIdleNudge = DateTimeOffset.MinValue;
+    private bool _nudgedIdle;
 
     private async void OnTick(object? sender, EventArgs e)
     {
@@ -128,10 +144,20 @@ public sealed class TaskSession : IDisposable
             if ((now - _lastIdleNudge).TotalSeconds >= TickSeconds)
             {
                 _lastIdleNudge = now;
+                _nudgedIdle = true;
                 Log.Info($"{idle:F0} 秒没动键鼠，催一下（再过 {Math.Max(0, AwAfkTimeoutSeconds - idle):F0} 秒就白费）");
                 Interrupted?.Invoke(Interrupt.Idle);
             }
             return;
+        }
+
+        // 人动了 —— 因空闲弹出的窗口立刻可以缩回去。这一步是秒级的、纯本地的，
+        // **不等 AW**：等 AW 就要等满一个 60 秒节拍，用户会觉得"动了鼠标也不消失"。
+        if (_nudgedIdle)
+        {
+            _nudgedIdle = false;
+            Log.Info("键鼠恢复，收回督促窗");
+            Retract?.Invoke();
         }
 
         // ---- 3：查 AW、重放。60 秒一次。
@@ -177,6 +203,10 @@ public sealed class TaskSession : IDisposable
                 {
                     Log.Info($"刚过去那一分钟有 {last.OffTaskSeconds:F0} 秒跑偏");
                     Interrupted?.Invoke(Interrupt.Deviated);
+                }
+                else
+                {
+                    Retract?.Invoke();   // 那一格干净了，因偏离弹出的窗口可以缩回去
                 }
             }
         }

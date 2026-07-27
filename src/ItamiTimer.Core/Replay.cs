@@ -33,8 +33,24 @@ public static class Replay
             if (e.Start > since && e.Start < until) set.Add(e.Start);
             if (e.End > since && e.End < until) set.Add(e.End);
         }
+
+        // T6：「尚未判定」的暂定期也有个终点，**它必须是一条边界**。
+        // 否则一条 not-afk 事件之后的整段空洞会被它起点处的判断整个裹走 ——
+        // 区间可能比 180 秒长得多，而分类是按区间【起点】算的。
+        foreach (var e in afkEvents)
+        {
+            if (e.Status != "not-afk") continue;
+            var deadline = e.End.AddSeconds(AfkTimeoutSeconds);
+            if (deadline > since && deadline < until) set.Add(deadline);
+        }
         return [.. set];
     }
+
+    /// <summary>
+    /// AW 的 afk watcher 的超时（`aw-watcher-afk.toml` 的 `timeout`，默认 180 秒）。
+    /// 见 <see cref="PendingPresent"/>。
+    /// </summary>
+    public const double AfkTimeoutSeconds = 180;
 
     /// <summary>
     /// 相邻事件之间的微小空隙最多桥接多少秒。见 <see cref="Bridge"/>。
@@ -74,6 +90,43 @@ public static class Replay
         return result;
     }
 
+    /// <summary>
+    /// **AW 行为特性 T6（2026-07-27 实测）：afk 桶在「尚未判定」的那段时间是空的。**
+    ///
+    /// `aw-watcher-afk` 要连续 180 秒零输入才翻成 `afk`，而那条 not-afk 事件在**最后
+    /// 一次输入**那一刻就停止延长了。于是：
+    ///
+    /// <code>
+    /// 22:32:16  最后一次动键鼠 → not-afk 事件到此为止
+    /// 22:32:16 ~ 22:35:16      → afk 桶里【什么都没有】，AW 还没判
+    /// 22:35:16  超时，写下 afk 事件并【回填】到 22:32:16
+    /// </code>
+    ///
+    /// 只要人安静下来，afk 桶的末端就有一个最长 180 秒的空洞。把它按 §6.1.1 判 `Gap`
+    /// 是错的——那条规矩防的是「afk watcher 根本没在跑」，不是「AW 还没来得及判」。
+    /// 实测后果：坐着看学习视频的头三分钟，表盘一格都不长。
+    ///
+    /// 所以区分两种「没有 afk 事件」：
+    /// <list type="bullet">
+    /// <item>末尾那条 <b>not-afk</b> 刚结束、还没到超时 → **尚未判定**，延续为在座</item>
+    /// <item>其余（watcher 没跑、空洞超过超时、上一条是 afk） → 真的没数据 → `Gap`</item>
+    /// </list>
+    ///
+    /// **这个「暂定」会自我纠正**：真走开了，180 秒后 AW 会把 afk 事件回填下来，下一轮
+    /// 重放就正确判成 `Absent`。所以最终账目不受影响，§6.1.1 那条作弊路径也没被打开——
+    /// 跟 §6.2「临时不可达不影响最终结果」是同一个道理。
+    /// </summary>
+    public static bool PendingPresent(IReadOnlyList<AwEvent> afkSorted, DateTimeOffset t)
+    {
+        AwEvent? last = null;
+        foreach (var e in afkSorted)
+        {
+            if (e.Start > t) break;
+            if (e.End <= t && (last is null || e.End > last.Value.End)) last = e;
+        }
+        return last is { Status: "not-afk" } l && (t - l.End).TotalSeconds < AfkTimeoutSeconds;
+    }
+
     /// <summary>在已按 Start 排好序的事件里找覆盖时刻 t 的那条。找不到返回 null → Gap。</summary>
     public static AwEvent? CoveringAt(IReadOnlyList<AwEvent> sorted, DateTimeOffset t)
     {
@@ -111,13 +164,14 @@ public static class Replay
             var afk = CoveringAt(afkEvents, a);
 
             IntervalKind kind;
-            if (afk is null)
+            if (afk is null && !PendingPresent(afkEvents, a))
             {
                 // afk 没数据就是没数据。**绝不能当成"在座"**——那会把"停在目标应用
                 // 上起身走开"这条最省力的作弊路径重新打开（§6.1.1）。
+                // 唯一的例外是 T6 那种「AW 尚未判定」的尾部空洞，见 PendingPresent。
                 kind = IntervalKind.Gap;
             }
-            else if (afk.Value.Status == "afk")
+            else if (afk is { Status: "afk" })
             {
                 // §4：Absent 优先级高于一切。锁屏时 LockApp.exe 在 ignore 名单里
                 // （本该 Neutral、计入）而 afk 同时说 afk —— 必须判 Absent，

@@ -178,6 +178,7 @@ public partial class MainWindow : Window
         _session = new TaskSession(task, _rules);
         _session.Updated += OnSessionUpdated;
         _session.Interrupted += OnInterrupted;
+        _session.Retract += OnRetract;
 
         F<TextBlock>("BillText").IsVisible = false;
         RefreshStartButton();
@@ -206,16 +207,22 @@ public partial class MainWindow : Window
             Icon = RingIcon.Make(progress, Math.Clamp(1 - st.FocusedSeconds / elapsed, 0, 1));
         }
 
-        // 回到正轨就自动缩回去（§0.5 问题 3）：用户已经用行动回应了提醒，
-        // 继续挡着是在惩罚正确行为。
-        if (_popped && !s.InRest && !_confirmingQuit && s.Cells.Count > 0 &&
-            s.Cells[^1].OffTaskSeconds < TaskSession.NudgeFloorSeconds &&
-            InputIdle.Elapsed().TotalSeconds < TaskSession.IdleNudgeSeconds)
-        {
-            _popped = false;
-            Win32Topmost.ClearTopmost(this);
-            Win32Topmost.Minimize(this);
-        }
+    }
+
+    /// <summary>
+    /// 回到正轨就自动缩回去（§0.5 问题 3）：用户已经用行动回应了提醒，继续挡着是在
+    /// 惩罚正确行为。
+    ///
+    /// **但用户正在看这个窗口时不能抽走它** —— 窗口是用 SW_SHOWNOACTIVATE 弹的、
+    /// 本来拿不到焦点，所以它一旦成了前台窗口，就说明是用户自己点进来的。
+    /// </summary>
+    private void OnRetract()
+    {
+        if (!_popped || _confirmingQuit) return;
+        if (Win32Topmost.IsForeground(this)) return;
+        _popped = false;
+        Win32Topmost.ClearTopmost(this);
+        Win32Topmost.Minimize(this);
     }
 
     private void OnInterrupted(TaskSession.Interrupt why)

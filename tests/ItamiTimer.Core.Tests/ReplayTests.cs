@@ -118,17 +118,22 @@ public class ReplayTests
 
     // ---------------------------------------------------------------- Gap（§6.3）
 
+    /// <summary>
+    /// afk 数据断了之后，只有**过了暂定期**才算真的没数据。
+    /// 这条测试在 T6 之前写的是「第 4 分钟之后全是 Gap」——那是错的，
+    /// 因为紧接着的 180 秒是 AW「还没判」而不是「没数据」（见 <see cref="Replay.PendingPresent"/>）。
+    /// </summary>
     [Fact]
-    public void afk缺数据算Gap_绝不当成在座()
+    public void afk断了之后先暂定在座_过了超时才算真没数据()
     {
         var s = Replay.Run(Task(), Rules,
             [Win(0, 10, "SumatraPDF.exe", "经济学.pdf")],
-            [Afk(0, 4, "not-afk")],           // 第 4 分钟之后没有 afk 数据了
+            [Afk(0, 4, "not-afk")],           // 第 4 分钟之后 afk 桶就没东西了
             At(10));
 
-        Assert.Equal(4 * 60, s.FocusedSeconds, 1);
-        Assert.Equal(6 * 60, s.GapSeconds, 1);
-        Assert.Empty(s.Violations);           // Gap 既不计入也不惩罚
+        Assert.Equal(7 * 60, s.FocusedSeconds, 1);   // 0~4 有事件，4~7 暂定在座
+        Assert.Equal(3 * 60, s.GapSeconds, 1);       // 7~10 超过超时，真的没数据
+        Assert.Empty(s.Violations);                  // Gap 既不计入也不惩罚
     }
 
     // ---------------------------------------------------------------- 达成与休息（§3、§8.4）
@@ -310,6 +315,73 @@ public class ReplayTests
 
         Assert.Single(s.Violations);
         Assert.Equal(0, s.GapSeconds, 3);
+    }
+
+    // ---------------------------------------------------------------- T6 afk 尚未判定的尾部空洞
+
+    /// <summary>
+    /// 2026-07-27 实机撞到：坐着看学习视频，表盘头三分钟一格都不长。
+    ///
+    /// 根因是 afk 桶在「尚未判定」那段时间是**空的** —— not-afk 事件在最后一次输入
+    /// 那刻就停止延长，而 afk 事件要等超时 180 秒之后才被回填下来。中间那段空洞
+    /// 被判成了 Gap，于是既不计入也不算离开。
+    /// </summary>
+    [Fact]
+    public void afk尚未判定的尾部空洞要算在座而不是无数据()
+    {
+        var s = Replay.Run(Task(), Rules,
+            [Win(0, 5, "chrome.exe", "【清华大学】《经济学原理》（曼昆）")],
+            // 最后一次输入在第 1 分钟，之后 AW 还没判 —— 桶里什么都没有
+            [Afk(0, 1, "not-afk")],
+            At(3));
+
+        Assert.Equal(0, s.GapSeconds, 1);
+        Assert.Equal(3 * 60, s.FocusedSeconds, 1);   // 看视频的三分钟要算数
+    }
+
+    /// <summary>
+    /// 但这个"暂定"是**有期限**的：超过 AW 的超时还没等到 afk 事件，说明 watcher
+    /// 根本没在跑，那就是真的没数据 —— 不能一直当人在座，否则 §6.1.1 那条
+    /// 「停在目标应用上起身走开」的作弊路径就重新打开了。
+    /// </summary>
+    [Fact]
+    public void 空洞超过超时就是真没数据_不能一直当人在座()
+    {
+        var s = Replay.Run(Task(), Rules,
+            [Win(0, 10, "SumatraPDF.exe", "经济学.pdf")],
+            [Afk(0, 1, "not-afk")],     // watcher 之后就没再写过东西
+            At(10));
+
+        // 前 1 + 3 分钟（1 分钟有事件 + 3 分钟暂定）算数，之后是真空洞
+        Assert.Equal(4 * 60, s.FocusedSeconds, 1);
+        Assert.Equal(6 * 60, s.GapSeconds, 1);
+    }
+
+    /// <summary>
+    /// 完全没有 afk 数据（watcher 压根没启动）时不适用暂定 —— 没有"上一条 not-afk"
+    /// 可以延续，只能是 Gap。
+    /// </summary>
+    [Fact]
+    public void 一条afk事件都没有时仍然是无数据()
+    {
+        var s = Replay.Run(Task(), Rules,
+            [Win(0, 5, "SumatraPDF.exe", "经济学.pdf")], [], At(5));
+
+        Assert.Equal(0, s.FocusedSeconds, 1);
+        Assert.Equal(5 * 60, s.GapSeconds, 1);
+    }
+
+    /// <summary>真走开之后 AW 回填的 afk 事件必须压过暂定 —— 暂定只在"还没判"时有效。</summary>
+    [Fact]
+    public void afk事件回填之后必须判离开_暂定不能盖过它()
+    {
+        var s = Replay.Run(Task(), Rules,
+            [Win(0, 10, "SumatraPDF.exe", "经济学.pdf")],
+            [Afk(0, 1, "not-afk"), Afk(1, 10, "afk")],   // AW 已经判了
+            At(10));
+
+        Assert.Equal(1 * 60, s.FocusedSeconds, 1);
+        Assert.Equal(9 * 60, s.AbsentSeconds, 1);
     }
 
     // ---------------------------------------------------------------- §5.4 并集追溯生效
