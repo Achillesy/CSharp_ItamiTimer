@@ -4,8 +4,9 @@ using System.Text.Json.Serialization;
 namespace ItamiTimer.App;
 
 /// <summary>
-/// 用户设置。只有两条：任务结束的声音、休息结束的声音（用户 2026-07-28「极致简化」，
-/// 参照 Windows 时钟应用的「专注时段」设置页）。
+/// 用户设置。三条声音：任务结束、休息结束、键鼠空闲（参照 Windows 时钟应用的
+/// 「专注时段」设置页排版）。第三条是用户 2026-07-28 想过之后加回来的 ——
+/// 空闲检测本身不该砍，砍的只是它原来那个"置顶提醒"的表达方式。
 ///
 /// ⚠️ **这是本程序第二样会写盘的东西**，跟 DESIGN.md §8.1「完全不写盘」不冲突 ——
 /// 那一条禁的是**任务状态**落盘（不要 current-task.json、不要累加值、退出即放弃），
@@ -21,6 +22,8 @@ public sealed class Settings
     [JsonPropertyName("focusDoneSound")] public string? FocusDoneSound { get; set; }
     [JsonPropertyName("restDoneEnabled")] public bool RestDoneEnabled { get; set; } = true;
     [JsonPropertyName("restDoneSound")] public string? RestDoneSound { get; set; }
+    [JsonPropertyName("idleEnabled")] public bool IdleEnabled { get; set; } = true;
+    [JsonPropertyName("idleSound")] public string? IdleSound { get; set; }
 
     private static string Path_ => System.IO.Path.Combine(Log.Directory, "settings.json");
 
@@ -46,6 +49,9 @@ public sealed class Settings
             "Windows Notify System Generic", "Windows Notify", "Alarm01", "chimes");
         s.RestDoneSound ??= Sound.PreferredOrFirst(
             "Windows Notify Calendar", "Windows Proximity Notification", "Alarm02", "notify");
+        // 空闲那声要**轻**：它一分钟可能响两次，而且提醒的是"你还在吗"，不是"完成了"
+        s.IdleSound ??= Sound.PreferredOrFirst(
+            "Windows Message Nudge", "Windows Balloon", "Windows Background", "ding");
         return s;
     }
 

@@ -28,12 +28,10 @@ public sealed class TaskSession : IDisposable
 {
     /// <summary>为什么需要把窗口弹出来。</summary>
     /// <summary>
-    /// 只剩两件事值得打断用户（用户 2026-07-28「极致简化」）。
+    /// 三件值得响一声的事。每一件都能在设置里单独关掉（§8.3.1）。
     ///
-    /// 原来还有 <c>Deviated</c>（跑偏）和 <c>Idle</c>（键鼠不动）两种，靠"置顶但不抢焦点"
-    /// 来提醒。用户把整套置顶机制否了：「不要再纠结窗口置顶这种事情了。逻辑混乱，
-    /// 又容易出错。」跑偏现在**只写日志**，用户从表盘上的红格子和越滑越远的灰弧
-    /// 自己看出来 —— 跟"不给账单"是同一条思路。
+    /// **跑偏不在其中**：它只写日志，用户从表盘上的红格子和越滑越远的灰弧自己看出来
+    /// —— 跟"不给账单"是同一条思路。整套"置顶但不抢焦点"已经删干净了（§8.3）。
     /// </summary>
     public enum Interrupt
     {
@@ -41,10 +39,23 @@ public sealed class TaskSession : IDisposable
         FocusDone,
         /// <summary>休息结束，任务终结（§8.4.3）。响一声「休息结束」。</summary>
         RestDone,
+        /// <summary>键鼠安静太久，赶在 AW 判 afk 之前叫醒（§8.3.5）。响一声「键鼠空闲」。</summary>
+        Idle,
     }
 
     // §8.3.5 / §8.3.6 / §10
     public const int NudgeFloorSeconds = 5;
+
+    /// <summary>安静多少秒开始叫（§8.3.5）。</summary>
+    public const int IdleNudgeSeconds = 60;
+
+    /// <summary>
+    /// AW 判 afk 的阈值（`aw-watcher-afk.toml` 的默认值）。
+    ///
+    /// **超过这条线就不再叫了** —— 那时 AW 已经把这段时间回填成 afk（§14.4a T5），
+    /// 叫醒也救不回来，继续响就成了纯噪音（人已经离开房间了）。
+    /// </summary>
+    private const int AwAfkTimeoutSeconds = 180;
 
     private readonly GroupRules _rules;
     private readonly AwClient _aw = new();
@@ -153,7 +164,18 @@ public sealed class TaskSession : IDisposable
         if (minute <= _lastAwMinute) return;
         _lastAwMinute = minute;
 
-        // 查 AW、重放。
+        // 1) 键鼠空闲。算在查 AW **之前**，这样 AW 连不上时也不会把它一起吞掉。
+        //
+        // 只在 [60, 180) 这个窗口里叫：AW 要安静满 180 秒才翻成 afk，而且事件起点会
+        // 回填到最后一次输入（§14.4a T5）—— 必须赶在那条截止线【之前】把人叫醒，
+        // 事后再叫是救不回来的。过了 180 秒就闭嘴，那时人多半真的离开了，
+        // 每分钟响一声只是噪音。
+        var idle = InputIdle.Elapsed().TotalSeconds;
+        var idleNudge = idle is >= IdleNudgeSeconds and < AwAfkTimeoutSeconds;
+        if (idleNudge)
+            Log.Info($"{idle:F0} 秒没动键鼠，叫一声（再过 {AwAfkTimeoutSeconds - idle:F0} 秒这段时间就白费了）");
+
+        // 2) 查 AW、重放。
         var focusDone = false;
 
         _busy = true;
@@ -203,7 +225,9 @@ public sealed class TaskSession : IDisposable
         }
         finally { _busy = false; }
 
+        // 一个计时点最多响一声，达成优先。
         if (focusDone) Interrupted?.Invoke(Interrupt.FocusDone);
+        else if (idleNudge) Interrupted?.Invoke(Interrupt.Idle);
     }
 
     /// <summary>放弃任务。退出程序等价于此（§2、§9）。</summary>

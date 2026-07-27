@@ -63,6 +63,23 @@
       </StackPanel>
     </Border>
 
+    <Border Classes="card">
+      <StackPanel Spacing="12">
+        <Grid ColumnDefinitions="*,Auto">
+          <StackPanel>
+            <TextBlock Classes="title" Text="键鼠空闲声音"/>
+            <!-- 说明里必须写清"为什么"：这一声跟另外两声不同，它是【来得及补救】的
+                 提醒 —— 再不动键鼠，这段时间就要被 AW 判成离开而作废了。 -->
+            <TextBlock Classes="sub"
+                       Text="一分钟没动键鼠时响一声。再安静下去，这段时间会被判成「人不在」而不计入。"/>
+          </StackPanel>
+          <ToggleSwitch x:Name="IdleOn" Grid.Column="1" VerticalAlignment="Center"
+                        OnContent="开" OffContent="关"/>
+        </Grid>
+        <ComboBox x:Name="IdleSound" HorizontalAlignment="Stretch" MaxDropDownHeight="320"/>
+      </StackPanel>
+    </Border>
+
     <!-- 选中就立刻放一遍，跟 Windows 自己的声音设置一样。没有"试听"按钮要点。 -->
     <TextBlock Classes="sub" Text="选择音色时会立刻试听一次。改动即时生效，无需确认。"/>
 

@@ -217,14 +217,15 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 只剩两件事会打断用户，而且**只用一声系统音**（用户 2026-07-28「极致简化」）。
+    /// 三件事会响一声系统音，每件都能在设置里单独关（用户 2026-07-28）。
     ///
     /// 整套"置顶但不抢焦点"已经删干净了 —— 用户原话：「不要再纠结窗口置顶这种事情了。
     /// 逻辑混乱，又容易出错。」它确实一直在出错：先是达成那次根本没置顶（不抢焦点
     /// 又不置顶等于没弹），修好之后又变成永远撤不掉。声音没有这些状态。
     ///
     /// 跑偏不再有任何提醒，**只写日志**。表盘上那格是红的、灰弧往前滑了一截，
-    /// 自己看，自己猜 —— 跟不给账单是同一条思路。
+    /// 自己看，自己猜 —— 跟不给账单是同一条思路。键鼠空闲则不同：它提醒的是
+    /// 一段**即将被 AW 判成 afk 而作废**的时间，晚了就救不回来（§8.3.5）。
     /// </summary>
     private void OnInterrupted(TaskSession.Interrupt why)
     {
@@ -240,6 +241,10 @@ public partial class MainWindow : Window
             case TaskSession.Interrupt.RestDone:
                 if (_settings.RestDoneEnabled) Sound.Play(_settings.RestDoneSound);
                 EndSession();
+                break;
+
+            case TaskSession.Interrupt.Idle:
+                if (_settings.IdleEnabled) Sound.Play(_settings.IdleSound);
                 break;
         }
     }
