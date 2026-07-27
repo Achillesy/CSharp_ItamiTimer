@@ -23,7 +23,7 @@ ItamiTimer（中文名「一袋米要扛几楼」）是一个 Windows 桌面端*
 样板页在 `design/dial-specimens.html`（双击可开），也发布在
 https://claude.ai/code/artifact/8b803438-9eba-41c0-a296-5c98848abbe6 。注意 §8.2.1 对样板做了一处修正（色带内移到 [0.50, 0.68]，避免数字被色块压住），样板页本身没同步。
 
-**注意本项目还不是 git 仓库**（AWJ 是）。文件只是躺在盘上，没有提交这一步，也就没有未提交的东西会丢。
+**本项目已纳入 git 管理**（2026-07-27）：远端 `https://github.com/Achillesy/CSharp_ItamiTimer.git`，默认分支 **`master`**（不是 `main`），公开仓库，Apache 2.0。`bin/`、`obj/`、`.vs/`、`*.user` 都已忽略。
 
 ## 权威设计文档
 
