@@ -12,17 +12,39 @@ public class TaskRecordTests
     };
 
     /// <summary>
-    /// §8.4.2a：滑块步进 5 保证休息时长恒为整数分钟，不需要任何取整规则。
-    /// 这条测试就是那个论证的守卫——哪天有人把步进改成 3，它会失败。
+    /// §8.4.2：休息 = ⌊专注 ÷ 5⌋ + 1。滑块那九个档都是 5 的倍数，
+    /// 所以就是"五分之一，再多一分钟"。
     /// </summary>
     [Theory]
-    [InlineData(10, 2)]
-    [InlineData(15, 3)]
-    [InlineData(25, 5)]
-    [InlineData(50, 10)]
-    public void 休息时长是专注的五分之一_滑块的九个档都是整数分钟(int focus, int expectedRest)
+    [InlineData(10, 3)]
+    [InlineData(15, 4)]
+    [InlineData(25, 6)]
+    [InlineData(50, 11)]
+    public void 休息时长是五分之一再加一分钟(int focus, int expectedRest)
     {
         Assert.Equal(expectedRest, WithFocus(focus).RestMinutes);
+    }
+
+    /// <summary>
+    /// 那个 +1 的本职：补上"发现延迟"（§14.0a）。
+    ///
+    /// 专注在某个真实时刻攒够，但程序要到下一个整分钟的计时点才发现；休息却是从
+    /// **真正达成那一刻**起算的。延迟被计时点间隔封死在 60 秒以内，所以补 1 分钟
+    /// 之后，**用户实际能歇的时间永不少于名义的五分之一**。
+    /// </summary>
+    [Theory]
+    [InlineData(10)]
+    [InlineData(25)]
+    [InlineData(50)]
+    public void 最坏的发现延迟也吃不掉名义休息(int focus)
+    {
+        var task = WithFocus(focus);
+        const double worstDelayMinutes = 1.0;      // 计时点间隔 = 延迟上界
+        var nominal = focus / 5.0;
+
+        Assert.True(task.RestMinutes - worstDelayMinutes >= nominal,
+            $"专注 {focus} 分钟：休息 {task.RestMinutes} 分钟减掉最坏延迟之后" +
+            $"只剩 {task.RestMinutes - worstDelayMinutes}，不够名义的 {nominal}");
     }
 
     /// <summary>
@@ -36,9 +58,9 @@ public class TaskRecordTests
     }
 
     /// <summary>
-    /// 休息是**向上**取整（用户 2026-07-28）。原来是整除，于是 FocusMinutes ≤ 4
-    /// 全部算出 0 分钟休息 —— 调试量程（2~10）下最常用的那几档根本没有休息阶段，
-    /// 休息扇形（§8.4.4）就永远看不见。方向也说得通：休息是奖励，零头该给用户。
+    /// +1 的第二个作用：**任何非零时长都有休息**。原来用整除，FocusMinutes ≤ 4
+    /// 全部算出 0 分钟 —— 休息阶段整个不存在，休息扇形（§8.4.4）永远看不见。
+    /// Core 必须接受任意时长（§13 的手动验证会用 1~2 分钟的任务跑）。
     /// </summary>
     [Theory]
     [InlineData(1, 1)]

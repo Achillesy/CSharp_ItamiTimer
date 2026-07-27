@@ -169,14 +169,18 @@ public class ReplayTests
     }
 
     [Fact]
-    public void 休息时长是专注的五分之一_休息中和休息后的阶段要分清()
+    public void 休息中和休息后的阶段要分清()
     {
-        var task = Task(5);   // 休息 1 分钟
+        // 休息 = ⌊5/5⌋ + 1 = 2 分钟（§8.4.2，那个 +1 是给"发现延迟"的补偿）
+        var task = Task(5);
+        Assert.Equal(2, task.RestMinutes);
+
         List<AwEvent> win = [Win(0, 20, "SumatraPDF.exe", "经济学.pdf")];
 
-        // 第 5 分钟达成，休息到第 6 分钟
+        // 第 5 分钟达成，休息到第 7 分钟
         Assert.Equal(TaskPhase.Resting, Replay.Run(task, Rules, win, Present(20), At(5.5)).Phase);
-        Assert.Equal(TaskPhase.Completed, Replay.Run(task, Rules, win, Present(20), At(6.5)).Phase);
+        Assert.Equal(TaskPhase.Resting, Replay.Run(task, Rules, win, Present(20), At(6.5)).Phase);
+        Assert.Equal(TaskPhase.Completed, Replay.Run(task, Rules, win, Present(20), At(7.5)).Phase);
     }
 
     [Fact]
