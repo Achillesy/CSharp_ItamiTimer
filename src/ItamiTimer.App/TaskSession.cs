@@ -40,6 +40,10 @@ public sealed class TaskSession : IDisposable
     }
 
     // §8.3.5 / §8.3.6 / §10
+    /// <summary>
+    /// 督促的最小间隔（秒）。**不再是 AW 查询的节拍** —— 查询锚在整分钟上，
+    /// 见 <c>_lastAwMinute</c>。这里只用来给"键鼠空闲"的督促限流，免得每秒弹一次。
+    /// </summary>
     public const int TickSeconds = 60;
     public const int IdleNudgeSeconds = 60;
     public const int NudgeFloorSeconds = 5;
@@ -100,7 +104,10 @@ public sealed class TaskSession : IDisposable
     {
         Task = task;
         _rules = rules;
-        _tick.Interval = TimeSpan.FromSeconds(1);   // 秒级只用来数休息和空闲，查 AW 仍是 60 秒一次
+        // 起算时刻本身就是整分钟，把它当成"已经查过的那一分钟" ——
+        // 于是点击这一刻不查 AW，第一次查询发生在下一个整分钟。
+        _lastAwMinute = task.StartedAt;
+        _tick.Interval = TimeSpan.FromSeconds(1);   // 秒级用来数休息和空闲；查 AW 只在整分钟
         _tick.Tick += OnTick;
         _tick.Start();
         Log.Info($"任务开始：{string.Join("、", task.Groups)}  专注 {task.FocusMinutes} 分钟  " +
@@ -116,10 +123,21 @@ public sealed class TaskSession : IDisposable
             GroupChanges = [.. Task.GroupChanges, new GroupChange(DateTimeOffset.Now, groups)],
         };
         Log.Info($"中途改勾选：{string.Join("、", groups)}（追溯整段历史生效）");
-        _lastAwAt = DateTimeOffset.MinValue;   // 下一拍立刻重算
+        _lastAwMinute = DateTimeOffset.MinValue;   // 下一拍立刻重算，不等整分钟
     }
 
-    private DateTimeOffset _lastAwAt = DateTimeOffset.MinValue;
+    /// <summary>
+    /// 已经查过的最后那个**整分钟**。
+    ///
+    /// 查询节拍锚在**整分钟**上，不是锚在点击时刻上（用户 2026-07-28 纠正）。
+    /// 原来这里是 `_lastAwAt = MinValue` + 「距上次满 60 秒就查」，于是节拍跟着点击
+    /// 时刻漂：23:59:43 点的开始 → 23:59:44 查一次、00:00:45 再查 —— 而计时点本该是
+    /// 00:00:00。整整晚了 45 秒，用户看着表盘在整分钟毫无反应。
+    ///
+    /// 初值 = <c>Task.StartedAt</c>（已经是整分钟），所以**点击那一刻不查**：此刻要做的
+    /// 只有一件事，把整段灰弧画上去。第一次查询发生在起算之后的第一个整分钟。
+    /// </summary>
+    private DateTimeOffset _lastAwMinute;
     private int _lastCellCount = -1;
     private DateTimeOffset _lastIdleNudge = DateTimeOffset.MinValue;
 
@@ -182,9 +200,10 @@ public sealed class TaskSession : IDisposable
             return;
         }
 
-        // ---- 3：查 AW、重放。60 秒一次。
-        if ((now - _lastAwAt).TotalSeconds < TickSeconds) return;
-        _lastAwAt = now;
+        // ---- 3：查 AW、重放。**每跨过一个整分钟查一次**，1 秒的 tick 保证误差 ≤1 秒。
+        var minute = TimeGrid.FloorToMinute(now);
+        if (minute <= _lastAwMinute) return;
+        _lastAwMinute = minute;
 
         _busy = true;
         try
