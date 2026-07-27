@@ -43,7 +43,7 @@ public sealed record DialPalette(
         // DominoTop 保留但不再使用：相机在骨牌顶端一线，看不到顶面。
         DominoTop: Color.FromRgb(0xE2, 0xC6, 0xA4),
         DominoFace: Color.FromRgb(0xC4, 0x9E, 0x74),
-        DominoSide: Color.FromRgb(0xD3, 0xB0, 0x88));
+        DominoSide: Color.FromRgb(0xE6, 0xC8, 0xA4));
 
     /// <summary>夜面：深灰盘 + 深色金属边框。</summary>
     public static readonly DialPalette Dark = new(
@@ -62,7 +62,7 @@ public sealed record DialPalette(
         Sweep: Color.FromRgb(0xB8, 0xC4, 0xD0),
         DominoTop: Color.FromRgb(0x8A, 0x6E, 0x50),
         DominoFace: Color.FromRgb(0x6E, 0x56, 0x3C),
-        DominoSide: Color.FromRgb(0x7E, 0x64, 0x48));
+        DominoSide: Color.FromRgb(0x93, 0x77, 0x57));
 
     /// <summary>
     /// §8.2.3 的三段过渡：focus → amber → slack。

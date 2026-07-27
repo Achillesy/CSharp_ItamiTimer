@@ -172,10 +172,13 @@ public class DominoRow : Control
             foreach (var q in Corners(i * Pitch + T, AngleAt(i)))
                 anchor = Math.Max(anchor, q.X);
 
-        var padX = T * scale * 0.35;
-        // 骨牌整体下移，底部压住影子上沿，否则会看着像浮在影子上方
-        var baseY = k.H * 0.985;
-        // 镜像：世界坐标仍按「向右倒」算，画的时候把 x 翻过来
+        // 影子的跨度：从最左那块的左下角起（= 屏幕上的 padX），到最右那块的支点，
+        // 再往右多探一点点。周一到周六这个跨度不变，所以**把影子居中，整排就居中**。
+        var shadowSpan = (anchor - T) * scale + Pitch * 0.22 * scale;
+        var padX = (k.W - shadowSpan) / 2;
+
+        // 骨牌整体下移，脚跟压住影子，否则会看着像浮在影子上方
+        var baseY = k.H * 0.965;
         Point S(Point w) => new(padX + (anchor - w.X) * scale, baseY - w.Y * scale);
 
         // ---- 第一遍：一整条影子。**连成一片、大小固定**，不随倒下块数变化。
@@ -183,12 +186,16 @@ public class DominoRow : Control
         //      因为影子大小是固定的），光在左上所以往右多探一截。
         //      上下沿都用渐变淡出：硬边会读成一条独立的灰带，骨牌就像浮在它上面。
         {
-            // **光从左边来，所以骨牌左边不该有影子**：带子从最左那块的脚下起头，
-            // 只往右铺。往右要多探一截，盖住最右那块的影子。
+            // **执行标准（用户 2026-07-27）：最左那块骨牌的左下角 = 影子的左下角。**
+            // 所以带子的左边界就是 padX、底边就是脚跟线 baseY，往上、往右铺开。
+            // 光从左边来 → 左边不该有影子；地面近乎侧看 → 越远越高，所以往上长。
+            //
+            // 右端跟着最右那块走：它一旦倒下，影子也跟着缩到斜面落下来的位置附近，
+            // 所以右端锚在它的支点上，而不是固定的满宽。
             var left = padX;
-            var right = padX + (anchor - 0) * scale + Pitch * 0.5 * scale;
-            var top = baseY - T * scale * 0.70;
-            var bottom = baseY + T * scale * 0.95;
+            var right = padX + shadowSpan;
+            var top = baseY - T * scale * 1.15;
+            var bottom = baseY;
             list.Add((Quad(new Point(left, top), new Point(right, top),
                            new Point(right, bottom), new Point(left, bottom)),
                 new LinearGradientBrush
@@ -198,9 +205,8 @@ public class DominoRow : Control
                     GradientStops =
                     {
                         new GradientStop(Color.FromArgb(0x00, 0, 0, 0), 0.00),
-                        new GradientStop(Color.FromArgb(0x2E, 0, 0, 0), 0.42),
-                        new GradientStop(Color.FromArgb(0x24, 0, 0, 0), 0.58),
-                        new GradientStop(Color.FromArgb(0x00, 0, 0, 0), 1.00),
+                        new GradientStop(Color.FromArgb(0x18, 0, 0, 0), 0.55),
+                        new GradientStop(Color.FromArgb(0x30, 0, 0, 0), 1.00),
                     }
                 }));
         }
@@ -225,11 +231,12 @@ public class DominoRow : Control
                 var d = SideWidth(i) * scale;
                 if (d > 0.4)
                 {
-                    const double TopRatio = 0.18;      // 顶端只剩底端宽度的一小截
-                    var rise = d * 0.30;               // 远端底角朝视平线抬起
+                    // 消失点在**画面之外**、大致在半高的位置，所以远端那条边
+                    // **上下各收一截**（而不是只收顶上）。收多少跟露出的宽度成正比。
+                    var shrink = d * 0.55;
                     list.Add((Quad(br,
-                                   new Point(br.X - d, br.Y - rise),
-                                   new Point(tr.X - d * TopRatio, tr.Y),
+                                   new Point(br.X - d, br.Y - shrink),
+                                   new Point(tr.X - d, tr.Y + shrink),
                                    tr),
                               new SolidColorBrush(p.DominoSide)));
                 }
