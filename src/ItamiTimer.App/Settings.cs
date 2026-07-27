@@ -39,7 +39,7 @@ public sealed class Settings
     /// <summary>右上角那个图钉：窗口置顶。手动开关，没有任何自动收放（<see cref="Win32Topmost"/>）。</summary>
     [JsonPropertyName("pinned")] public bool Pinned { get; set; }
 
-    private static string Path_ => System.IO.Path.Combine(Log.Directory, "settings.json");
+    private static string Path_ => System.IO.Path.Combine(AppData.Dir, "settings.json");
 
     private static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
 
@@ -73,7 +73,7 @@ public sealed class Settings
     {
         try
         {
-            Directory.CreateDirectory(Log.Directory);
+            Directory.CreateDirectory(AppData.Dir);
             File.WriteAllText(Path_, JsonSerializer.Serialize(this, Json));
         }
         catch (Exception e)

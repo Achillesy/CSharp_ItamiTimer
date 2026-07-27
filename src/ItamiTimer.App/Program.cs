@@ -30,6 +30,15 @@ internal static class Program
                 return;
             }
 
+            // 同上，把番茄图标导成 .ico 装进 exe 的资源。图标仍然是代码画的，
+            // 仓库里不放位图 —— 这条纪律从表盘一路贯到这里。
+            if (args is ["--export-icon", var icoPath, ..])
+            {
+                BuildAvaloniaApp().SetupWithoutStarting();
+                IconExport.Write(icoPath);
+                return;
+            }
+
             BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
         }
         catch (Exception ex)

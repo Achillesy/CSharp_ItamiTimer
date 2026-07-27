@@ -19,6 +19,15 @@
     <AssemblyName>ItamiTimer</AssemblyName>
     <RootNamespace>ItamiTimer.App</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!--
+      exe 的文件图标（桌面快捷方式、资源管理器、Alt-Tab 都看它）。
+      窗口里那个图标是运行时画的，跟这个是同一份美术。
+
+      tomato.ico 由 IconExport 从 TomatoIcon 导出（命令行开关见 Program.cs），
+      仓库里那个 .ico 只是导出结果 —— 位图不是手画的，是代码画的。
+      番茄的形状要改就去改 TomatoIcon.cs，然后重新导一次。
+    -->
+    <ApplicationIcon>tomato.ico</ApplicationIcon>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
   </PropertyGroup>
 
@@ -30,6 +39,17 @@
 
   <ItemGroup>
     <ProjectReference Include="..\ItamiTimer.Core\ItamiTimer.Core.csproj" />
+  </ItemGroup>
+
+  <!--
+    规则文件要跟着 exe 走，否则发布出去的程序找不到它（见 AppData.RulesPath）。
+
+    这份是**随程序发布的默认规则**。用户自己那份在 %LOCALAPPDATA%\ItamiTimer\，
+    优先级更高，所以重新发布不会冲掉他加的小目标。
+  -->
+  <ItemGroup>
+    <Content Include="$(MSBuildThisFileDirectory)..\..\rules.json"
+             Link="rules.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

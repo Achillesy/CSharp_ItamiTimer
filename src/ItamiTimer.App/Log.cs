@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text;
 
 namespace ItamiTimer.App;
@@ -21,15 +22,34 @@ public static class Log
     private const long MaxBytes = 1 * 1024 * 1024;
     private static readonly Lock Gate = new();
 
-    public static string Directory { get; } = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ItamiTimer");
+    public static string Directory => AppData.Dir;
 
     public static string Path_ => System.IO.Path.Combine(Directory, "itami.log");
 
+    /// <summary>
+    /// <b>Release 下一个字都不写</b>（用户 2026-07-28：「log 文件只有 Debug 才写，
+    /// Release 版本不必了」）。
+    ///
+    /// 用 <c>[Conditional("DEBUG")]</c> 而不是方法里判一个开关：这样 Release 编译时
+    /// <b>整个调用连同实参一起消失</b> —— 那行每分钟一次的日志有一大串字符串插值，
+    /// 运行时判断的话字符串照拼不误，只是拼完扔掉。
+    ///
+    /// ⚠️ 代价说清楚：界面对用户是<b>沉默</b>的（分割线以下一个提示字都没有），
+    /// 日志原本是<b>唯一</b>能让人事后看出"它到底怎么了"的地方（§8.1a）。Release 下
+    /// 出了错 —— AW 连不上、rules.json 写坏、抛异常 —— 屏幕上只有一个灰按钮，
+    /// 没有任何线索，用户和我都无从查起。
+    ///
+    /// 想留一条退路的话：把 <see cref="Error"/> 上的 <c>[Conditional]</c> 去掉即可。
+    /// 正常一轮任务照样零写入（没有 ERROR 就没有行），出事时又有据可查。
+    /// </summary>
+    [Conditional("DEBUG")]
     public static void Info(string message) => Write("INFO ", message);
+
+    [Conditional("DEBUG")]
     public static void Warn(string message) => Write("WARN ", message);
 
     /// <summary>记一条错误。**异常的完整信息一定要进去** —— 界面上那句话是不会有的。</summary>
+    [Conditional("DEBUG")]
     public static void Error(string what, Exception e)
         => Write("ERROR", $"{what}: {e.GetType().Name}: {e.Message}"
                           + (e.InnerException is { } inner ? $"  <- {inner.GetType().Name}: {inner.Message}" : ""));

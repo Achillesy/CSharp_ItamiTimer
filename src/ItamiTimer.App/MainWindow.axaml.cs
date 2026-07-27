@@ -162,7 +162,7 @@ public partial class MainWindow : Window
     {
         try
         {
-            _rules = GroupRules.Load("rules.json");
+            _rules = GroupRules.Load(AppData.RulesPath());
             foreach (var name in _rules.SelectableGroups)
             {
                 var box = new CheckBox { Content = name };

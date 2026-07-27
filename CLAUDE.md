@@ -87,6 +87,12 @@ src/ItamiTimer.App/    net10.0-windows  ItamiTimer.exe  界面（WinForms 脚手
 dotnet build ItamiTimer.slnx
 ```
 
+发布（框架依赖 + 限定 RID，约 27MB；**不加 `-r win-x64` 会变成 560MB**，因为 Skia/HarfBuzz 各平台的原生库和 pdb 全进来了）：
+
+```bash
+dotnet publish src/ItamiTimer.App -c Release -r win-x64 --self-contained false -o "$LOCALAPPDATA/Programs/ItamiTimer"
+```
+
 ```bash
 dotnet run --project src/ItamiTimer.Cli
 ```
@@ -126,6 +132,8 @@ dotnet run --project src/ItamiTimer.Cli
 
 - **模拟表盘**（§8.2）从 §11 移进了 v1，已实现。
 - **收进任务栏常驻**（原 §8.3）曾移进 v1，2026-07-28 又**整个砍掉**——窗口从头到尾放在原地。
+- **日志只有 Debug 写**（§8.3.8，`[Conditional("DEBUG")]`）。所以 Release 下出错是**完全无声**的——排查问题得先切回 Debug 跑一遍。
+- **`rules.json` 按三级找**（`AppData.RulesPath`）：`%LOCALAPPDATA%\ItamiTimer\` → exe 旁边 → 工作目录。用户自己那份在第一级，重新发布冲不掉。
 - **提示音 + 设置窗口**（§8.3.1~8.3.3）是 2026-07-28 新进 v1 的，已实现。三条通知音各自可关，外加合成的滴答声（开关在钟的右上角，音量在设置里）。
 
 滑块量程是 §8.4.2a 的正式值 **10~50 分钟、步进 5、默认 25**。2026-07-27~28 期间它临时是 2~10 分钟，核心循环跑通后已改回；文档里如果还看到"调试量程"字样，那是历史记录。
