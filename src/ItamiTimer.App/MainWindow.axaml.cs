@@ -27,6 +27,8 @@ public partial class MainWindow : Window
 
     public MainWindow()
     {
+        Log.Info($"启动。日志：{Log.Path_}");
+
         InitializeComponent();
         ApplyTheme();
 
@@ -68,10 +70,13 @@ public partial class MainWindow : Window
             await aw.FindBucketIdAsync(AwClient.WindowBucketType);
             await aw.FindBucketIdAsync(AwClient.AfkBucketType);
             _awReady = true;
+            Log.Info("AW 就绪，两个 bucket 都在。");
         }
-        catch (Exception)
+        catch (Exception e)
         {
             _awReady = false;
+            // 界面上只是灰掉，一个字都不说；**原因写进日志**，否则就成了黑箱
+            Log.Error("连不上 ActivityWatch，分割线以下已置灰", e);
         }
 
         this.FindControl<StackPanel>("Controls")!.IsEnabled = _awReady;
@@ -92,12 +97,15 @@ public partial class MainWindow : Window
             }
             items.ItemsSource = _goalBoxes;
             if (_goalBoxes.Count == 1) _goalBoxes[0].IsChecked = true;
+            Log.Info($"rules.json 已加载，小目标：{string.Join("、", _rules.SelectableGroups)}");
         }
-        catch (Exception)
+        catch (Exception e)
         {
             // fail-closed（§5.2）：规则读不了就不让开始，不静默放行。
-            // 这里同样不解释——按钮灰着，用户自己去看 rules.json。
+            // 界面上不解释（按钮灰着，用户自己去看），**但日志必须写清是哪一条坏了** ——
+            // GroupRules 抛的异常里带着组名和那条正则。
             _rules = null;
+            Log.Error("rules.json 读不了，开始按钮已置灰", e);
         }
     }
 
@@ -113,7 +121,9 @@ public partial class MainWindow : Window
         if (picked.Count == 0) return;
 
         // §14.1：进位到下一个整分钟。绝不向后取整——那会把点「开始」之前的时间也算进来。
-        _ = TimeGrid.CeilToMinute(DateTimeOffset.Now);
+        var startedAt = TimeGrid.CeilToMinute(DateTimeOffset.Now);
+        var minutes = (int)this.FindControl<Slider>("Minutes")!.Value;
+        Log.Info($"提交任务：{string.Join("、", picked)}  专注 {minutes} 分钟  起算 {startedAt:HH:mm:ss}");
         // TODO 任务循环（§8.3.5）还没接上
     }
 }
