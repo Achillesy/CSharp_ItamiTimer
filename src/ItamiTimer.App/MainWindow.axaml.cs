@@ -180,6 +180,14 @@ public partial class MainWindow : Window
         _session.Interrupted += OnInterrupted;
         _session.Retract += OnRetract;
 
+        // 点下按钮的那一刻盘面就要有东西：整段灰弧立刻摆上去，不等第一次 AW 回来
+        var dial = F<DialControl>("Dial");
+        dial.StartedAt = task.StartedAt;
+        dial.Cells = [];
+        dial.RemainingMinutes = task.FocusMinutes;
+        dial.RingOpacity = 1;
+        dial.InvalidateVisual();
+
         F<TextBlock>("BillText").IsVisible = false;
         RefreshStartButton();
 

@@ -171,10 +171,10 @@ public class DialControl : Control
     /// <summary>§8.2.3 + §8.2.4 + §8.2.5：色块、承诺弧、截止线、螺旋。</summary>
     private void DrawRing(DrawingContext ctx, Point c, Func<double, double> R)
     {
-        var cells = Cells;
-        if (cells.Count == 0 || StartedAt is not { } start || RingOpacity <= 0.01) return;
+        if (StartedAt is not { } start || RingOpacity <= 0.01) return;
 
         using var _ = ctx.PushOpacity(RingOpacity);
+        var cells = Cells;
         var p = Palette;
         var m0 = start.Minute + start.Second / 60.0;
 
@@ -215,8 +215,14 @@ public class DialControl : Control
     }
 
     /// <summary>
-    /// §8.2.4 承诺弧与截止线。截止线**必须画成一条线**——只靠蓝弧的边缘不够，
-    /// 偷懒时它往前滑，正是"看着截止线离自己越来越远"那个痛感载体，眼睛得追得住。
+    /// §8.2.4 承诺弧与截止线。
+    ///
+    /// **点下「开始」的那一刻就要看得见**（用户 2026-07-27）：从开始时刻到预定的结束
+    /// 时刻画一整段灰弧。此前它被画在「有色块」的前提之下，所以任务刚开始、一格都还
+    /// 没走完时盘面是空的 —— 看着像没在跑。
+    ///
+    /// 截止线**必须画成一条线**：只靠弧的边缘不够。偷懒时它往前滑，正是"看着截止线
+    /// 离自己越来越远"那个痛感载体，眼睛得追得住。
     /// </summary>
     private void DrawPendingArc(DrawingContext ctx, Point c, Func<double, double> R, double headMinute)
     {
@@ -225,11 +231,13 @@ public class DialControl : Control
         var (rIn, rOut) = Lanes[lane];
         var d1 = (headMinute + RemainingMinutes) * 6;
 
-        using (ctx.PushOpacity(0.22))
-            ctx.DrawGeometry(new SolidColorBrush(Palette.Pending), null,
+        // 灰色，不是蓝色：这段是"还欠着的时间"，它不该有任何情绪
+        var grey = Palette.Tick;
+        using (ctx.PushOpacity(0.30))
+            ctx.DrawGeometry(new SolidColorBrush(grey), null,
                 Annulus(c, R(rIn), R(rOut), headMinute * 6, d1));
 
-        ctx.DrawLine(new Pen(new SolidColorBrush(Palette.Pending), R(0.014)),
+        ctx.DrawLine(new Pen(new SolidColorBrush(A(grey, 0xCC)), R(0.014)),
             At(c, R(rIn - 0.02), d1), At(c, R(rOut + 0.02), d1));
     }
 
