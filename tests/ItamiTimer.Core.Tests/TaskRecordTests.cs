@@ -40,7 +40,7 @@ public class TaskRecordTests
     public void 新任务默认是已提交且没有变更记录()
     {
         var task = WithFocus(25);
-        Assert.Equal(TaskStatus.Committed, task.Status);
+        Assert.Equal(RecordStatus.Committed, task.Status);
         Assert.Empty(task.GroupChanges);
         Assert.Null(task.AbandonedAt);
     }

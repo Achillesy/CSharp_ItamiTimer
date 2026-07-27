@@ -1,7 +1,9 @@
+using System.Text.Json.Serialization;
+
 namespace ItamiTimer.Core;
 
 /// <summary>任务的终局状态。中间不存在"状态机状态"——阶段是推导出来的（§3）。</summary>
-public enum TaskStatus
+public enum RecordStatus
 {
     /// <summary>已提交，尚未终结。</summary>
     Committed,
@@ -64,7 +66,7 @@ public sealed record TaskRecord
     /// <summary>勾选变更的审计记录。纯显示用，见 <see cref="GroupChange"/>。</summary>
     public IReadOnlyList<GroupChange> GroupChanges { get; init; } = [];
 
-    public TaskStatus Status { get; init; } = TaskStatus.Committed;
+    public RecordStatus Status { get; init; } = RecordStatus.Committed;
 
     /// <summary>仅当 <see cref="Status"/> 为 Abandoned 时有值。</summary>
     public DateTimeOffset? AbandonedAt { get; init; }
@@ -75,6 +77,9 @@ public sealed record TaskRecord
     ///
     /// 注意验证用的短任务（FocusMinutes = 1~2）会算出 0 分钟休息，即专注
     /// 达成后立刻 Completed。这对测试正好方便，不是 bug。
+    ///
+    /// **不落盘**：推导值写进 JSON 会让人以为它可以手改，改了又不生效。
     /// </summary>
+    [JsonIgnore]
     public int RestMinutes => FocusMinutes / 5;
 }
