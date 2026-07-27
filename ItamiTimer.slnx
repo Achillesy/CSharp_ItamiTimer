@@ -1,3 +1,7 @@
 <Solution>
-  <Project Path="ItamiTimer.csproj" />
+  <Folder Name="/src/">
+    <Project Path="src/ItamiTimer.Core/ItamiTimer.Core.csproj" />
+    <Project Path="src/ItamiTimer.Cli/ItamiTimer.Cli.csproj" />
+    <Project Path="src/ItamiTimer.App/ItamiTimer.App.csproj" />
+  </Folder>
 </Solution>

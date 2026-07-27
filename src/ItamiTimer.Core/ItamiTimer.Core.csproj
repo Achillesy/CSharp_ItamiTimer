@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    DESIGN.md §8 的第一条边界纪律：模块 1~6（AwClient / GroupRules /
+    TaskRecord / TaskEvaluator / TaskStore / Settings）不含任何 UI 代码、
+    不含任何 Win32 调用。
+
+    这里的 net10.0（没有 -windows 后缀）就是让编译器来强制执行这条纪律：
+    一旦有人往这个项目里写 WinForms / Avalonia / P/Invoke，直接编不过。
+    绝对不要给这个项目加 UseWindowsForms、UseWPF 或任何 UI 包引用。
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+</Project>

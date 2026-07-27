@@ -22,7 +22,7 @@ ItamiTimer（中文名「一袋米要扛几楼」）是一个 Windows 桌面端*
 
 **用户定的第一步**：先做一个**纯 C# 的命令行原子层**（对标 AWJ 的 `src/aw_journal/aw_atoms.py`），不带 UI、命令行下可运行、每分钟输出一个色块。它同时是模块 1/2/4 的实现、纯函数的测试夹具、以及后续 Avalonia 渲染层的数据源。UI 与逻辑分离——逻辑先于 UI 存在且能独立运行。
 
-**性能纪律见 §7.2**：增量缓存，水位线 `now − 180s`；`Gap` 格子永不冻结；查询窗口要比目标区间宽（AW 只按事件自己的开始时间过滤）；**缓存必须可以随时扔掉且重算结果一致**，它是优化不是事实来源。
+**不要做缓存**（§7.2，用户 2026-07-27 决定牺牲效率换简单）。每轮就重查 `[startedAt, now]` 整段、重放一遍。任务最长 50 分钟，事件量是分钟级的，开销可忽略；而缓存会引入一个"必须永远和重算结果一致"的不变量，错了以后症状极其隐蔽（色块看着对，账不对）。**但有一条必须保留**：查询窗口要比目标区间**宽**——AW 只按事件自己的开始时间过滤，跨过区间起点的事件会静默消失。
 
 新增的 v1 核心交互（2026-07-27）：
 
@@ -57,21 +57,37 @@ Artifact 版：https://claude.ai/code/artifact/8b803438-9eba-41c0-a296-5c98848ab
 - **共享规则、不共享代码**：`rules.json` 的 app 名可以拿 AWJ 的 `config/classify_rules.yaml` 当字典抄，但两边的匹配语义和粒度独立演进（AWJ 是 5 大类做统计，本项目是紧白名单做约束——粒度不同，见 DESIGN.md §5.1）。
 - AWJ 里那些**AW 行为特性的硬知识**要搬结论（不是搬代码）：心跳续期让 duration 自己长大、afk 分不清"走开"和"认真看"、系统代理吞 localhost 请求。都在下面「架构要点」里。
 
-## 技术栈
+## 技术栈与项目布局
 
-- C# / .NET 10。**当前代码是 WinForms 脚手架，但已决定转 Avalonia**（DESIGN.md §0.2）——转栈时 `TargetFramework` 从 `net10.0-windows` 改成 `net10.0`
-- 现状：Visual Studio 2026 生成的空白 WinForms 项目，主窗口 `PainForm`（`PainForm.cs` + `PainForm.Designer.cs`，标题「一袋米要扛几楼」）。**核心逻辑一行都还没写**，所以转 Avalonia 的成本几乎是零 —— 不要在 WinForms 上继续堆代码
-- `Nullable` 和 `ImplicitUsings` 均已启用
-- 转栈后表盘用手写 XAML 绘制（Shape/Transform/Path），**WPF 的纯 XAML 表盘项目是最可直接复用的参考**，两边几何模型一致
+C# / .NET 10。2026-07-27 拆成三个 csproj，**目的是让编译器强制执行 DESIGN.md §8 的边界纪律**（详见 §8.0）：
+
+```
+src/ItamiTimer.Core/   net10.0          类库          模块 1~6，无 UI 无 Win32
+src/ItamiTimer.Cli/    net10.0          itami.exe     命令行原子层（当前的开发重点）
+src/ItamiTimer.App/    net10.0-windows  ItamiTimer.exe  界面（WinForms 脚手架，待换 Avalonia）
+```
+
+三条不能动的：
+
+- **`Core` 必须保持 `net10.0`（无 `-windows`）**。这是纪律的执行机制本身：往 Core 里塞 WinForms/Avalonia/P/Invoke 会直接编不过。绝不要给它加 `UseWindowsForms`、`UseWPF` 或任何 UI 包引用。
+- **`App` 的 `AssemblyName` 钉死是 `ItamiTimer`**。AW 上报的 `data.app` 就是 exe 名，§5.3 第 1 步靠它做自身豁免；改了就死循环。
+- **`App` 是空脚手架，不要在上面堆代码**（DESIGN.md §0.2 已定转 Avalonia，届时整个换掉）。核心逻辑一行都还没写，所以转栈成本几乎为零。
+
+转栈后表盘用手写 XAML 绘制（Shape/Transform/Path），**WPF 的纯 XAML 表盘项目是最可直接复用的参考**，两边几何模型一致。
+
+测试项目还没建，框架未选。§7 的重放算法是纯函数，喂合成事件就能穷举边界。
 
 ## 构建 / 运行
 
-```
-dotnet build
-dotnet run
+```bash
+dotnet build ItamiTimer.slnx
 ```
 
-也可以直接用 VS2026 打开 `ItamiTimer.slnx`。这是 WinForms 应用，只能在 Windows 上运行。
+```bash
+dotnet run --project src/ItamiTimer.Cli
+```
+
+也可以直接用 VS2026 打开 `ItamiTimer.slnx`。`Core` 和 `Cli` 是跨平台的；`App` 目前只能在 Windows 上跑。
 
 ## 架构要点
 

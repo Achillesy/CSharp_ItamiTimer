@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    命令行原子层：无 UI、可独立运行、每分钟输出一个色块。
+    同时是 Core 的测试夹具和 App 渲染层的数据源（UI 与逻辑分离——
+    逻辑先于 UI 存在，且能脱离 UI 独立运行）。
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>itami</AssemblyName>
+    <RootNamespace>ItamiTimer.Cli</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ItamiTimer.Core\ItamiTimer.Core.csproj" />
+  </ItemGroup>
+
+</Project>

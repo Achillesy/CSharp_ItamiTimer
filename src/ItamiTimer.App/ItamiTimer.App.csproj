@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    ⚠️ 这是 VS2026 生成的 WinForms 空脚手架，核心逻辑一行都没有。
+    DESIGN.md §0.2 已决定转 Avalonia —— 到时候这个项目整个换掉：
+    TargetFramework 去掉 -windows、UseWindowsForms 删掉、PainForm 重写成
+    XAML。留着它只是为了在原子层开发期间解决方案仍然能构建。
+    不要在这上面继续堆代码。
+
+    AssemblyName 必须钉死成 ItamiTimer：AW 上报的 data.app 就是 exe 名，
+    而 DESIGN.md §5.3 第 1 步靠它硬编码自身豁免。改了这里，程序会把自己
+    判成 OffTask，陷入「提醒 → 用户看提醒 → 又违规 → 再提醒」死循环。
+  -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>ItamiTimer</AssemblyName>
+    <RootNamespace>ItamiTimer</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ItamiTimer.Core\ItamiTimer.Core.csproj" />
+  </ItemGroup>
+
+</Project>
