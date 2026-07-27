@@ -221,8 +221,9 @@ public class DialControl : Control
     /// 时刻画一整段灰弧。此前它被画在「有色块」的前提之下，所以任务刚开始、一格都还
     /// 没走完时盘面是空的 —— 看着像没在跑。
     ///
-    /// 截止线**必须画成一条线**：只靠弧的边缘不够。偷懒时它往前滑，正是"看着截止线
-    /// 离自己越来越远"那个痛感载体，眼睛得追得住。
+    /// **不画截止线**（用户 2026-07-27）。§8.2.4 原本要求在弧的末端画一条径向实线，
+    /// 理由是"偷懒时它往前滑，眼睛得追得住"；实际画出来那一小段线是多余的 ——
+    /// 弧自己的末端已经把位置说清楚了。
     /// </summary>
     private void DrawPendingArc(DrawingContext ctx, Point c, Func<double, double> R, double headMinute)
     {
@@ -232,13 +233,9 @@ public class DialControl : Control
         var d1 = (headMinute + RemainingMinutes) * 6;
 
         // 灰色，不是蓝色：这段是"还欠着的时间"，它不该有任何情绪
-        var grey = Palette.Tick;
         using (ctx.PushOpacity(0.30))
-            ctx.DrawGeometry(new SolidColorBrush(grey), null,
+            ctx.DrawGeometry(new SolidColorBrush(Palette.Tick), null,
                 Annulus(c, R(rIn), R(rOut), headMinute * 6, d1));
-
-        ctx.DrawLine(new Pen(new SolidColorBrush(A(grey, 0xCC)), R(0.014)),
-            At(c, R(rIn - 0.02), d1), At(c, R(rOut + 0.02), d1));
     }
 
     private void DrawTicks(DrawingContext ctx, Point c, Func<double, double> R, double rFace)

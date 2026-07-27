@@ -190,9 +190,8 @@ public partial class MainWindow : Window
 
         F<TextBlock>("BillText").IsVisible = false;
         RefreshStartButton();
-
-        // §8.3：任务一开始就收进任务栏，只留一个色环图标
-        Win32Topmost.Minimize(this);
+        // §8.3 原本要求"任务一开始就收进任务栏"，用户 2026-07-27 改成**留在原地**。
+        // 连带：回到正轨时也只撤销置顶、不再缩起来（见 OnRetract）。
     }
 
     private void OnSessionUpdated()
@@ -218,11 +217,14 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 回到正轨就自动缩回去（§0.5 问题 3）：用户已经用行动回应了提醒，继续挡着是在
-    /// 惩罚正确行为。
+    /// 回到正轨就**撤销置顶**（§0.5 问题 3）：用户已经用行动回应了提醒，继续压在
+    /// 最上面是在惩罚正确行为。
     ///
-    /// **但用户正在看这个窗口时不能抽走它** —— 窗口是用 SW_SHOWNOACTIVATE 弹的、
-    /// 本来拿不到焦点，所以它一旦成了前台窗口，就说明是用户自己点进来的。
+    /// 只撤销置顶、**不最小化** —— 用户 2026-07-27 定的"开始之后窗口就放那儿"。
+    /// 从来没缩起来过，回落时自然也不该缩。
+    ///
+    /// **用户正在看这个窗口时不动它**：窗口是用 SW_SHOWNOACTIVATE 弹的、本来拿不到
+    /// 焦点，所以它一旦成了前台窗口，就说明是用户自己点进来的。
     /// </summary>
     private void OnRetract()
     {
@@ -230,7 +232,6 @@ public partial class MainWindow : Window
         if (Win32Topmost.IsForeground(this)) return;
         _popped = false;
         Win32Topmost.ClearTopmost(this);
-        Win32Topmost.Minimize(this);
     }
 
     private void OnInterrupted(TaskSession.Interrupt why)
@@ -299,19 +300,41 @@ public partial class MainWindow : Window
 
     // ---------------------------------------------------------------- 退出 = 放弃（§9）
 
-    private void OnClosing(object? sender, WindowClosingEventArgs e)
+    private bool _closeApproved;
+
+    /// <summary>
+    /// §9：**专注中关窗口 = 放弃任务**，所以要问一次。标题栏的 ×、任务栏右键「关闭
+    /// 窗口」、Alt+F4 都会走到这里。
+    ///
+    /// 没有任务、或者已经在休息（专注已达成、账也给过了）→ **直接退出，不问**。
+    ///
+    /// Closing 是同步事件，没法在里面 await 对话框，所以先取消关闭、异步问完再关。
+    /// </summary>
+    private async void OnClosing(object? sender, WindowClosingEventArgs e)
     {
-        // 专注中点关闭 = 放弃任务。收起来该用最小化，两个动作长得像、后果差很远，
-        // 所以必须问一次，并且**先把账摆出来**。
-        if (_session is { Finished: false, InRest: false } && !_confirmingQuit)
+        if (_closeApproved) return;
+        if (_session is not { Finished: false, InRest: false }) return;
+
+        e.Cancel = true;
+
+        // **先撤销置顶再问**。偏离提醒会把主窗口设成 HWND_TOPMOST，而确认框是普通窗口
+        // —— 不撤销的话它会被主窗口整个盖住，用户看到的就是"点了 × 什么都没发生"。
+        // （测试时踩到过：对话框确实创建了、也是前台窗口，但屏幕上看不见。）
+        _popped = false;
+        Win32Topmost.ClearTopmost(this);
+
+        if (await Confirm.AskAsync(this, "任务尚未完成，你确定退出？"))
         {
-            e.Cancel = true;
-            ShowQuitConfirm();
+            _session?.Abandon();
+            _closeApproved = true;
+            Close();
         }
     }
 
     private void ShowQuitConfirm()
     {
+        _popped = false;
+        Win32Topmost.ClearTopmost(this);
         if (_session?.State is { } st) ShowBill(Bill.Render(_session.Task, st));
         F<StackPanel>("ConfirmRow").IsVisible = true;
         F<Button>("StartBtn").IsEnabled = false;
@@ -319,12 +342,13 @@ public partial class MainWindow : Window
         Pop();
     }
 
+    /// <summary>界面里点「放弃」→ 只放弃这一轮，**不退出程序**（用户 2026-07-27）。</summary>
     private void OnConfirmQuit(object? sender, RoutedEventArgs e)
     {
         _session?.Abandon();
         EndSession();
         F<TextBlock>("BillText").IsVisible = false;
-        Close();
+        Win32Topmost.ClearTopmost(this);
     }
 
     private void OnCancelQuit(object? sender, RoutedEventArgs e)
@@ -334,7 +358,6 @@ public partial class MainWindow : Window
         F<TextBlock>("BillText").IsVisible = false;
         RefreshStartButton();
         Win32Topmost.ClearTopmost(this);
-        Win32Topmost.Minimize(this);
     }
 
     /// <summary>
