@@ -154,28 +154,39 @@ public class DominoRow : Control
         var list = new List<(Geometry, IBrush)>();
         if (k.W <= 0 || k.H <= 0 || k.Palette is not { } p) return list;
 
-        // 七天共用的缩放：以并集包围盒为准
+        // 缩放七天共用（以并集包围盒为准），否则周一的骨牌会明显比周日的大。
         var scale = Math.Min(k.W / (MaxX - MinX), k.H * 0.94 / MaxY);
-        var padX = (k.W - (MaxX - MinX) * scale) / 2;
-        // 骨牌整体下移，底部压住影子上沿，否则会看着像浮在影子上方
-        var baseY = k.H * 0.985;
-        // 镜像：世界坐标仍按「向右倒」算，画的时候把 x 翻过来
-        Point S(Point w) => new(padX + (MaxX - w.X) * scale, baseY - w.Y * scale);
 
         // 转成数组：ReadOnlySpan 不能被局部函数捕获。只有 7 个元素，而 Build
         // 一天才跑一次，这点开销无所谓。
         var ang = Angles(k.Fallen).ToArray();
         double AngleAt(int i) => i < ang.Length ? ang[i] : 0;
 
+        // **左对齐**：锚点取【本布局自己】的最大世界 x（镜像后就是屏幕最左那一点），
+        // 而不是七天并集的。用并集会让周一到周六左边空出一大块——那块是留给周日
+        // 倒平的牌的，可周一根本没有。
+        // 周日因此有自己的锚点，但那天一块立着的都没有，看不出位置变过（用户说
+        // 周日是特例、位置随便）。
+        var anchor = double.MinValue;
+        for (var i = 0; i < Count; i++)
+            foreach (var q in Corners(i * Pitch + T, AngleAt(i)))
+                anchor = Math.Max(anchor, q.X);
+
+        var padX = T * scale * 0.35;
+        // 骨牌整体下移，底部压住影子上沿，否则会看着像浮在影子上方
+        var baseY = k.H * 0.985;
+        // 镜像：世界坐标仍按「向右倒」算，画的时候把 x 翻过来
+        Point S(Point w) => new(padX + (anchor - w.X) * scale, baseY - w.Y * scale);
+
         // ---- 第一遍：一整条影子。**连成一片、大小固定**，不随倒下块数变化。
         //      范围只取【七块都立着时】的那一段（倒下的牌伸出去的部分不带影子，
         //      因为影子大小是固定的），光在左上所以往右多探一截。
         //      上下沿都用渐变淡出：硬边会读成一条独立的灰带，骨牌就像浮在它上面。
         {
-            // 满宽。曾试过只盖住「七块都立着」的那一段，结果周日倒下的牌会伸到带子
-            // 外面去 —— 影子大小既然固定，就得固定成【够盖住任何一天】的那个尺寸。
-            var left = padX - T * scale * 0.5;
-            var right = padX + (MaxX - MinX) * scale + Pitch * 0.4 * scale;
+            // **光从左边来，所以骨牌左边不该有影子**：带子从最左那块的脚下起头，
+            // 只往右铺。往右要多探一截，盖住最右那块的影子。
+            var left = padX;
+            var right = padX + (anchor - 0) * scale + Pitch * 0.5 * scale;
             var top = baseY - T * scale * 0.70;
             var bottom = baseY + T * scale * 0.95;
             list.Add((Quad(new Point(left, top), new Point(right, top),
@@ -206,11 +217,22 @@ public class DominoRow : Control
             // 跟平视的消失点矛盾。
             if (a < 1e-6)
             {
-                // 镜像之后侧面落在【左】边，正对左上的光 —— 它是高光面
+                // 镜像之后侧面落在【左】边，正对左上的光 —— 它是向光面。
+                //
+                // **不是上下等宽**：视平线就在骨牌顶端（所以看不到顶面），纵深方向的
+                // 线全都朝那里收，于是这个面越往上越窄、到顶几乎并成一条。远端的
+                // 底角同时要抬起来一点——它比近端离视平线更近。
                 var d = SideWidth(i) * scale;
                 if (d > 0.4)
-                    list.Add((Quad(br, new Point(br.X - d, br.Y), new Point(tr.X - d, tr.Y), tr),
+                {
+                    const double TopRatio = 0.18;      // 顶端只剩底端宽度的一小截
+                    var rise = d * 0.30;               // 远端底角朝视平线抬起
+                    list.Add((Quad(br,
+                                   new Point(br.X - d, br.Y - rise),
+                                   new Point(tr.X - d * TopRatio, tr.Y),
+                                   tr),
                               new SolidColorBrush(p.DominoSide)));
+                }
             }
 
             list.Add((Quad(tl, tr, br, bl), new LinearGradientBrush
@@ -219,7 +241,7 @@ public class DominoRow : Control
                 EndPoint = new RelativePoint(1, 1, RelativeUnit.Relative),
                 GradientStops =
                 {
-                    new GradientStop(Lighten(p.DominoFace, 0.30), 0.0),
+                    new GradientStop(Lighten(p.DominoFace, 0.12), 0.0),
                     new GradientStop(p.DominoFace, 1.0),
                 }
             }));

@@ -37,12 +37,13 @@ public sealed record DialPalette(
         // 会消失，而且会教育眼睛"红 = 正常"。独立 token，而且要【轻】——
         // 它是装饰，不该跟时分针抢。
         Sweep: Color.FromRgb(0x33, 0x40, 0x4B),
-        // 骨牌：白色塑料。镜像之后侧面落在【左】边、正对左上的光，所以
-        // **侧面是高光面，正对屏幕的正面反而略暗**（用户 2026-07-27 定）。
-        // DominoTop 保留但不再使用——相机在骨牌顶端一线，看不到顶面。
-        DominoTop: Color.FromRgb(0xFF, 0xFF, 0xFF),
-        DominoFace: Color.FromRgb(0xDF, 0xE3, 0xE8),
-        DominoSide: Color.FromRgb(0xFC, 0xFD, 0xFE));
+        // 骨牌：**木质**（用户 2026-07-27 定），比表盘的木框浅一档，免得抢。
+        // 镜像之后侧面落在【左】边正对左上的光，所以侧面是向光面 ——
+        // 但**只需要稍微亮一点**，明暗拉太开就不像同一块木头了。
+        // DominoTop 保留但不再使用：相机在骨牌顶端一线，看不到顶面。
+        DominoTop: Color.FromRgb(0xE2, 0xC6, 0xA4),
+        DominoFace: Color.FromRgb(0xC4, 0x9E, 0x74),
+        DominoSide: Color.FromRgb(0xD3, 0xB0, 0x88));
 
     /// <summary>夜面：深灰盘 + 深色金属边框。</summary>
     public static readonly DialPalette Dark = new(
@@ -59,9 +60,9 @@ public sealed record DialPalette(
         Absent: Color.FromRgb(0x6E, 0x7A, 0x87),
         Pending: Color.FromRgb(0x5C, 0x97, 0xE8),
         Sweep: Color.FromRgb(0xB8, 0xC4, 0xD0),
-        DominoTop: Color.FromRgb(0x9A, 0xA5, 0xB2),
-        DominoFace: Color.FromRgb(0x67, 0x72, 0x7F),
-        DominoSide: Color.FromRgb(0xA6, 0xB1, 0xBD));
+        DominoTop: Color.FromRgb(0x8A, 0x6E, 0x50),
+        DominoFace: Color.FromRgb(0x6E, 0x56, 0x3C),
+        DominoSide: Color.FromRgb(0x7E, 0x64, 0x48));
 
     /// <summary>
     /// §8.2.3 的三段过渡：focus → amber → slack。
