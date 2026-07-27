@@ -32,12 +32,20 @@ namespace ItamiTimer.App;
 /// 数值可以互相印证：递推收敛到 75.52°，而「面贴面摞起来」的极限角满足
 /// `cos θ = t / pitch = 1/4`，`arccos(0.25) = 75.52°`。两条路算出同一个数。
 ///
-/// ── 渲染近似 ───────────────────────────────────────────
+/// ── 渲染近似（用户 2026-07-27 定）─────────────────────────
 ///
-/// 相机在**右前方稍高处**：立着的牌在**右边**多出一个侧面和一条顶面；倒下的牌
-/// 转到了侧向，那个面看不见了，所以**只画侧面矩形 + 接触影**。
+/// **看不到顶面。** 相机高度在骨牌顶端一线，所以地面是近乎侧看的——顶面看不见，
+/// 地上的影子也只能是一条很薄的带子。这一条是自洽性的关键：能看见顶面就意味着
+/// 俯视，跟平视的消失点是矛盾的。
 ///
-/// 光源与表盘统一在**左上**：顶面最亮 → 正面居中 → 右侧面背光最暗。
+/// **右侧面的宽度逐块减半。** 消失点在**左**，所以越靠右露出的右侧面越宽：
+/// 最右一块 = 正面宽的 1/2，往左依次 1/4、1/8……到左边第二块基本看不见。
+/// 左边第一块永远是倒下的，不用管。
+///
+/// **倒下的牌没有右侧面**：它转到了侧向，那个面已经看不见了，只剩侧面矩形。
+///
+/// **先画影子，后画骨牌。** 骨牌挡住影子靠近自己的那一端，接缝就藏起来了。
+/// 影子向**左**投、直接连到左邻那块，立着的时候最长，倒下时按 cos 收短。
 ///
 /// ── 性能 ──────────────────────────────────────────────
 ///
@@ -67,8 +75,11 @@ public class DominoRow : Control
     // ---- 骨牌单位：高 6、厚 1、间距 3（= 高/2）、中心距 4
     private const double H = 6, T = 1, Pitch = 4;
 
-    /// <summary>立牌向右后方的纵深偏移（骨牌单位）。相机在右前方稍高处。</summary>
-    private const double DX = 0.90, DY = 0.50;
+    /// <summary>
+    /// 第 i 块露出的右侧面宽度（骨牌单位）。消失点在左：最右一块是正面宽的 1/2，
+    /// 往左逐块减半。<c>Count-1-i</c> 是它离最右边有几块。
+    /// </summary>
+    private static double SideWidth(int i) => T * Math.Pow(0.5, Count - i);
 
     /// <summary>
     /// 倒 1~6 块的角度（度）。**取这个数组的后 N 个**就是倒 N 块的布局。
@@ -119,11 +130,7 @@ public class DominoRow : Control
                 {
                     minX = Math.Min(minX, q.X); maxX = Math.Max(maxX, q.X);
                     maxY = Math.Max(maxY, q.Y);
-                    if (a < 1e-6)   // 立着的还有纵深
-                    {
-                        maxX = Math.Max(maxX, q.X + DX);
-                        maxY = Math.Max(maxY, q.Y + DY);
-                    }
+                    if (a < 1e-6) maxX = Math.Max(maxX, q.X + SideWidth(i));   // 立着的还有右侧面
                 }
             }
         }
@@ -150,38 +157,59 @@ public class DominoRow : Control
         var baseY = k.H * 0.97;
         Point S(Point w) => new(padX + (w.X - MinX) * scale, baseY - w.Y * scale);
 
-        var ang = Angles(k.Fallen);
+        // 转成数组：ReadOnlySpan 不能被局部函数捕获。只有 7 个元素，而 Build
+        // 一天才跑一次，这点开销无所谓。
+        var ang = Angles(k.Fallen).ToArray();
+        double AngleAt(int i) => i < ang.Length ? ang[i] : 0;
 
-        // 从右往左：右邻先画，左边倒下的那块压在它身上（在上层）
-        for (var i = Count - 1; i >= 0; i--)
+        // ---- 第一遍：全部影子。先画完再画骨牌，骨牌会挡住影子靠近自己的那一端，
+        //      接缝就藏起来了（用户 2026-07-27 的要求）。
+        for (var i = 0; i < Count; i++)
         {
-            var a = i < ang.Length ? ang[i] : 0;
+            var a = AngleAt(i);
             var c = Corners(i * Pitch + T, a);
-            var (bl, br, tr, tl) = (S(c[0]), S(c[1]), S(c[2]), S(c[3]));
+            var (bl, br) = (S(c[0]), S(c[1]));
 
-            // 接触影：躺得越平摊得越开
-            var t = a / 90.0;
-            var shW = T * scale * (1.1 + t * 7.5);
-            var shX = (bl.X + br.X) / 2 + t * H * scale * 0.42;
-            list.Add((Ellipse(new Point(shX, baseY + T * scale * 0.16), shW, T * scale * 0.55),
-                new RadialGradientBrush
+            // 影子向【左】投，直接连到左邻那块的位置；立着时最长，倒下时按 cos 收短。
+            // 相机在骨牌顶端一线，地面近乎侧看，所以影子只能是很薄的一条带子。
+            var len = Pitch * Math.Cos(a * Math.PI / 180) * scale;
+            if (len < scale * 0.2) continue;
+            var band = T * scale * 0.42;
+            var right = br.X;
+            var left = right - len;
+
+            list.Add((Quad(new Point(left, baseY - band * 0.5), new Point(right, baseY - band),
+                           new Point(right, baseY + band), new Point(left, baseY + band * 0.5)),
+                new LinearGradientBrush
                 {
+                    StartPoint = new RelativePoint(1, 0, RelativeUnit.Relative),
+                    EndPoint = new RelativePoint(0, 0, RelativeUnit.Relative),
                     GradientStops =
                     {
-                        new GradientStop(Color.FromArgb(0x3C, 0, 0, 0), 0.0),
-                        new GradientStop(Color.FromArgb(0x1A, 0, 0, 0), 0.55),
+                        new GradientStop(Color.FromArgb(0x3E, 0, 0, 0), 0.0),
+                        new GradientStop(Color.FromArgb(0x1C, 0, 0, 0), 0.55),
                         new GradientStop(Color.FromArgb(0x00, 0, 0, 0), 1.0),
                     }
                 }));
+        }
 
+        // ---- 第二遍：骨牌。从右往左，左边倒下的那块压在右邻身上（在上层）
+        for (var i = Count - 1; i >= 0; i--)
+        {
+            var a = AngleAt(i);
+            var c = Corners(i * Pitch + T, a);
+            var (bl, br, tr, tl) = (S(c[0]), S(c[1]), S(c[2]), S(c[3]));
+
+            // 立着的牌在右边多出一个侧面，宽度逐块减半（消失点在左）。
+            // **没有顶面**——相机在骨牌顶端一线，看得见顶面就意味着俯视，
+            // 跟平视的消失点矛盾。
             if (a < 1e-6)
             {
-                // 立着：右边多出一个侧面和一条顶面（相机在右前方稍高处）
-                Point Back(Point q) => new(q.X + DX * scale, q.Y - DY * scale);
-                list.Add((Quad(br, Back(br), Back(tr), tr), new SolidColorBrush(p.DominoSide)));
-                list.Add((Quad(tl, tr, Back(tr), Back(tl)), new SolidColorBrush(p.DominoTop)));
+                var d = SideWidth(i) * scale;
+                if (d > 0.4)
+                    list.Add((Quad(br, new Point(br.X + d, br.Y), new Point(tr.X + d, tr.Y), tr),
+                              new SolidColorBrush(p.DominoSide)));
             }
-            // 倒下的：那个面已经转到侧向看不见了，只画侧面矩形
 
             list.Add((Quad(tl, tr, br, bl), new LinearGradientBrush
             {
@@ -189,7 +217,7 @@ public class DominoRow : Control
                 EndPoint = new RelativePoint(1, 1, RelativeUnit.Relative),
                 GradientStops =
                 {
-                    new GradientStop(Lighten(p.DominoFace, 0.35), 0.0),   // 左上受光
+                    new GradientStop(Lighten(p.DominoFace, 0.30), 0.0),
                     new GradientStop(p.DominoFace, 1.0),
                 }
             }));
