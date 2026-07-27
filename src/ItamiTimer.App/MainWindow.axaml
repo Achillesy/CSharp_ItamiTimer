@@ -5,7 +5,8 @@
         Title="一袋米要扛几楼"
         Width="380" Height="620"
         CanResize="False"
-        WindowStartupLocation="CenterScreen">
+        WindowStartupLocation="CenterScreen"
+        Background="#D7DBE0">
 
   <DockPanel Margin="18">
 

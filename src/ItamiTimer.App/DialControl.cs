@@ -22,8 +22,8 @@ public class DialControl : Control
 {
     // ---- §8.2.1 分层与半径（归一化到 rFace = 1.0）
     private const double RBezelOut = 1.075;  // 木框外缘。第一版 1.13 太厚，像玩具
-    private const double RNumerals = 0.700;  // 往内收：0.795 时数字跟刻度挤在一起
-    private const double RTickMinor = 0.905, RTickMajor = 0.875, RTickOuter = 0.955;
+    private const double RNumerals = 0.745;  // 0.795 挤刻度、0.70 离刻度太远，取中
+    private const double RTickMinor = 0.918, RTickMajor = 0.893, RTickOuter = 0.955;
     private const double RHour = 0.55, RMinute = 0.775, RSecond = 0.88;
     private const double RHub = 0.035;
 
@@ -162,8 +162,8 @@ public class DialControl : Control
             GradientStops =
             {
                 new GradientStop(A(Shadow, 0x00), 0.80),
-                new GradientStop(A(Shadow, 0x14), 0.94),
-                new GradientStop(A(Shadow, 0x2E), 1.0),
+                new GradientStop(A(Shadow, 0x0C), 0.95),
+                new GradientStop(A(Shadow, 0x22), 1.0),
             }
         }, null, c, R(1.0), R(1.0));
     }
@@ -239,8 +239,8 @@ public class DialControl : Control
         {
             var major = i % 5 == 0;
             var pen = new Pen(new SolidColorBrush(major ? Palette.Ink : Palette.Tick),
-                              rFace * (major ? 0.014 : 0.0055))
-            { LineCap = major ? PenLineCap.Flat : PenLineCap.Round };
+                              rFace * (major ? 0.026 : 0.0105))
+            { LineCap = PenLineCap.Flat };
             ctx.DrawLine(pen, At(c, R(major ? RTickMajor : RTickMinor), i * 6), At(c, R(RTickOuter), i * 6));
         }
     }

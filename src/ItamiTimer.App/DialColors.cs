@@ -19,8 +19,8 @@ public sealed record DialPalette(
 {
     /// <summary>日面：素白盘 + 木质边框（对着用户给的那张实物照片调的）。</summary>
     public static readonly DialPalette Light = new(
-        Face: Color.FromRgb(0xFD, 0xFD, 0xFC),
-        FaceRim: Color.FromRgb(0xF4, 0xF3, 0xF0),   // 盘面边缘，被边框挡住光的地方
+        Face: Color.FromRgb(0xFF, 0xFF, 0xFF),
+        FaceRim: Color.FromRgb(0xF2, 0xF3, 0xF5),   // 盘面边缘，被边框挡住光的地方
         Ink: Color.FromRgb(0x1B, 0x22, 0x2A),
         Tick: Color.FromRgb(0x5A, 0x63, 0x6D),
         // 木框：左上受光 → 右下背光
