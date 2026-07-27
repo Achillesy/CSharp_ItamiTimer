@@ -42,8 +42,8 @@ namespace ItamiTimer.App;
 /// **看不到顶面。** 相机高度在骨牌顶端一线，能看见顶面就意味着俯视，跟平视的
 /// 消失点矛盾。这一条同时决定了地上的影子只能是很薄的一条带子。
 ///
-/// **侧面宽度线性递减**：屏幕上最左那块是完整的梯形，往右依次 3/4、1/2、1/4，
-/// 第五块起省略。**侧面是向光面，正对屏幕的正面反而略暗。**
+/// **侧面宽度按像素定死**：屏幕上从左数 6、5、4、3、2、1 像素，第七块起没有。
+/// **侧面是向光面，正对屏幕的正面反而略暗。**
 ///
 /// **倒下的牌没有侧面**：它转到了侧向，那个面已经看不见了。
 ///
@@ -79,18 +79,19 @@ public class DominoRow : Control
     private const double H = 6, T = 1, Pitch = 4;
 
     /// <summary>
-    /// 露出的侧面宽度，按**屏幕上从左数第几块**给：完整 → 3/4 → 1/2 → 1/4 → 没有。
+    /// 露出的侧面宽度，**直接用像素定死**（用户 2026-07-27）：屏幕上从左数
+    /// 6、5、4、3、2、1 像素，第七块和所有倒下的都没有。
     ///
-    /// 原来用逐块减半（1/2、1/4、1/8……），**衰减太快**——第三块起就只剩零点几个
-    /// 像素，等于只有最左一块看得出厚度。改成线性递减之后，前四块都还读得出来，
-    /// 后面省略掉反而更干净。
+    /// 刻意不跟缩放走。这个面本来就只是一道暗示厚度的窄边，按比例算的话在小窗口上
+    /// 会细到看不见、在大窗口上又会宽得像另一块骨牌；给绝对像素反而稳定。
+    /// （Avalonia 画的是 DIP，所以高 DPI 下它仍会跟着系统缩放，不会变成发丝。）
     /// </summary>
-    private static readonly double[] SideSchedule = [1.00, 0.75, 0.50, 0.25];
+    private static readonly double[] SidePx = [6, 5, 4, 3, 2, 1];
 
-    private static double SideWidth(int i)
+    private static double SideWidthPx(int i)
     {
         var j = Count - 1 - i;        // 镜像之后，屏幕上从左数第几块（0 起）
-        return j < SideSchedule.Length ? T * SideSchedule[j] : 0;
+        return j < SidePx.Length ? SidePx[j] : 0;
     }
 
     /// <summary>
@@ -142,7 +143,6 @@ public class DominoRow : Control
                 {
                     minX = Math.Min(minX, q.X); maxX = Math.Max(maxX, q.X);
                     maxY = Math.Max(maxY, q.Y);
-                    if (a < 1e-6) maxX = Math.Max(maxX, q.X + SideWidth(i));   // 立着的还有右侧面
                 }
             }
         }
@@ -244,7 +244,7 @@ public class DominoRow : Control
                 // **不是上下等宽**：视平线就在骨牌顶端（所以看不到顶面），纵深方向的
                 // 线全都朝那里收，于是这个面越往上越窄、到顶几乎并成一条。远端的
                 // 底角同时要抬起来一点——它比近端离视平线更近。
-                var d = SideWidth(i) * scale;
+                var d = SideWidthPx(i);
                 if (d > 0.4)
                 {
                     // 消失点在**画面之外**、大致在半高的位置，所以远端那条边
