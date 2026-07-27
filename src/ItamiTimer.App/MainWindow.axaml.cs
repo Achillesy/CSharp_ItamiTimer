@@ -33,6 +33,9 @@ public partial class MainWindow : Window
         };
         UpdateMinutesText();
 
+        // 空闲时的图标就是那颗折纸番茄；任务进行中会换成 RingIcon 的进度色环（§8.3.2）
+        Icon = TomatoIcon.Make();
+
         _frame.Tick += (_, _) => this.FindControl<DialControl>("Dial")!.InvalidateVisual();
         _frame.Start();
     }

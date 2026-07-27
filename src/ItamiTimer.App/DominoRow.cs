@@ -34,18 +34,21 @@ namespace ItamiTimer.App;
 ///
 /// ── 渲染近似（用户 2026-07-27 定）─────────────────────────
 ///
-/// **看不到顶面。** 相机高度在骨牌顶端一线，所以地面是近乎侧看的——顶面看不见，
-/// 地上的影子也只能是一条很薄的带子。这一条是自洽性的关键：能看见顶面就意味着
-/// 俯视，跟平视的消失点是矛盾的。
+/// **整排是镜像的。** 几何仍然按「向右倒」算（那样递推最好写），但画到屏幕时把 x
+/// 翻过来：于是**第一块倒下的在右边、往左倒**，影子自然投向右侧，跟表盘那个
+/// **左上**光源就一致了——不用改表盘，也不用改光源。递减的侧面因此落在左边，
+/// 正好是受光面。
 ///
-/// **右侧面的宽度逐块减半。** 消失点在**左**，所以越靠右露出的右侧面越宽：
-/// 最右一块 = 正面宽的 1/2，往左依次 1/4、1/8……到左边第二块基本看不见。
-/// 左边第一块永远是倒下的，不用管。
+/// **看不到顶面。** 相机高度在骨牌顶端一线，能看见顶面就意味着俯视，跟平视的
+/// 消失点矛盾。这一条同时决定了地上的影子只能是很薄的一条带子。
 ///
-/// **倒下的牌没有右侧面**：它转到了侧向，那个面已经看不见了，只剩侧面矩形。
+/// **侧面宽度逐块减半**，最宽的那块是正面宽的 1/2，往消失点方向依次 1/4、1/8……
+/// 到第三块起就是零点几个像素了。**侧面是高光面，正对屏幕的正面反而略暗。**
 ///
-/// **先画影子，后画骨牌。** 骨牌挡住影子靠近自己的那一端，接缝就藏起来了。
-/// 影子向**左**投、直接连到左邻那块，立着的时候最长，倒下时按 cos 收短。
+/// **倒下的牌没有侧面**：它转到了侧向，那个面已经看不见了。
+///
+/// **影子是连成一片的一条带子，大小固定**，不随倒下块数变化。先画影子后画骨牌，
+/// 并且**骨牌整体下移、底部压住影子的上沿**——不压住的话骨牌会看着像浮在影子上方。
 ///
 /// ── 性能 ──────────────────────────────────────────────
 ///
@@ -154,41 +157,39 @@ public class DominoRow : Control
         // 七天共用的缩放：以并集包围盒为准
         var scale = Math.Min(k.W / (MaxX - MinX), k.H * 0.94 / MaxY);
         var padX = (k.W - (MaxX - MinX) * scale) / 2;
-        var baseY = k.H * 0.97;
-        Point S(Point w) => new(padX + (w.X - MinX) * scale, baseY - w.Y * scale);
+        // 骨牌整体下移，底部压住影子上沿，否则会看着像浮在影子上方
+        var baseY = k.H * 0.985;
+        // 镜像：世界坐标仍按「向右倒」算，画的时候把 x 翻过来
+        Point S(Point w) => new(padX + (MaxX - w.X) * scale, baseY - w.Y * scale);
 
         // 转成数组：ReadOnlySpan 不能被局部函数捕获。只有 7 个元素，而 Build
         // 一天才跑一次，这点开销无所谓。
         var ang = Angles(k.Fallen).ToArray();
         double AngleAt(int i) => i < ang.Length ? ang[i] : 0;
 
-        // ---- 第一遍：全部影子。先画完再画骨牌，骨牌会挡住影子靠近自己的那一端，
-        //      接缝就藏起来了（用户 2026-07-27 的要求）。
-        for (var i = 0; i < Count; i++)
+        // ---- 第一遍：一整条影子。**连成一片、大小固定**，不随倒下块数变化。
+        //      范围只取【七块都立着时】的那一段（倒下的牌伸出去的部分不带影子，
+        //      因为影子大小是固定的），光在左上所以往右多探一截。
+        //      上下沿都用渐变淡出：硬边会读成一条独立的灰带，骨牌就像浮在它上面。
         {
-            var a = AngleAt(i);
-            var c = Corners(i * Pitch + T, a);
-            var (bl, br) = (S(c[0]), S(c[1]));
-
-            // 影子向【左】投，直接连到左邻那块的位置；立着时最长，倒下时按 cos 收短。
-            // 相机在骨牌顶端一线，地面近乎侧看，所以影子只能是很薄的一条带子。
-            var len = Pitch * Math.Cos(a * Math.PI / 180) * scale;
-            if (len < scale * 0.2) continue;
-            var band = T * scale * 0.42;
-            var right = br.X;
-            var left = right - len;
-
-            list.Add((Quad(new Point(left, baseY - band * 0.5), new Point(right, baseY - band),
-                           new Point(right, baseY + band), new Point(left, baseY + band * 0.5)),
+            // 满宽。曾试过只盖住「七块都立着」的那一段，结果周日倒下的牌会伸到带子
+            // 外面去 —— 影子大小既然固定，就得固定成【够盖住任何一天】的那个尺寸。
+            var left = padX - T * scale * 0.5;
+            var right = padX + (MaxX - MinX) * scale + Pitch * 0.4 * scale;
+            var top = baseY - T * scale * 0.70;
+            var bottom = baseY + T * scale * 0.95;
+            list.Add((Quad(new Point(left, top), new Point(right, top),
+                           new Point(right, bottom), new Point(left, bottom)),
                 new LinearGradientBrush
                 {
-                    StartPoint = new RelativePoint(1, 0, RelativeUnit.Relative),
-                    EndPoint = new RelativePoint(0, 0, RelativeUnit.Relative),
+                    StartPoint = new RelativePoint(0, 0, RelativeUnit.Relative),
+                    EndPoint = new RelativePoint(0, 1, RelativeUnit.Relative),
                     GradientStops =
                     {
-                        new GradientStop(Color.FromArgb(0x3E, 0, 0, 0), 0.0),
-                        new GradientStop(Color.FromArgb(0x1C, 0, 0, 0), 0.55),
-                        new GradientStop(Color.FromArgb(0x00, 0, 0, 0), 1.0),
+                        new GradientStop(Color.FromArgb(0x00, 0, 0, 0), 0.00),
+                        new GradientStop(Color.FromArgb(0x2E, 0, 0, 0), 0.42),
+                        new GradientStop(Color.FromArgb(0x24, 0, 0, 0), 0.58),
+                        new GradientStop(Color.FromArgb(0x00, 0, 0, 0), 1.00),
                     }
                 }));
         }
@@ -205,9 +206,10 @@ public class DominoRow : Control
             // 跟平视的消失点矛盾。
             if (a < 1e-6)
             {
+                // 镜像之后侧面落在【左】边，正对左上的光 —— 它是高光面
                 var d = SideWidth(i) * scale;
                 if (d > 0.4)
-                    list.Add((Quad(br, new Point(br.X + d, br.Y), new Point(tr.X + d, tr.Y), tr),
+                    list.Add((Quad(br, new Point(br.X - d, br.Y), new Point(tr.X - d, tr.Y), tr),
                               new SolidColorBrush(p.DominoSide)));
             }
 
