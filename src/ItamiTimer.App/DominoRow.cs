@@ -172,9 +172,11 @@ public class DominoRow : Control
             foreach (var q in Corners(i * Pitch + T, AngleAt(i)))
                 anchor = Math.Max(anchor, q.X);
 
-        // 影子的跨度：从最左那块的左下角起（= 屏幕上的 padX），到最右那块的支点，
-        // 再往右多探一点点。周一到周六这个跨度不变，所以**把影子居中，整排就居中**。
-        var shadowSpan = (anchor - T) * scale + Pitch * 0.22 * scale;
+        // 影子的跨度：从最左那块的左下角起（= 屏幕上的 padX），**到最右那块与地面的
+        // 接触点为止**，一点都不多探。骨牌倒下之后只有右下角还挨着地，那个角就是它的
+        // 支点，世界坐标恒为 T ——所以右端就是 (anchor - T)。
+        // 周一到周六这个跨度不变，所以**把影子居中，整排就居中**。
+        var shadowSpan = (anchor - T) * scale;
         var padX = (k.W - shadowSpan) / 2;
 
         // 骨牌整体下移，脚跟压住影子，否则会看着像浮在影子上方
