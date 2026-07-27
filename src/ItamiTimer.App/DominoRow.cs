@@ -212,8 +212,11 @@ public class DominoRow : Control
             var right = padX + shadowSpan;
             var top = baseY - T * scale * 1.15;
             var bottom = baseY;
-            list.Add((Quad(new Point(left, top), new Point(right, top),
-                           new Point(right, bottom), new Point(left, bottom)),
+            // 圆角而不是方角：一条硬边的矩形会读成"贴了一块灰纸"，两端收圆之后
+            // 才像影子自己在地上淡开。圆角取带高的四成，不做成整颗药丸。
+            var bandH = bottom - top;
+            list.Add((new RectangleGeometry(new Rect(left, top, right - left, bandH),
+                                            bandH * 0.40, bandH * 0.40),
                 new LinearGradientBrush
                 {
                     StartPoint = new RelativePoint(0, 0, RelativeUnit.Relative),
