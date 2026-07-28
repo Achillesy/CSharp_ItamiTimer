@@ -268,6 +268,10 @@ public partial class MainWindow : Window
             Groups = picked,
         };
 
+        // 点击 Start 时补充检查今天星期几，更新骨牌数目。
+        // 这样跨过午夜点击时，骨牌会反映新的日期；检查密度低，不会太明显。
+        F<DominoRow>("Dominoes").Fallen = DominoRow.FallenForToday(DateTime.Now);
+
         // 番茄钟模式下 rules 可能压根没读出来（§11.1 第 4 条），给一份空的即可 ——
         // 合成事件靠自身豁免命中 Neutral，不经过任何用户规则。
         _session = new TaskSession(task, _rules ?? GroupRules.Empty, _mode, _settings.AwBaseUrl);
