@@ -39,6 +39,16 @@ public sealed class Settings
     /// <summary>右上角那个图钉：窗口置顶。手动开关，没有任何自动收放（<see cref="WindowPin"/>）。</summary>
     [JsonPropertyName("pinned")] public bool Pinned { get; set; }
 
+    /// <summary>
+    /// ActivityWatch 的地址（§11.1）。**用别的文本编辑器改这个文件**，设置窗口里没有它 ——
+    /// 那一页只放声音（§8.3.2）。
+    ///
+    /// 在此之前这个值**根本没有配置**：`AwClient` 的默认参数写死成这个串，三个调用点
+    /// 全是 `new AwClient()`，一处传参都没有。所以"读了配置恰好是默认值"和"压根没有
+    /// 配置"看起来一样 —— 现在把它摆到文件里，至少改得动了。
+    /// </summary>
+    [JsonPropertyName("awBaseUrl")] public string AwBaseUrl { get; set; } = "http://127.0.0.1:5600";
+
     private static string Path_ => System.IO.Path.Combine(AppData.Dir, "settings.json");
 
     private static readonly JsonSerializerOptions Json = new() { WriteIndented = true };

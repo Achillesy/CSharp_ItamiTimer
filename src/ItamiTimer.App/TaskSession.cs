@@ -58,7 +58,8 @@ public sealed class TaskSession : IDisposable
     private const int AwAfkTimeoutSeconds = 180;
 
     private readonly GroupRules _rules;
-    private readonly AwClient _aw = new();
+    /// <summary>地址来自 settings.json（§11.1），不再写死在代码里。</summary>
+    private readonly AwClient _aw;
     private readonly DispatcherTimer _tick = new();
     private string? _winBucket, _afkBucket;
     private bool _busy;
@@ -102,17 +103,26 @@ public sealed class TaskSession : IDisposable
     public event Action<Interrupt>? Interrupted;
 
 
-    public TaskSession(TaskRecord task, GroupRules rules)
+    /// <summary>
+    /// 番茄钟模式：不查 AW，喂合成事件给 <see cref="Replay"/>（§11.1 第 1 条）。
+    /// 启动时定死，会话中途不会变。
+    /// </summary>
+    private readonly bool _pomodoro;
+
+    public TaskSession(TaskRecord task, GroupRules rules, AppMode mode = AppMode.Constrained,
+                       string awBaseUrl = "http://127.0.0.1:5600")
     {
         Task = task;
         _rules = rules;
+        _pomodoro = mode == AppMode.Pomodoro;
+        _aw = new AwClient(awBaseUrl);
         // 起算时刻本身就是整分钟，把它当成"已经查过的那一分钟" ——
         // 于是点击这一刻不查 AW，第一次查询发生在下一个整分钟。
         _lastAwMinute = task.StartedAt;
         _tick.Interval = TimeSpan.FromSeconds(1);   // 秒级用来数休息和空闲；查 AW 只在整分钟
         _tick.Tick += OnTick;
         _tick.Start();
-        Log.Info($"Task started. Goals: {string.Join(", ", task.Groups)}  focus {task.FocusMinutes} min  " +
+        Log.Info($"Task started [{mode}]. Goals: {string.Join(", ", task.Groups)}  focus {task.FocusMinutes} min  " +
                  $"from {task.StartedAt:HH:mm:ss}  break {task.RestMinutes} min");
     }
 
@@ -178,7 +188,9 @@ public sealed class TaskSession : IDisposable
         // 回填到最后一次输入（§14.4a T5）—— 必须赶在那条截止线【之前】把人叫醒，
         // 事后再叫是救不回来的。过了 180 秒就闭嘴，那时人多半真的离开了，
         // 每分钟响一声只是噪音。
-        var idle = InputIdle.Elapsed().TotalSeconds;
+        // 番茄钟模式下这一声没有意义：它存在的唯一理由是抢救即将被 AW 判成 afk 的
+        // 时间（§8.3.5），而此时根本没有 AW，也就没什么可抢救的（§11.1 第 3 条）。
+        var idle = _pomodoro ? 0 : InputIdle.Elapsed().TotalSeconds;
         var idleNudge = idle is >= IdleNudgeSeconds and < AwAfkTimeoutSeconds;
         if (idleNudge)
             Log.Info($"No input for {idle:F0}s, nudging (in another {AwAfkTimeoutSeconds - idle:F0}s this time is written off)");
@@ -189,10 +201,18 @@ public sealed class TaskSession : IDisposable
         _busy = true;
         try
         {
-            _winBucket ??= await _aw.FindBucketIdAsync(AwClient.WindowBucketType);
-            _afkBucket ??= await _aw.FindBucketIdAsync(AwClient.AfkBucketType);
-            var win = await _aw.FetchEventsAsync(_winBucket, Task.StartedAt, now);
-            var afk = await _aw.FetchEventsAsync(_afkBucket, Task.StartedAt, now);
+            List<AwEvent> win, afk;
+            if (_pomodoro)
+            {
+                (win, afk) = SyntheticSpan(Task.StartedAt, now);
+            }
+            else
+            {
+                _winBucket ??= await _aw.FindBucketIdAsync(AwClient.WindowBucketType);
+                _afkBucket ??= await _aw.FindBucketIdAsync(AwClient.AfkBucketType);
+                win = await _aw.FetchEventsAsync(_winBucket, Task.StartedAt, now);
+                afk = await _aw.FetchEventsAsync(_afkBucket, Task.StartedAt, now);
+            }
 
             State = Replay.Run(Task, _rules, win, afk, now);
             var cells = Replay.ToMinuteCells(Task, State);
@@ -240,6 +260,30 @@ public sealed class TaskSession : IDisposable
         // 一个计时点最多响一声，达成优先。
         if (focusDone) Interrupted?.Invoke(Interrupt.FocusDone);
         else if (idleNudge) Interrupted?.Invoke(Interrupt.Idle);
+    }
+
+    /// <summary>
+    /// 番茄钟模式下喂给 <see cref="Replay"/> 的那两条合成事件（§11.1 第 1 条）。
+    ///
+    /// **窗口事件用 <c>ItamiTimer</c> 这个名字，是刻意的，不是占位符。** `GroupRules`
+    /// 把它硬编码判成 <c>Neutral</c>（§5.3 第 1 步的自身豁免），而 <c>Neutral</c> 是
+    /// **计入**专注时长的。于是整段重放出来就是满格 —— 不需要 rules.json、不需要
+    /// 勾任何小目标、<b>Core 一行不用改</b>。语义上也不牵强：番茄钟模式下本来就是
+    /// 一切都算数。
+    ///
+    /// ⚠️ 这条依赖 <c>Neutral</c> 的"计入"语义。`ReplayTests.番茄钟模式_合成事件整段计入`
+    /// 钉住了它 —— 哪天有人把 Neutral 改成不计入，番茄钟会**静默地不再计时**，
+    /// 那种 bug 光看界面是发现不了的。
+    ///
+    /// <see cref="TaskRecord.StartedAt"/> 已经截断到整分钟（§14.1），所以合成区间
+    /// 天然覆盖每一个色块的完整 60 秒。
+    /// </summary>
+    private static (List<AwEvent> Win, List<AwEvent> Afk) SyntheticSpan(DateTimeOffset from, DateTimeOffset now)
+    {
+        var seconds = Math.Max(0, (now - from).TotalSeconds);
+        return (
+            [new AwEvent(from, seconds, "ItamiTimer", "Pomodoro", null)],
+            [new AwEvent(from, seconds, null, null, "not-afk")]);
     }
 
     /// <summary>放弃任务。退出程序等价于此（§2、§9）。</summary>

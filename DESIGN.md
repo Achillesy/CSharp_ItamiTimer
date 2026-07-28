@@ -1309,9 +1309,9 @@ now ≥ restEndsAt → status = Completed，归档 history.jsonl
 - 把专注会话回写给 ActivityWatchJournal 做历史统计
 - **界面顶部的分类统计面板**（§2.1）。设计上已经把位置和边界留好了（模块表第 7 层 + 优雅降级纪律），但它依赖 AWJ 侧先加一个支持「未结束的部分区间」的 `awj stats --json` 子命令——那是对另一个项目的改动，要在那边单独定稿。**v1 先把核心的约束/核算做对，统计面板作为第二步。**
 
-### 11.1 没装 AW 时退化成纯番茄钟 —— 方案已定稿（2026-07-28 晚），待实现
+### 11.1 没装 AW 时退化成纯番茄钟 —— ✅ 已实现（2026-07-28 晚）
 
-用户 2026-07-28 傍晚确认这是**当初就有的设计意图**：「用户不装 aw 也就当个番茄钟用……只是不用 aw，需要自己计时（不考虑用户自己切换程序，纯计时）。」当晚把四个待定点也都定了，**下次开工可以直接照着做**。
+用户 2026-07-28 傍晚确认这是**当初就有的设计意图**：「用户不装 aw 也就当个番茄钟用……只是不用 aw，需要自己计时（不考虑用户自己切换程序，纯计时）。」当晚把四个待定点定完并实现了。
 
 **先说清楚为什么要单独写这一节**：原则 0、§6.2、§12 的变更表**三处都写着相反的规则**（「不猜测、不降级、不自己找替代信号」「不显示任何编造的进度数字」，v2 那套"AW 断了自己撑着"还是在 v3 里被主动删掉的）。所以后来人读到这里会以为纯计时是被否决的方案，从而拒绝实现。**它不是被否决，是还没做。**
 
@@ -1355,12 +1355,28 @@ now ≥ restEndsAt → status = Completed，归档 history.jsonl
 
 这条**跟番茄钟模式无关，可以单独做**。
 
-#### 实现顺序（建议分两次提交）
+#### 落点
 
-1. 模式标志 + 界面分支：`_awReady` 布尔量升级成 `AppMode { Constrained, Pomodoro }`，启动时定一次并写日志；隐藏小目标列表、改按钮条件；`rules.json` 失败一并归入 Pomodoro。此时任务循环仍走原路。
-2. `TaskSession` 的合成事件分支：跳过 HTTP，喂合成事件给 `Replay`；关掉键鼠空闲督促。
+| 文件 | 干什么 |
+|---|---|
+| `AppMode.cs` | 新增。两个值 + 那条"绝不自动降级"的警告 |
+| `MainWindow.axaml.cs` | `_awReady` 布尔量升级成 `_mode`；`CheckAwAsync` 里裁决并写日志；新增 `ApplyMode()` 隐藏小目标列表；`RefreshStartButton` / `OnStart` 各加一条分支 |
+| `TaskSession.cs` | `SyntheticSpan()` 造那两条合成事件；番茄钟模式跳过 HTTP、关掉键鼠空闲督促；AW 地址改从参数来 |
+| `GroupRules.cs` | 新增 `Empty` —— `rules.json` 读不出来时给 `TaskSession` 用 |
+| `Settings.cs` | 新增 `awBaseUrl` |
+| `Core/Replay.cs` 等 | **一行没改**，承诺兑现 |
 
-**外加一条 Core 测试**（很便宜，但必要）：喂一条覆盖整段的 `Neutral` 合成事件，断言 `FocusedSeconds == 已过去的秒数`。它钉住的是第 1 条边界那个承诺 —— **"Core 一行不用改"这句话本身得有测试兜着**，否则哪天有人动了 `Neutral` 的计入语义，番茄钟模式会静默地不再计时。
+**`PomodoroFallbackTests` 五条**钉住第 1 条边界那个承诺。最要紧的是最后一条 `承诺的依赖_自身豁免判Neutral且Neutral计入` —— 它直接指着依赖本身。**"Core 一行不用改"这句话必须有测试兜着**：哪天有人动了 `Neutral` 的计入语义或自身豁免那几个名字，番茄钟模式会**静默地不再计时**，而界面上看不出来（盘面本来就该全绿）、日志里也不报错。这个项目已经出过好几个这种"不报错、不崩溃、只是安静把事情做错"的 bug（`Phase` 恒为 `NoData`、承诺弧跨整点跳圈、达成时刻打成 UTC）。
+
+#### 实测（2026-07-28 20:24，把 `awBaseUrl` 指向不存在的 5999 端口模拟没装 AW）
+
+```
+ERROR  Cannot reach ActivityWatch; falling back to plain pomodoro mode: ... (127.0.0.1:5999)
+INFO   Mode: Pomodoro
+INFO   Task started [Pomodoro]. Goals:   focus 25 min  from 20:25:00  break 6 min
+```
+
+界面：小目标勾选框 0 个、`Start` 直接可点、齿轮仍在。87 个测试通过。
 
 #### 它的价值
 

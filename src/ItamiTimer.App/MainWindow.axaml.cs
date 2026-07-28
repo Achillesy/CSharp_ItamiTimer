@@ -37,7 +37,8 @@ public partial class MainWindow : Window
 
     private GroupRules? _rules;
     private readonly List<CheckBox> _goalBoxes = [];
-    private bool _awReady;
+    /// <summary>启动时定一次，整个会话不再变（§11.1 第 2 条，见 <see cref="AppMode"/>）。</summary>
+    private AppMode _mode = AppMode.Constrained;
     private readonly Settings _settings = Settings.Load();
 
     private TaskSession? _session;
@@ -144,20 +145,28 @@ public partial class MainWindow : Window
     {
         try
         {
-            using var aw = new AwClient();
+            using var aw = new AwClient(_settings.AwBaseUrl);
             await aw.ProbeAsync();
             await aw.FindBucketIdAsync(AwClient.WindowBucketType);
             await aw.FindBucketIdAsync(AwClient.AfkBucketType);   // 缺 afk 同样不算就绪（§6.1.1）
-            _awReady = true;
             Log.Info("ActivityWatch ready; both buckets present.");
         }
         catch (Exception e)
         {
-            _awReady = false;
-            Log.Error("Cannot reach ActivityWatch; controls below the divider are greyed out", e);
+            // §11.1：连不上不是"停摆"，是**退化成纯番茄钟**。界面不解释，原因进日志。
+            _mode = AppMode.Pomodoro;
+            Log.Error("Cannot reach ActivityWatch; falling back to plain pomodoro mode", e);
         }
-        F<StackPanel>("Controls").IsEnabled = _awReady;
-        RefreshStartButton();
+
+        // rules.json 读不了同样退化（§11.1 第 4 条）。原来的行为是把开始按钮永久
+        // 灰掉、程序基本不可用 —— 那比退化成番茄钟糟得多。
+        if (_rules is null)
+        {
+            _mode = AppMode.Pomodoro;
+            Log.Warn("rules.json unavailable; falling back to plain pomodoro mode");
+        }
+
+        ApplyMode();
     }
 
     private void LoadRules()
@@ -177,9 +186,10 @@ public partial class MainWindow : Window
         }
         catch (Exception e)
         {
-            // fail-closed（§5.2）：规则读不了就不让开始。界面不解释，原因进日志。
+            // 读不了不再是"不让开始"，而是退化成纯番茄钟（§11.1 第 4 条）——
+            // 由 CheckAwAsync 统一裁决，这里只负责把 _rules 置空并记账。
             _rules = null;
-            Log.Error("Cannot read rules.json; Start button greyed out", e);
+            Log.Error("Cannot read rules.json", e);
         }
     }
 
@@ -192,6 +202,24 @@ public partial class MainWindow : Window
 
     private List<string> Picked()
         => _goalBoxes.Where(b => b.IsChecked == true).Select(b => (string)b.Content!).ToList();
+
+    /// <summary>
+    /// 把界面调成本次会话的模式（§11.1 第 3 条）。启动时调用一次，此后不再变。
+    ///
+    /// 番茄钟模式下**整个隐藏**小目标列表，不是变灰 —— 它此时没有意义，而且
+    /// "列表整个消失"正是让用户看出自己没在被监管的那个信号（§11.1 的判据一节：
+    /// 点击「开始」才表示他希望被监管）。
+    ///
+    /// 也**不执行** §6.2 那套"分割线以下整块变灰" —— 那是给"AW 本该在但连不上"
+    /// 用的，而这里根本没打算用 AW。
+    /// </summary>
+    private void ApplyMode()
+    {
+        F<ItemsControl>("Goals").IsVisible = _mode == AppMode.Constrained;
+        F<StackPanel>("Controls").IsEnabled = true;
+        Log.Info($"Mode: {_mode}");
+        RefreshStartButton();
+    }
 
     private void RefreshStartButton()
     {
@@ -207,7 +235,8 @@ public partial class MainWindow : Window
         }
         btn.Content = "Start";
         btn.Classes.Set("danger", false);
-        btn.IsEnabled = _awReady && _rules is not null && Picked().Count > 0;
+        // 番茄钟模式下没有小目标可勾，自然也不能拿"勾了没有"当启用条件（§11.1 第 3 条）。
+        btn.IsEnabled = _mode == AppMode.Pomodoro || (_rules is not null && Picked().Count > 0);
     }
 
     // ---------------------------------------------------------------- 任务
@@ -222,8 +251,10 @@ public partial class MainWindow : Window
             else { _ = AskAbandonAsync(); return; }
         }
 
-        var picked = Picked();
-        if (_rules is null || picked.Count == 0) return;
+        // 番茄钟模式：没有小目标可勾，Groups 就是空的；约束模式仍然要求至少勾一个。
+        var pomodoro = _mode == AppMode.Pomodoro;
+        var picked = pomodoro ? [] : Picked();
+        if (!pomodoro && (_rules is null || picked.Count == 0)) return;
 
         // §14.1（2026-07-27 改）：**截断**到当前这个整分钟，不是进位。
         // 23:13:10 点的开始 → 23:13:00 起算。代价是点击前最多 59 秒也算进来，
@@ -235,7 +266,9 @@ public partial class MainWindow : Window
             Groups = picked,
         };
 
-        _session = new TaskSession(task, _rules);
+        // 番茄钟模式下 rules 可能压根没读出来（§11.1 第 4 条），给一份空的即可 ——
+        // 合成事件靠自身豁免命中 Neutral，不经过任何用户规则。
+        _session = new TaskSession(task, _rules ?? GroupRules.Empty, _mode, _settings.AwBaseUrl);
         _session.Updated += OnSessionUpdated;
         _session.Interrupted += OnInterrupted;
 

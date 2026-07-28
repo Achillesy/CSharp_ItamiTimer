@@ -54,6 +54,13 @@ public sealed class GroupRules
         PropertyNameCaseInsensitive = true,
     };
 
+    /// <summary>
+    /// 一份什么都没有的规则。给纯番茄钟模式用（§11.1 第 4 条）—— 那时 rules.json
+    /// 可能压根读不出来，而合成事件靠**自身豁免**命中 <c>Neutral</c>，本来就不经过
+    /// 任何用户规则，所以给一份空的正好。
+    /// </summary>
+    public static readonly GroupRules Empty = new([], []);
+
     private GroupRules(IReadOnlyList<CompiledGroup> groups, IReadOnlyList<Regex> ignore)
     {
         _groups = groups;
