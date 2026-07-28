@@ -946,9 +946,25 @@ lane 2 内缘（0.14）仍在中心毂（0.045）之外。**超过 180 分钟不
 
 > 想回到"只在出事时留痕"的中间档：给 `Log.Info` / `Log.Warn` 加回 `[Conditional("DEBUG")]`、`Log.Error` 不加即可。正常一轮任务零写入（没有 ERROR 就没有行），出事时又有据可查。
 
-**发布形态**：框架依赖 + RID 限定（`-c Release -r win-x64 --self-contained false`），删掉 `.pdb` 之后约 **27 MB / 35 个文件**。
+**发布形态**：框架依赖 + RID 限定（`-c Release -r win-x64 --self-contained false`），**再手工删掉 `.pdb`**，约 **27 MB / 35 个文件**。
 
-不指定 RID 的话会把 Skia / HarfBuzz **所有平台**的原生库和调试符号一起塞进来——实测 **560 MB**，光三个平台的 `libSkiaSharp.pdb` 就 244 MB。
+两个尺寸陷阱，都实测过：
+
+| 做法 | 结果 |
+|---|---|
+| 不指定 RID | **560 MB** —— Skia / HarfBuzz **所有平台**的原生库和调试符号全进来，光三个平台的 `libSkiaSharp.pdb` 就 244 MB |
+| 指定了 RID，但不删 `.pdb` | **127 MB / 39 个文件** |
+| 指定 RID + 删 `.pdb` | **27 MB / 35 个文件** |
+
+**`dotnet publish` 自己不会剔除调试符号**——它只是把 NuGet 原生包里的内容照搬到输出目录。那 100 MB 的差额就两个文件：`libSkiaSharp.pdb`（80.1 MB）和 `libHarfBuzzSharp.pdb`（19.9 MB）。
+
+```bash
+find "$LOCALAPPDATA/Programs/ItamiTimer" -name '*.pdb' -delete
+```
+
+> ⚠️ **这是一个「必须记得做」的手工步骤，也就是迟早会被忘掉的那种。** 2026-07-28 第一次写文档时就漏了，照文档跑的人会拿到 127 MB 还以为正常。
+>
+> 真正的解法是在 csproj 里挂一个 `AfterTargets="Publish"` 的 `Delete` 任务，让 27 MB 成为发布命令的**自然产物**，两个平台一起受益。**目前还没做**，先把步骤写进文档。
 
 **文件都在哪**：
 

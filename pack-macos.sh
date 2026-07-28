@@ -4,6 +4,13 @@
 # 对应 Windows 那边的：
 #     dotnet publish src/ItamiTimer.App -c Release -r win-x64 --self-contained false \
 #         -o "$LOCALAPPDATA/Programs/ItamiTimer"
+#     find "$LOCALAPPDATA/Programs/ItamiTimer" -name '*.pdb' -delete
+#
+# 那第二行 find 不是可选的：dotnet publish 只把 NuGet 原生包照搬出来、不剔除调试
+# 符号，Windows 那边实测原样输出 127MB，删掉 pdb 才是 27MB（差额就 libSkiaSharp.pdb
+# 80MB + libHarfBuzzSharp.pdb 20MB 两个文件）。详见 DESIGN.md §8.3.8。
+#
+# 本脚本这边同理 —— 见下面 publish 之后那一步。
 #
 # ⚠️ **打包不是锦上添花，是正确性的一部分。**
 #
@@ -34,6 +41,14 @@ RID="osx-$(uname -m | sed 's/^x86_64$/x64/; s/^arm64$/arm64/')"
 echo "==> publish（$RID，框架依赖）"
 dotnet publish src/ItamiTimer.App -c Release -r "$RID" --self-contained false \
     -o "$STAGE/publish" --nologo -v quiet
+
+# dotnet publish 只把 NuGet 原生包照搬出来，**不剔除调试符号**。Windows 那边实测
+# 原样输出 127MB、删掉 pdb 才 27MB（差额就 libSkiaSharp.pdb 80MB +
+# libHarfBuzzSharp.pdb 20MB 两个文件）。macOS 的原生包目前不带 .pdb，但 SkiaSharp
+# 哪天改了打包方式就会跟着长——一条无害的清理胜过一个装进 .app 才发现的意外。
+# 详见 DESIGN.md §8.3.8。
+find "$STAGE/publish" \( -name '*.pdb' -o -name '*.dSYM' \) -exec rm -rf {} + 2>/dev/null || true
+echo "    $(du -sh "$STAGE/publish" | cut -f1)"
 
 echo "==> 画图标（代码画的，仓库里不放位图）"
 "$STAGE/publish/ItamiTimer" --export-iconset "$STAGE/ItamiTimer.iconset" >/dev/null

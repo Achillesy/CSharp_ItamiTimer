@@ -50,11 +50,17 @@ dotnet build ItamiTimer.slnx
 dotnet test ItamiTimer.slnx
 ```
 
-发布（**必须指定 RID**，否则 Skia/HarfBuzz 各平台的原生库和调试符号全进来，实测会涨到 560MB）：
+发布**两步**（**必须指定 RID**，否则 Skia/HarfBuzz 各平台的原生库和调试符号全进来，实测会涨到 560MB）：
 
 ```bash
 dotnet publish src/ItamiTimer.App -c Release -r win-x64 --self-contained false -o "$LOCALAPPDATA/Programs/ItamiTimer"
 ```
+
+```bash
+find "$LOCALAPPDATA/Programs/ItamiTimer" -name '*.pdb' -delete
+```
+
+**第二步不能省。** `dotnet publish` 只会把 NuGet 原生包里的东西照搬出来，**不会剔除调试符号**，所以它的原样输出是 **127 MB / 39 个文件**；删掉 `.pdb` 才是 **27 MB / 35 个文件**。那 100 MB 就两个文件：`libSkiaSharp.pdb` 80.1 MB + `libHarfBuzzSharp.pdb` 19.9 MB。
 
 macOS 打包成 `.app` 装进 `~/Applications/`（发布 + 画图标 + 组 bundle + ad-hoc 签名一步到位）：
 

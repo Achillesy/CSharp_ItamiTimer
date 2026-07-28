@@ -106,11 +106,17 @@ src/ItamiTimer.App/    net10.0   ItamiTimer      界面（Avalonia 12）
 dotnet build ItamiTimer.slnx
 ```
 
-发布（框架依赖 + 限定 RID，约 27MB；**不加 `-r win-x64` 会变成 560MB**，因为 Skia/HarfBuzz 各平台的原生库和 pdb 全进来了）：
+发布是**两步**，第二步别忘（框架依赖 + 限定 RID；**不加 `-r win-x64` 会变成 560MB**，因为 Skia/HarfBuzz 各平台的原生库和 pdb 全进来了）：
 
 ```bash
 dotnet publish src/ItamiTimer.App -c Release -r win-x64 --self-contained false -o "$LOCALAPPDATA/Programs/ItamiTimer"
 ```
+
+```bash
+find "$LOCALAPPDATA/Programs/ItamiTimer" -name '*.pdb' -delete
+```
+
+**`dotnet publish` 自己不删调试符号**：原样输出 **127MB / 39 个文件**，删掉 `.pdb` 才是 **27MB / 35 个文件**。那 100MB 就两个文件（`libSkiaSharp.pdb` 80.1MB + `libHarfBuzzSharp.pdb` 19.9MB），它们由 NuGet 原生包带进来，SDK 不管。文档里凡是写"约 27MB"的地方，都是**删过 pdb 之后**的数字。
 
 ```bash
 dotnet run --project src/ItamiTimer.Cli
