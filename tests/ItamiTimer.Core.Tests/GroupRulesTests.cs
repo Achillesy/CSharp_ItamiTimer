@@ -110,7 +110,7 @@ public class GroupRulesTests
     {
         var e = Assert.Throws<InvalidDataException>(() =>
             GroupRules.Parse("""{ "groups": { "什么都算": { "rules": [ {} ] } } }"""));
-        Assert.Contains("匹配一切", e.Message);
+        Assert.Contains("match everything", e.Message);
     }
 
     [Fact]

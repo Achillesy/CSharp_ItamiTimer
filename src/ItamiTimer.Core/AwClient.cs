@@ -62,7 +62,7 @@ public sealed class AwClient : IDisposable
         catch (Exception e) when (e is HttpRequestException or TaskCanceledException)
         {
             throw new AwUnavailableException(
-                $"连不上 ActivityWatch（{_http.BaseAddress}）。请确认 aw-server 在运行。", e);
+                $"Cannot reach ActivityWatch at {_http.BaseAddress}. Make sure aw-server is running.", e);
         }
     }
 
@@ -92,7 +92,7 @@ public sealed class AwClient : IDisposable
         // §6.1.1：afk bucket 是必需的，不是可选的。缺了它，"停在目标应用上起身走开"
         // 就完全隐形——那是最省力的作弊路径。绝不降级为"永远视为在座"。
         throw new AwUnavailableException(
-            $"找不到类型为 {bucketType} 的 bucket。两个 watcher（window 和 afk）都必须在跑。");
+            $"No bucket of type {bucketType} found. Both watchers (window and afk) must be running.");
     }
 
     /// <summary>

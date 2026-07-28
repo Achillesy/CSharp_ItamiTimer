@@ -5,18 +5,24 @@ using Avalonia.Controls;
 namespace ItamiTimer.App;
 
 /// <summary>
-/// 窗口置顶开关。
+/// 窗口置顶开关（右上角那个图钉）。
 ///
 /// ⚠️ **这跟 2026-07-28 上午被砍掉的那套「置顶提醒」不是一回事**，别混。被砍掉的是
 /// **自动**置顶：程序自己判断该顶、该撤，撤的条件还要跨越会话生命周期 —— 那套东西
 /// 在实机上连塌三次，用户的评价是"逻辑混乱，又容易出错"（§8.3）。
 ///
 /// 现在这个是**手动图钉**：用户点一下顶上去，再点一下放下来。**没有状态机，没有
-/// "什么时候该撤"的判断**，所以那三类 bug 一个都不会回来。同一个 Win32 调用，
-/// 完全不同的东西。
+/// "什么时候该撤"的判断**，所以那三类 bug 一个都不会回来。
+///
+/// **Windows 上为什么不用 Avalonia 自带的 <c>Window.Topmost</c>**：那个属性在
+/// Windows 上会顺手激活窗口，而 §13 第 6 条要求**绝不抢焦点** —— 用户按图钉的时候
+/// 正在别处打字。<c>SWP_NOACTIVATE</c> 才是那条纪律的落点。
+///
+/// **macOS 上反过来**：`Window.Topmost` 走的是 NSWindow 的 window level，
+/// 本来就不带激活语义，用它即可 —— 没有理由为此再引一个 P/Invoke。
+/// 类名从 <c>Win32Topmost</c> 改成中性的现名，就是因为它不再只有 Win32 那一条路。
 /// </summary>
-[SupportedOSPlatform("windows")]
-public static class Win32Topmost
+public static class WindowPin
 {
     private static readonly IntPtr HWND_TOPMOST = new(-1);
     private static readonly IntPtr HWND_NOTOPMOST = new(-2);
@@ -28,7 +34,13 @@ public static class Win32Topmost
     /// <summary>置顶开 / 关。**绝不抢焦点**（§13 第 6 条）—— 用户按图钉时正在别处打字。</summary>
     public static void Set(Window w, bool on)
     {
-        if (!OperatingSystem.IsWindows()) return;
+        if (OperatingSystem.IsWindows()) SetWindows(w, on);
+        else w.Topmost = on;
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static void SetWindows(Window w, bool on)
+    {
         if (w.TryGetPlatformHandle()?.Handle is not { } h || h == IntPtr.Zero) return;
         SetWindowPos(h, on ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0,
             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);

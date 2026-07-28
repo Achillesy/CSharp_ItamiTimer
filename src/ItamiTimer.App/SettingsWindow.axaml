@@ -1,7 +1,7 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="ItamiTimer.App.SettingsWindow"
-        Title="设置"
+        Title="Settings"
         Width="460"
         SizeToContent="Height"
         CanResize="False"
@@ -33,14 +33,14 @@
 
   <StackPanel Margin="22,18,22,20" Spacing="12">
 
-    <TextBlock Text="设置" FontSize="26" FontWeight="Bold" Margin="0,0,0,6"/>
+    <TextBlock Text="Settings" FontSize="26" FontWeight="Bold" Margin="0,0,0,6"/>
 
     <Border Classes="card">
       <StackPanel Spacing="12">
         <Grid ColumnDefinitions="*,Auto">
-          <TextBlock Classes="title" Text="任务结束声音"/>
+          <TextBlock Classes="title" Text="Focus complete"/>
           <ToggleSwitch x:Name="FocusOn" Grid.Column="1" VerticalAlignment="Center"
-                        OnContent="开" OffContent="关"/>
+                        OnContent="On" OffContent="Off"/>
         </Grid>
         <ComboBox x:Name="FocusSound" HorizontalAlignment="Stretch" MaxDropDownHeight="320"/>
       </StackPanel>
@@ -49,9 +49,9 @@
     <Border Classes="card">
       <StackPanel Spacing="12">
         <Grid ColumnDefinitions="*,Auto">
-          <TextBlock Classes="title" Text="休息结束声音"/>
+          <TextBlock Classes="title" Text="Break over"/>
           <ToggleSwitch x:Name="RestOn" Grid.Column="1" VerticalAlignment="Center"
-                        OnContent="开" OffContent="关"/>
+                        OnContent="On" OffContent="Off"/>
         </Grid>
         <ComboBox x:Name="RestSound" HorizontalAlignment="Stretch" MaxDropDownHeight="320"/>
       </StackPanel>
@@ -60,9 +60,9 @@
     <Border Classes="card">
       <StackPanel Spacing="12">
         <Grid ColumnDefinitions="*,Auto">
-          <TextBlock Classes="title" Text="键鼠空闲声音"/>
+          <TextBlock Classes="title" Text="Idle nudge"/>
           <ToggleSwitch x:Name="IdleOn" Grid.Column="1" VerticalAlignment="Center"
-                        OnContent="开" OffContent="关"/>
+                        OnContent="On" OffContent="Off"/>
         </Grid>
         <ComboBox x:Name="IdleSound" HorizontalAlignment="Stretch" MaxDropDownHeight="320"/>
       </StackPanel>
@@ -72,7 +72,7 @@
          滴答是钟本身的功能，跟督促学习无关，不该混进这一页。 -->
     <Border Classes="card">
       <StackPanel Spacing="12">
-        <TextBlock Classes="title" Text="滴答声音量"/>
+        <TextBlock Classes="title" Text="Tick volume"/>
         <Slider x:Name="TickVol" Minimum="0" Maximum="100" TickFrequency="10"
                 IsSnapToTickEnabled="True" HorizontalAlignment="Stretch"/>
       </StackPanel>

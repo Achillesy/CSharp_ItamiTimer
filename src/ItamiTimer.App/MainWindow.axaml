@@ -10,11 +10,21 @@
         Background="#D7DBE0">
 
   <Window.Styles>
-    <!-- 「开始」既是按钮也是分割线：它以上是给眼睛的，以下是给手的 -->
+    <!-- 「开始」既是按钮也是分割线：它以上是给眼睛的，以下是给手的。
+
+         ⚠️ Padding=0 + VerticalContentAlignment=Center 这两条【必须一起写】，
+         否则文字会顶着上边（2026-07-28 改英文后暴露）。Fluent 主题给 Button 的
+         默认 Padding 上下不对称，配上固定 Height 就把内容挤上去了。
+
+         为什么中文时期没人发现：汉字字形占满整个 em 框，视觉重心本来就在行盒
+         中间，偏移被吃掉了；换成英文，大写字母偏上、底下的降部空间又空着，
+         同样的偏移立刻看得出来。gear 和 chrome 两个样式一直是对的，照它们写。 -->
     <Style Selector="Button.start">
       <Setter Property="Height" Value="42"/>
+      <Setter Property="Padding" Value="0"/>
       <Setter Property="HorizontalAlignment" Value="Stretch"/>
       <Setter Property="HorizontalContentAlignment" Value="Center"/>
+      <Setter Property="VerticalContentAlignment" Value="Center"/>
       <Setter Property="FontSize" Value="16"/>
       <Setter Property="FontWeight" Value="SemiBold"/>
       <Setter Property="CornerRadius" Value="6"/>
@@ -32,9 +42,23 @@
       <Setter Property="Foreground" Value="#E4E8EC"/>
     </Style>
 
-    <!-- 放弃是危险动作，用偷懒那个红（§8.2.3 的 slack） -->
-    <Style Selector="Button.danger /template/ ContentPresenter">
+    <!-- 「放弃」是危险动作，单独染红（用户 2026-07-28 傍晚要的）。
+
+         ⚠️ 这几条【必须排在上面那组 .start 之后】：Avalonia 同优先级的样式按声明
+         顺序生效，后来者赢。挪到前面去就会被绿色盖掉，而且不报任何错。
+
+         只有「放弃」染红，「开始新一轮」不染 —— 后者是奖励结束、开下一轮，不是
+         危险动作。切换在 RefreshStartButton() 里，一行 Classes.Set。
+
+         色值取自表盘的 slack 红（§8.2.3）。这是这个红唯一一次离开表盘：它在盘上
+         的意思是"这一分钟偷懒了"，在这里是"这一下会作废整轮"—— 两处都是"这不
+         是你想要的结果"，语义对得上。 -->
+    <Style Selector="Button.start.danger /template/ ContentPresenter">
       <Setter Property="Background" Value="#D6453F"/>
+      <Setter Property="Foreground" Value="#FFFFFF"/>
+    </Style>
+    <Style Selector="Button.start.danger:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="#E15C56"/>
       <Setter Property="Foreground" Value="#FFFFFF"/>
     </Style>
 
@@ -55,15 +79,14 @@
       <Setter Property="Opacity" Value="1"/>
     </Style>
 
-    <!-- 右上角那两个即时开关：喇叭（总静音）、图钉（置顶）。
-         跟齿轮同一族的字形，用 Windows 自带的图标字体，不打包任何图片。
+    <!-- 右上角那两个即时开关：喇叭（滴答声）、图钉（置顶）。
+         图形是【矢量画的】（ChromeIcons.cs），不打包图片、也不依赖任何图标字体——
+         原来用的 Segoe Fluent Icons 只有 Windows 有，macOS 上是豆腐块。
          关着的时候淡、开着的时候实 —— 状态一眼就看得出来。 -->
     <Style Selector="Button.chrome">
       <Setter Property="Width" Value="28"/>
       <Setter Property="Height" Value="28"/>
       <Setter Property="Padding" Value="0"/>
-      <Setter Property="FontFamily" Value="Segoe Fluent Icons, Segoe MDL2 Assets"/>
-      <Setter Property="FontSize" Value="14"/>
       <Setter Property="Opacity" Value="0.40"/>
       <Setter Property="Background" Value="Transparent"/>
       <Setter Property="BorderThickness" Value="0"/>
@@ -93,8 +116,8 @@
       <app:DialControl x:Name="Dial" Height="330"/>
       <StackPanel Orientation="Horizontal" Spacing="2"
                   HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-4,-4,0">
-        <Button x:Name="MuteBtn" Classes="chrome" ToolTip.Tip="静音"/>
-        <Button x:Name="PinBtn" Classes="chrome" ToolTip.Tip="置顶"/>
+        <Button x:Name="MuteBtn" Classes="chrome" ToolTip.Tip="Ticking"/>
+        <Button x:Name="PinBtn" Classes="chrome" ToolTip.Tip="Always on top"/>
       </StackPanel>
     </Grid>
 
@@ -104,7 +127,7 @@
     <!-- ↓↓↓ 分割线以下：连不上 AW 时整块变灰，这个程序就只是一个钟（§6.2） -->
     <StackPanel x:Name="Controls" Spacing="10">
 
-      <Button x:Name="StartBtn" Classes="start" Click="OnStart" Content="开始"/>
+      <Button x:Name="StartBtn" Classes="start" Click="OnStart" Content="Start"/>
 
       <!-- 取值控件。不解释、不说明、连数字都不给（用户 2026-07-27：主打一个猜）。
            只有九个刻度，自己拖去。
@@ -122,7 +145,7 @@
       <Grid ColumnDefinitions="*,Auto">
         <ItemsControl x:Name="Goals"/>
         <Button x:Name="SettingsBtn" Grid.Column="1" Classes="gear" Content="⚙"
-                VerticalAlignment="Bottom" ToolTip.Tip="设置"/>
+                VerticalAlignment="Bottom" ToolTip.Tip="Settings"/>
       </Grid>
 
     </StackPanel>

@@ -44,7 +44,7 @@ public partial class MainWindow : Window
 
     public MainWindow()
     {
-        Log.Info($"启动。日志：{Log.Path_}");
+        Log.Info($"Started. Log: {Log.Path_}");
 
         InitializeComponent();
         ApplyTheme();
@@ -108,30 +108,32 @@ public partial class MainWindow : Window
     /// **喇叭只管滴答声**（用户 2026-07-28）：滴答是钟本身的功能，跟督促学习那三声
     /// 通知无关，所以它不是"总静音"。那三声各有各的开关，在设置窗口里。
     ///
-    /// 图标用 Segoe Fluent / MDL2 的字形，**状态靠图形本身和明度双重表达**，
+    /// 图标是**矢量画的**（<see cref="ChromeIcons"/>），不是字体字形。原来这两个用的是
+    /// Segoe Fluent Icons 的 `E767` / `E74F` / `E840` / `E718`，而那个字体只有 Windows
+    /// 装机自带 —— macOS 上是两个豆腐块。状态仍然靠图形本身和明度双重表达，
     /// 不用文字（分割线以上一个字都没有）：
     ///
     /// | | 关 | 开 |
     /// |---|---|---|
-    /// | 喇叭 | `E74F` 打叉的喇叭 | `E767` 喇叭 |
-    /// | 图钉 | `E718` 空心图钉 | `E840` 实心图钉 |
+    /// | 喇叭 | 划一道斜杠 | 带两道声波 |
+    /// | 图钉 | 空心（只描边） | 实心 |
     ///
-    /// 图钉那一格**刻意不用 `E77A`（打叉的图钉）**：打叉在满不透明度下会读成
-    /// "置顶被禁用"，跟"已置顶"正好相反。喇叭打叉没有这个歧义 —— 划掉的喇叭
-    /// 全世界都认得是静音。
+    /// 图钉那一格**刻意不用"打叉"**：打叉在满不透明度下会读成"置顶被禁用"，
+    /// 跟"已置顶"正好相反。喇叭划斜杠没有这个歧义 —— 划掉的喇叭全世界都认得
+    /// 是静音。
     /// </summary>
     private void ApplyChrome()
     {
         var mute = F<Button>("MuteBtn");
         var pin = F<Button>("PinBtn");
 
-        mute.Content = _settings.TickEnabled ? "\uE767" : "\uE74F";   // 喇叭 / 打叉的喇叭
+        mute.Content = ChromeIcons.Speaker(_settings.TickEnabled);
         mute.Classes.Set("on", _settings.TickEnabled);
-        pin.Content = _settings.Pinned ? "\uE840" : "\uE718";    // 实心图钉 / 空心图钉
+        pin.Content = ChromeIcons.Pin(_settings.Pinned);
         pin.Classes.Set("on", _settings.Pinned);
 
         if (!_settings.TickEnabled) Tick.Stop();   // 掐断正在响的那一声，别等它自己完
-        Win32Topmost.Set(this, _settings.Pinned);
+        WindowPin.Set(this, _settings.Pinned);
     }
 
     /// <summary>
@@ -147,12 +149,12 @@ public partial class MainWindow : Window
             await aw.FindBucketIdAsync(AwClient.WindowBucketType);
             await aw.FindBucketIdAsync(AwClient.AfkBucketType);   // 缺 afk 同样不算就绪（§6.1.1）
             _awReady = true;
-            Log.Info("AW 就绪，两个 bucket 都在。");
+            Log.Info("ActivityWatch ready; both buckets present.");
         }
         catch (Exception e)
         {
             _awReady = false;
-            Log.Error("连不上 ActivityWatch，分割线以下已置灰", e);
+            Log.Error("Cannot reach ActivityWatch; controls below the divider are greyed out", e);
         }
         F<StackPanel>("Controls").IsEnabled = _awReady;
         RefreshStartButton();
@@ -171,13 +173,13 @@ public partial class MainWindow : Window
             }
             F<ItemsControl>("Goals").ItemsSource = _goalBoxes;
             if (_goalBoxes.Count == 1) _goalBoxes[0].IsChecked = true;
-            Log.Info($"rules.json 已加载，小目标：{string.Join("、", _rules.SelectableGroups)}");
+            Log.Info($"rules.json loaded. Goals: {string.Join(", ", _rules.SelectableGroups)}");
         }
         catch (Exception e)
         {
             // fail-closed（§5.2）：规则读不了就不让开始。界面不解释，原因进日志。
             _rules = null;
-            Log.Error("rules.json 读不了，开始按钮已置灰", e);
+            Log.Error("Cannot read rules.json; Start button greyed out", e);
         }
     }
 
@@ -196,11 +198,15 @@ public partial class MainWindow : Window
         var btn = F<Button>("StartBtn");
         if (_session is { Finished: false })
         {
-            btn.Content = _session.InRest ? "开始新一轮" : "放弃";
+            btn.Content = _session.InRest ? "New round" : "Give up";
+            // 只有「放弃」染红：它作废整轮。「开始新一轮」是专注已达成之后开下一轮，
+            // 不危险，保持绿色（样式见 MainWindow.axaml 的 Button.start.danger）。
+            btn.Classes.Set("danger", !_session.InRest);
             btn.IsEnabled = true;
             return;
         }
-        btn.Content = "开始";
+        btn.Content = "Start";
+        btn.Classes.Set("danger", false);
         btn.IsEnabled = _awReady && _rules is not null && Picked().Count > 0;
     }
 
@@ -338,7 +344,7 @@ public partial class MainWindow : Window
 
         e.Cancel = true;
 
-        if (await Confirm.AskAsync(this, "任务尚未完成，你确定退出？"))
+        if (await Confirm.AskAsync(this, "The task isn't finished. Quit anyway?"))
         {
             _session?.Abandon();
             _closeApproved = true;
@@ -354,7 +360,7 @@ public partial class MainWindow : Window
     /// </summary>
     private async Task AskAbandonAsync()
     {
-        if (!await Confirm.AskAsync(this, "任务尚未完成，你确定放弃？")) return;
+        if (!await Confirm.AskAsync(this, "The task isn't finished. Give up?")) return;
         _session?.Abandon();
         EndSession();
     }
@@ -363,6 +369,6 @@ public partial class MainWindow : Window
     private async void OnSettings(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
         try { await new SettingsWindow(_settings).ShowDialog(this); }
-        catch (Exception ex) { Log.Error("打开设置窗口失败", ex); }
+        catch (Exception ex) { Log.Error("Failed to open the settings window", ex); }
     }
 }

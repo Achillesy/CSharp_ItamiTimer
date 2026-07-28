@@ -1,6 +1,21 @@
+<!--
+  ⚠️ Name 必须是 ItamiTimer，而且【不是】为了好看。
+
+  macOS 的 aw-watcher-window 上报的 data.app 就是这个名字（不是进程名、也不是
+  Info.plist 里的 CFBundleName）。Avalonia 不设 Name 时默认叫「Avalonia Application」
+  —— 2026-07-28 实测撞到：AW 老老实实记下 app='Avalonia Application'，而 §5.3 第 1 步
+  的自身豁免认的是 SelfApps 里那几个名字，一个都对不上。
+
+  后果正是 GroupRules 注释里警告的那个死循环：用户看一眼自己的进度 → ItamiTimer
+  成为活跃窗口 → 判成 OffTask → 格子变红。跟 Windows 那边 AssemblyName 钉死成
+  ItamiTimer 是同一条纪律、同一个理由，只是旋钮在另一个地方。
+
+  顺带把 macOS 菜单栏左上角那个应用名也修对了 —— 但那只是副作用。
+-->
 <Application xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              x:Class="ItamiTimer.App.App"
+             Name="ItamiTimer"
              RequestedThemeVariant="Default">
   <Application.Styles>
     <FluentTheme />

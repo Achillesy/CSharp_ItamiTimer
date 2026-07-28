@@ -26,15 +26,15 @@ internal static class DialSpecimens
         var t2359 = new DateTimeOffset(2026, 7, 27, 23, 59, 0, TimeSpan.FromHours(8));
         var t1010 = new DateTimeOffset(2026, 7, 28, 10, 10, 0, TimeSpan.FromHours(8));
 
-        Save(outDir, "01-跨整点-两格-弧应在外圈", t2359,
+        Save(outDir, "01-crosses-the-hour-two-cells-arc-on-outer-ring", t2359,
             [Cell(0, t2359, 29, 31), Cell(1, t2359, 60, 0)], remaining: 5);
 
-        Save(outDir, "02-同样两格但不跨整点-作为对照", t1010,
+        Save(outDir, "02-same-two-cells-within-the-hour-control", t1010,
             [Cell(0, t1010, 29, 31), Cell(1, t1010, 60, 0)], remaining: 5);
 
-        Save(outDir, "03-刚点开始-零格-整段灰弧", t2359, [], remaining: 5);
+        Save(outDir, "03-just-started-zero-cells-full-grey-arc", t2359, [], remaining: 5);
 
-        Save(outDir, "04-四种结局各一格", t1010, [
+        Save(outDir, "04-one-cell-of-each-outcome", t1010, [
             Cell(0, t1010, 60, 0),            // 全绿
             Cell(1, t1010, 30, 30),           // 一半偷懒
             Cell(2, t1010, 0, 60),            // 全红
@@ -45,21 +45,21 @@ internal static class DialSpecimens
         // 跨圈：58 格已走完，承诺弧还剩 6 分钟 —— 必须在第 58→60 分钟处切到内圈
         var many = new List<MinuteCell>();
         for (var i = 0; i < 58; i++) many.Add(Cell(i, t1010, i % 7 == 0 ? 20 : 60, i % 7 == 0 ? 40 : 0));
-        Save(outDir, "05-承诺弧跨圈-末尾应内缩到第二圈", t1010, many, remaining: 6);
+        Save(outDir, "05-arc-wraps-past-full-circle-tail-spirals-inward", t1010, many, remaining: 6);
 
         // 休息：**色环已经撤掉**（用户 2026-07-28：任务结束就不查 AW 了，不用画），
         // 盘面上只剩一块扇形 = 你挣来的时间（§8.4.4）
-        Save(outDir, "06-休息中-盘面只剩休息扇形", t1010,
+        Save(outDir, "06-on-break-only-the-rest-wedge-remains", t1010,
             [], remaining: 0, restFrom: t1010.AddMinutes(25), restMinutes: 5);
 
-        Save(outDir, "07-休息扇形跨过12点", t2359,
+        Save(outDir, "07-rest-wedge-crosses-twelve", t2359,
             [], remaining: 0, restFrom: t2359.AddMinutes(1), restMinutes: 5);
 
-        Save(outDir, "08-休息扇形-夜面", t1010,
+        Save(outDir, "08-rest-wedge-dark-face", t1010,
             [], remaining: 0, restFrom: t1010.AddMinutes(25), restMinutes: 5,
             palette: DialPalette.Dark);
 
-        Console.WriteLine($"表盘样张已写入 {outDir}");
+        Console.WriteLine($"Dial specimens written to {outDir}");
     }
 
     private static MinuteCell Cell(int i, DateTimeOffset t0, double counted, double off,

@@ -9,9 +9,25 @@ namespace ItamiTimer.App;
 /// </summary>
 public static class AppData
 {
-    /// <summary><c>%LOCALAPPDATA%\ItamiTimer</c>。settings.json 和（仅 Debug 的）日志都在这里。</summary>
-    public static string Dir { get; } = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ItamiTimer");
+    /// <summary>
+    /// settings.json 和（仅 Debug 的）日志放哪儿。
+    ///
+    /// <code>
+    /// Windows   %LOCALAPPDATA%\ItamiTimer
+    /// macOS     ~/Library/Application Support/ItamiTimer
+    /// </code>
+    ///
+    /// **macOS 上不能直接用 <c>SpecialFolder.LocalApplicationData</c>**：.NET 在
+    /// 类 Unix 系统上把它映射到 XDG 的 <c>~/.local/share</c>，那是个从 Finder 里
+    /// 根本看不见的隐藏目录。用户要去改自己那份 rules.json 时得先会按 ⇧⌘. ——
+    /// 这个程序的配置本来就指望用户自己去编辑（§8.1 那条链子只读不写），
+    /// 藏起来等于把那条路堵死。
+    /// </summary>
+    public static string Dir { get; } = OperatingSystem.IsMacOS()
+        ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                       "Library", "Application Support", "ItamiTimer")
+        : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                       "ItamiTimer");
 
     /// <summary>
     /// 规则文件按三级找，**绝不只看当前工作目录**。

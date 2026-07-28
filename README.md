@@ -1,6 +1,6 @@
 # 一袋米要扛几楼（ItamiTimer）
 
-Windows 桌面端**带强制约束的专注任务计时器**。
+桌面端**带强制约束的专注任务计时器**。Windows 和 macOS 都能跑（同一份代码，见「跨平台」）。
 
 勾选本轮允许的小目标，提交任务；此后**只有窗口标题/应用命中规则、且人在座**的时间才算专注。切到别处那段时间不计入，任务因此被拖长——表盘上那一分钟的格子变红，灰色的截止弧往前滑走。
 
@@ -14,10 +14,13 @@ Windows 桌面端**带强制约束的专注任务计时器**。
 
 - **表盘**：一分钟一格，绿 → 琥珀 → 红表示那一分钟的纯度；灰弧从写入头画到预计结束时刻，偷懒多久它就往前滑多久。全部矢量绘制，不含任何位图资源——番茄图标、木质边框、指针投影、exe 的文件图标，都是代码画出来的。
 - **七块骨牌**：倒下几块就是星期几。倾角是按凸多边形接触求解算出来的，不是拍脑袋。
-- **右上角**：喇叭（滴答声开关）、图钉（窗口置顶）。这两个属于「钟」。
+- **右上角**：喇叭（滴答声开关）、图钉（窗口置顶）。这两个属于「钟」。图形也是矢量画的，不依赖任何图标字体。
 - **齿轮**：三条通知音各自可关 + 滴答音量。这三条属于「督工」。
+- **「开始」按钮就是那条分割线**：它以上是给眼睛的，以下是给手的。任务进行中它变成红色的「Give up」——界面上唯一一处用红色，因为它作废整轮。
 
-滴答声是**运行时合成**的（白噪声 × 指数衰减 + 阻尼正弦），因为 `C:\Windows\Media` 里一个滴答都没有。「滴」和「答」音色不同、按秒交替——真钟的擒纵机构两边不对称。
+**界面文字是英文**（`Start` / `Give up` / `Settings`……），只有窗口标题保留中文原名。这不是多语言版，就是一个英文版，目的是让更多人能用。你自己的小目标名字来自 `rules.json`，写什么语言都行。
+
+滴答声是**运行时合成**的（白噪声 × 指数衰减 + 阻尼正弦），因为 `C:\Windows\Media` 里一个滴答都没有——macOS 那 14 个系统音更没有，全是提示音。「滴」和「答」音色不同、按秒交替——真钟的擒纵机构两边不对称。
 
 ## 核心思路
 
@@ -47,39 +50,65 @@ dotnet build ItamiTimer.slnx
 dotnet test ItamiTimer.slnx
 ```
 
-发布（**必须指定 RID**，否则 Skia/HarfBuzz 各平台的原生库和调试符号全进来，会从 27MB 涨到 560MB）：
+发布（**必须指定 RID**，否则 Skia/HarfBuzz 各平台的原生库和调试符号全进来，实测会涨到 560MB）：
 
 ```bash
 dotnet publish src/ItamiTimer.App -c Release -r win-x64 --self-contained false -o "$LOCALAPPDATA/Programs/ItamiTimer"
 ```
 
-**日志只有 Debug 版写**（`[Conditional("DEBUG")]`）。Release 下出错是完全无声的——排查问题得先切回 Debug 跑一遍。
+macOS 打包成 `.app` 装进 `~/Applications/`（发布 + 画图标 + 组 bundle + ad-hoc 签名一步到位）：
+
+```bash
+./pack-macos.sh
+```
+
+**macOS 上必须走这个脚本，不能直接跑发布出来的二进制。** 除了图标和 Dock，bundle 还决定了 AW 上报的应用名——自身豁免靠它（见下）。
+
+**Debug 和 Release 都写日志。** 界面对用户是全程沉默的（分割线以下一个提示字都没有），日志是唯一能事后看出"它到底怎么了"的地方，所以正式版也留着。开销可以忽略：一分钟一行，一轮任务最多五十行，超过 1MB 自动滚动、只留一份旧的。
 
 ## 项目结构
 
 ```
-src/ItamiTimer.Core/   net10.0          类库      判定与重放，无 UI 无 Win32
-src/ItamiTimer.Cli/    net10.0          itami     命令行原子层，用真实 AW 数据干跑
-src/ItamiTimer.App/    net10.0-windows  界面      Avalonia 12
-tests/ItamiTimer.Core.Tests/            xUnit     80 个测试
+src/ItamiTimer.Core/   net10.0   类库      判定与重放，无 UI 无平台调用
+src/ItamiTimer.Cli/    net10.0   itami     命令行原子层，用真实 AW 数据干跑
+src/ItamiTimer.App/    net10.0   界面      Avalonia 12
+tests/ItamiTimer.Core.Tests/     xUnit     80 个测试
 ```
 
-**`Core` 必须保持 `net10.0`（无 `-windows`）**——这是纪律的执行机制本身：往 Core 里塞 UI 或 P/Invoke 会直接编不过。重放是纯函数，所以测"专注 25 分钟走完"不用真等 25 分钟，喂合成事件就能穷举边界。
+**`Core` 必须保持不含 UI**——往里塞 UI 包会直接编不过。重放是纯函数，所以测"专注 25 分钟走完"不用真等 25 分钟，喂合成事件就能穷举边界。
 
 其它文件：
 
-- `rules.json` — 小目标规则。运行时按三级找：`%LOCALAPPDATA%\ItamiTimer\`（你自己的）→ exe 旁边（随程序发布的默认）→ 当前工作目录
+- `rules.json` — 小目标规则。运行时按三级找：用户数据目录（你自己的）→ 程序旁边（随程序发布的默认）→ 当前工作目录
+- `pack-macos.sh` — macOS 打包脚本
 - `wild-enchanting-planet.md` — 已被取代的 v1 设计，仅作历史记录
 
-运行时数据在 `%LOCALAPPDATA%\ItamiTimer\`：`settings.json`、`rules.json`、以及仅 Debug 的 `itami.log`。**程序对任务状态只读不写**。
+运行时数据（`settings.json`、你自己那份 `rules.json`、`itami.log`）：
+
+| | |
+|---|---|
+| Windows | `%LOCALAPPDATA%\ItamiTimer\` |
+| macOS | `~/Library/Application Support/ItamiTimer/` |
+
+**程序对任务状态只读不写。**
+
+## 跨平台
+
+判定层从设计上就与平台无关——所有输入只来自 AW 的 REST API，不碰任何原生窗口 API。这条在 2026-07-28 移植 macOS 时得到实测印证：**Core、Cli 和 80 个测试一行没改就全过了**，全部改动集中在界面层，且每一处平台差异都收口在单个文件里（放音、键鼠空闲、置顶、数据目录、右上角图标）。
+
+移植中撞到、也最容易重犯的两条：
+
+- **`App.axaml` 的 `Name="ItamiTimer"` 是正确性的一部分。** macOS 的 aw-watcher-window 上报的应用名就是 Avalonia 的 `Application.Name`；不设它时默认叫 `Avalonia Application`，于是程序认不出自己，看一眼进度就被判成违规——正是那个"提醒 → 用户看提醒 → 又违规"的死循环。
+- **`ignore` 名单两个平台的条目写在同一份 `rules.json` 里。** AW 报的 app 名两边完全不同（`explorer.exe` ↔ `Finder`、`LockApp.exe` ↔ `loginwindow`），而一条在另一平台上永远匹配不上的正则是无害的。
 
 ## 调试出口
 
-两个不属于产品功能的命令行开关，正常启动路径一个字节都没碰：
+三个不属于产品功能的命令行开关，正常启动路径一个字节都没碰：
 
 ```bash
-ItamiTimer.exe --dial-specimens <目录>    # 把表盘在几个关键状态下离屏渲染成 PNG
-ItamiTimer.exe --export-icon <路径.ico>   # 从 TomatoIcon 导出 exe 的文件图标
+ItamiTimer --dial-specimens <目录>       # 把表盘在几个关键状态下离屏渲染成 PNG
+ItamiTimer --export-icon <路径.ico>      # 从 TomatoIcon 导出 exe 的文件图标（Windows）
+ItamiTimer --export-iconset <目录>       # 同上，导成 .iconset 交给 iconutil（macOS）
 ```
 
 表盘在 App 层，Core 的测试碰不到它——半径、角度、叠放次序这类几何错误只有看图才发现得了。

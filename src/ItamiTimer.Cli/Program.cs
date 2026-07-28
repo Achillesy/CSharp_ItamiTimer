@@ -31,7 +31,7 @@ catch (AwUnavailableException e)
 }
 catch (Exception e)
 {
-    Console.Error.WriteLine($"\n出错了：{e.Message}\n");
+    Console.Error.WriteLine($"\nSomething went wrong: {e.Message}\n");
     return 1;
 }
 
@@ -48,12 +48,12 @@ async Task<int> StartAsync()
 {
     var minutes = int.Parse(opt.GetValueOrDefault("minutes", "25"));
     var groups = opt.GetValueOrDefault("group")?.Split(',', StringSplitOptions.RemoveEmptyEntries)
-                 ?? throw new ArgumentException("要指定小目标：--group 学习经济学");
+                 ?? throw new ArgumentException("A goal is required: --group <name from rules.json>");
 
     var rules = LoadRules();
     foreach (var g in groups)
         if (!rules.SelectableGroups.Contains(g))
-            throw new ArgumentException($"rules.json 里没有启用的小目标「{g}」。可选：{string.Join("、", rules.SelectableGroups)}");
+            throw new ArgumentException($"No enabled goal \"{g}\" in rules.json. Available: {string.Join(", ", rules.SelectableGroups)}");
 
     // §6.2：提交任务时 AW 不可达 → 拒绝提交。不允许开始一个从一开始就没法核算的任务。
     using var aw = new AwClient();
@@ -69,22 +69,22 @@ async Task<int> StartAsync()
         Groups = groups,
     };
 
-    Console.WriteLine($"\nAW: {host}   任务已提交（只在内存里，退出即放弃）");
-    Console.WriteLine($"小目标：{string.Join("、", groups)}");
-    Console.WriteLine($"专注 {minutes} 分钟，之后休息 {task.RestMinutes} 分钟");
-    Console.WriteLine($"开始时刻：{Renderer.Clock(task.StartedAt)}（进位到整分钟）\n");
+    Console.WriteLine($"\nAW: {host}   task submitted (in memory only — quitting abandons it)");
+    Console.WriteLine($"Goals: {string.Join(", ", groups)}");
+    Console.WriteLine($"Focus {minutes} min, then a {task.RestMinutes} min break");
+    Console.WriteLine($"Started at {Renderer.Clock(task.StartedAt)} (floored to the minute)\n");
     Console.WriteLine(Renderer.Legend());
-    Console.WriteLine($"节拍 {TickSeconds} 秒");
-    Console.WriteLine("Ctrl+C = 放弃任务（会先给你看账单）\n");
+    Console.WriteLine($"Tick every {TickSeconds}s");
+    Console.WriteLine("Ctrl+C = abandon the task (you get the tally first)\n");
 
     // Ctrl+C 对应 GUI 的"点关闭"：§9 要求退出前把账摆出来，不能默默丢掉。
     TaskState? last = null;
     Console.CancelKeyPress += (_, e) =>
     {
         e.Cancel = true;
-        Console.WriteLine("\n\n=== 放弃任务 ===\n");
+        Console.WriteLine("\n\n=== Task abandoned ===\n");
         if (last is not null) Console.WriteLine(Renderer.Bill(task, last));
-        Console.WriteLine("这一轮作废了。\n");
+        Console.WriteLine("This round is void.\n");
         Environment.Exit(130);
     };
 
@@ -104,12 +104,12 @@ async Task<int> StartAsync()
         // 的，跟穿插的警告混在一起会糊成一团。一分钟一行正好是一份可读的日志。
         Console.WriteLine($"{Renderer.Clock(now, "HH:mm")}  {Renderer.Cells(cells)}  " +
                           $"{Renderer.PhaseText(state.Phase)}  " +
-                          $"{state.FocusedSeconds / 60:F1}/{task.FocusMinutes} 分钟");
+                          $"{state.FocusedSeconds / 60:F1}/{task.FocusMinutes} min");
 
         // 用【刚走完的那一格】当触发条件，不是【此刻在干什么】。否则 10:00:10 切走、
         // 10:00:50 切回这种短切换会整个从提醒里溜掉——而它在色块上明明是红的。
         if (cells.Count > 0 && cells[^1].OffTaskSeconds >= NudgeFloorSeconds)
-            Console.WriteLine($"       ⚠ 刚过去那一分钟有 {cells[^1].OffTaskSeconds:F0} 秒跑偏了。");
+            Console.WriteLine($"       ⚠ The minute just past had {cells[^1].OffTaskSeconds:F0}s off-task.");
 
         if (state.FocusCompletedAt is { } done) return Rest(task, state, done);
 
@@ -128,18 +128,18 @@ int Rest(TaskRecord task, TaskState state, DateTimeOffset completedAt)
 
     var rest = TimeSpan.FromMinutes(task.RestMinutes);
     var restEnds = completedAt + rest;
-    Console.WriteLine($"进入休息 {task.RestMinutes} 分钟。这段时间去哪、干什么都不重要。\n");
+    Console.WriteLine($"Break for {task.RestMinutes} min. Where you go and what you do does not matter.\n");
 
     while (DateTimeOffset.Now < restEnds)
     {
         // 每分钟淡掉 100%/休息分钟数（§8.4.4）。不是固定 10%——那样 25 分钟的任务
         // 休息结束时盘上还挂着半个色环，跟「没有色环就是邀请」打架。
         var left = rest > TimeSpan.Zero ? 1 - (DateTimeOffset.Now - completedAt) / rest : 0;
-        Console.Write($"\r☕ 休息中，色环还剩 {Math.Max(0, left) * 100:F0}%   ");
+        Console.Write($"\r☕ On a break — {Math.Max(0, left) * 100:F0}% of the ring left   ");
         Thread.Sleep(1000);
     }
 
-    Console.WriteLine("\n\n休息结束。要再来一轮就自己再开一次 —— 程序不会替你开始。\n");
+    Console.WriteLine("\n\nBreak over. Start another round yourself — the program never does it for you.\n");
     return 0;
 }
 
@@ -151,9 +151,9 @@ async Task<int> ReplayPastAsync()
 {
     var minutes = int.Parse(opt.GetValueOrDefault("minutes", "25"));
     var groups = opt.GetValueOrDefault("group")?.Split(',', StringSplitOptions.RemoveEmptyEntries)
-                 ?? throw new ArgumentException("要指定小目标：--group 学习经济学");
+                 ?? throw new ArgumentException("A goal is required: --group <name from rules.json>");
     var since = DateTimeOffset.Parse(opt.GetValueOrDefault("since")
-                 ?? throw new ArgumentException("要指定起点：--since \"2026-07-26 20:00\""));
+                 ?? throw new ArgumentException("A start time is required: --since \"2026-07-26 20:00\""));
     var until = opt.TryGetValue("until", out var u) ? DateTimeOffset.Parse(u) : since.AddHours(3);
 
     var rules = LoadRules();
@@ -169,8 +169,8 @@ async Task<int> ReplayPastAsync()
     };
     var state = Replay.Run(task, rules, win, afk, until);
 
-    Console.WriteLine($"\n干跑：{Renderer.Clock(task.StartedAt, "MM-dd HH:mm")} → {Renderer.Clock(until, "HH:mm")}   小目标：{string.Join("、", groups)}");
-    Console.WriteLine($"窗口事件 {win.Count} 条，afk 事件 {afk.Count} 条\n");
+    Console.WriteLine($"\nDry run: {Renderer.Clock(task.StartedAt, "MM-dd HH:mm")} → {Renderer.Clock(until, "HH:mm")}   goals: {string.Join(", ", groups)}");
+    Console.WriteLine($"{win.Count} window events, {afk.Count} afk events\n");
     Console.WriteLine(Renderer.Legend());
     Console.WriteLine(Renderer.Cells(Replay.ToMinuteCells(task, state)));
     Console.WriteLine();
@@ -182,14 +182,17 @@ int Help()
 {
     Console.WriteLine("""
 
-        一袋米要扛几楼 —— 命令行原子层
+        ItamiTimer (一袋米要扛几楼) — command-line layer
 
-          itami start  --minutes 5 --group 学习经济学     提交任务，跑到结束
-          itami replay --since "2026-07-26 20:00" [--until ...] --minutes 25 --group 学习经济学
-                                                         拿过去的真实历史干跑
+          itami start  --minutes 25 --group <goal>       submit a task and run it to the end
+          itami replay --since "2026-07-26 20:00" [--until ...] --minutes 25 --group <goal>
+                                                        dry-run over real past history
 
-        任务只活在进程里，不落盘：退出 itami 就等于放弃当前任务（DESIGN.md §2）。
-        规则文件默认找 ./rules.json，可用 --rules <路径> 指定。
+        <goal> is a group name from rules.json.
+
+        A task lives only in this process and is never written to disk: quitting itami
+        abandons the current task (DESIGN.md §2).
+        The rules file defaults to ./rules.json; override it with --rules <path>.
 
         """);
     return 0;
@@ -201,7 +204,7 @@ GroupRules LoadRules()
 {
     var path = opt.GetValueOrDefault("rules") ?? "rules.json";
     if (!File.Exists(path))
-        throw new FileNotFoundException($"找不到规则文件 {Path.GetFullPath(path)}，用 --rules 指定路径。");
+        throw new FileNotFoundException($"Rules file not found at {Path.GetFullPath(path)}. Use --rules to point at one.");
     return GroupRules.Load(path);
 }
 

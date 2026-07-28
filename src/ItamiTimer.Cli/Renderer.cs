@@ -53,7 +53,7 @@ public static class Renderer
     /// <summary>一分钟一个字符，60 个换一行。</summary>
     public static string Cells(IReadOnlyList<MinuteCell> cells)
     {
-        if (cells.Count == 0) return $"{Dim}（还没有走完一整分钟）{Reset}";
+        if (cells.Count == 0) return $"{Dim}(no full minute has elapsed yet){Reset}";
 
         var sb = new StringBuilder();
         for (var i = 0; i < cells.Count; i++)
@@ -73,18 +73,18 @@ public static class Renderer
     }
 
     public static string Legend()
-        => $"{Fg(Focus)}█{Reset} 计入   {Fg(Amber)}█{Reset} 掺了偷懒   {Fg(Slack)}█{Reset} 基本在偷懒   "
-         + $"{Fg(AbsentC)}▒{Reset} 离开   {Dim}░{Reset} AW 无数据";
+        => $"{Fg(Focus)}█{Reset} counted   {Fg(Amber)}█{Reset} partly off-task   {Fg(Slack)}█{Reset} mostly off-task   "
+         + $"{Fg(AbsentC)}▒{Reset} away   {Dim}░{Reset} no AW data";
 
     public static string PhaseText(TaskPhase p) => p switch
     {
-        TaskPhase.NotStarted => "即将开始",
-        TaskPhase.Focusing => $"{Fg(Focus)}● 专注中{Reset}",
-        TaskPhase.Slacking => $"{Fg(Slack)}● 跑偏了{Reset}",
-        TaskPhase.Away => $"{Fg(AbsentC)}● 人不在{Reset}",
-        TaskPhase.NoData => $"{Dim}● AW 无数据{Reset}",
-        TaskPhase.Resting => "☕ 休息中",
-        TaskPhase.Completed => "✓ 已完成",
+        TaskPhase.NotStarted => "about to start",
+        TaskPhase.Focusing => $"{Fg(Focus)}● focusing{Reset}",
+        TaskPhase.Slacking => $"{Fg(Slack)}● off-task{Reset}",
+        TaskPhase.Away => $"{Fg(AbsentC)}● away{Reset}",
+        TaskPhase.NoData => $"{Dim}● no AW data{Reset}",
+        TaskPhase.Resting => "☕ on a break",
+        TaskPhase.Completed => "✓ completed",
         _ => p.ToString(),
     };
 
@@ -93,30 +93,30 @@ public static class Renderer
     {
         var sb = new StringBuilder();
         var elapsed = (s.FocusCompletedAt ?? s.Now) - task.StartedAt;
-        sb.AppendLine($"任务：{string.Join("、", task.Groups)}   {PhaseText(s.Phase)}");
-        sb.AppendLine($"承诺专注 {task.FocusMinutes} 分钟，实际耗时 {elapsed.TotalMinutes:F1} 分钟");
+        sb.AppendLine($"Task: {string.Join(", ", task.Groups)}   {PhaseText(s.Phase)}");
+        sb.AppendLine($"Committed to {task.FocusMinutes} min of focus; {elapsed.TotalMinutes:F1} min of wall-clock spent");
 
         // 最重要的一个数字：已经攒了多少。没有它，用户看不出还差多远。
         var banked = s.FocusedSeconds / 60;
         if (s.FocusCompletedAt is null)
-            sb.AppendLine($"**已专注 {banked:F1} / {task.FocusMinutes} 分钟，还差 {task.FocusMinutes - banked:F1} 分钟**");
+            sb.AppendLine($"**Focused {banked:F1} / {task.FocusMinutes} min — {task.FocusMinutes - banked:F1} min to go**");
         else
-            sb.AppendLine($"专注已达成于 {Clock(s.FocusCompletedAt.Value)}");
+            sb.AppendLine($"Focus completed at {Clock(s.FocusCompletedAt.Value)}");
         sb.AppendLine();
 
         if (s.Violations.Count > 0)
         {
             var total = s.OffTaskSecondsByApp.Values.Sum();
-            sb.AppendLine($"  偷懒 {s.Violations.Count} 次，共 {total / 60:F1} 分钟");
+            sb.AppendLine($"  Off-task {s.Violations.Count}x, {total / 60:F1} min total");
             foreach (var (app, secs) in s.OffTaskSecondsByApp.OrderByDescending(x => x.Value))
-                sb.AppendLine($"      {app,-24} {secs / 60:F1} 分钟");
+                sb.AppendLine($"      {app,-24} {secs / 60:F1} min");
         }
-        else sb.AppendLine("  没有偷懒。");
+        else sb.AppendLine("  No off-task time.");
 
-        if (s.AbsentSeconds > 0) sb.AppendLine($"  离开              {s.AbsentSeconds / 60:F1} 分钟");
-        if (s.GapSeconds > 0) sb.AppendLine($"  AW 无数据          {s.GapSeconds / 60:F1} 分钟（不计入）");
+        if (s.AbsentSeconds > 0) sb.AppendLine($"  Away              {s.AbsentSeconds / 60:F1} min");
+        if (s.GapSeconds > 0) sb.AppendLine($"  No AW data        {s.GapSeconds / 60:F1} min (not counted)");
         foreach (var ch in task.GroupChanges)
-            sb.AppendLine($"  中途添加小目标     {Clock(ch.At, "HH:mm")} → {string.Join("、", ch.Groups)}");
+            sb.AppendLine($"  Goals added later {Clock(ch.At, "HH:mm")} → {string.Join(", ", ch.Groups)}");
         return sb.ToString();
     }
 }

@@ -8,12 +8,17 @@
     陷入「提醒 → 用户看提醒 → 又违规 → 再提醒」死循环。
     §8.5 专门提醒过：换 csproj 正是最容易把这行弄丢的时刻。
 
-    net10.0-windows：本层是唯一允许出现 Win32 调用的地方（置顶不抢焦点、
-    读键鼠空闲时间）。Core 保持 net10.0 且不含 P/Invoke。
+    net10.0（2026-07-28 去掉 -windows）：本层是唯一允许出现平台调用的地方
+    （置顶、读键鼠空闲时间、放音）。Core 保持 net10.0 且不含 P/Invoke。
+
+    ⚠️ **为什么去掉 -windows**：那个后缀对本项目其实没起作用 —— Core 的 csproj 里
+    自己写着「net10.0 挡不住 P/Invoke」，所以 -windows 换来的只有平台分析器上下文。
+    去掉之后 CA1416 反而会**真的开始报**没守住的平台调用，是净收益。平台专属代码
+    一律 [SupportedOSPlatform] 标注 + OperatingSystem.IsXxx() 守住，两边都编得过。
   -->
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net10.0-windows</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>ItamiTimer</AssemblyName>

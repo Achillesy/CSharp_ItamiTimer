@@ -65,7 +65,7 @@ public sealed class GroupRules
     public static GroupRules Parse(string json)
     {
         var file = JsonSerializer.Deserialize<RulesFile>(json, JsonOpts)
-                   ?? throw new InvalidDataException("rules.json 是空的。");
+                   ?? throw new InvalidDataException("rules.json is empty.");
 
         var groups = new List<CompiledGroup>();
         foreach (var (name, g) in file.Groups)
@@ -73,13 +73,13 @@ public sealed class GroupRules
             // fail-closed（§5.2）：空组匹配一切，勾上它等于把约束整个关掉。
             // 宁可拒绝加载并报错，也不要静默放行。
             if (g.Rules.Count == 0)
-                throw new InvalidDataException($"小目标「{name}」一条规则都没有。空组会匹配一切，等于关掉约束。");
+                throw new InvalidDataException($"Goal \"{name}\" has no rules. An empty group matches everything, which disables the constraint.");
 
             var rules = new List<CompiledRule>();
             foreach (var r in g.Rules)
             {
                 if (r.App is null && r.Title is null)
-                    throw new InvalidDataException($"小目标「{name}」里有一条规则既没写 app 也没写 title，它会匹配一切。");
+                    throw new InvalidDataException($"Goal \"{name}\" has a rule with neither app nor title; it would match everything.");
                 rules.Add(new CompiledRule(Compile(r.App, name), Compile(r.Title, name)));
             }
             groups.Add(new CompiledGroup(name, g.Disabled, rules));
@@ -98,7 +98,7 @@ public sealed class GroupRules
         }
         catch (ArgumentException e)
         {
-            throw new InvalidDataException($"「{where}」里的正则写错了：{pattern}  ({e.Message})", e);
+            throw new InvalidDataException($"Invalid regex in \"{where}\": {pattern}  ({e.Message})", e);
         }
     }
 

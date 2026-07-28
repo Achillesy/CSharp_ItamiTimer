@@ -21,23 +21,11 @@ public static class Confirm
     {
         var result = false;
 
-        var yes = new Button
-        {
-            Content = "是",
-            Width = 96,
-            Height = 34,
-            HorizontalContentAlignment = HorizontalAlignment.Center,
-            CornerRadius = new Avalonia.CornerRadius(6),
-        };
-        var no = new Button
-        {
-            Content = "否",
-            Width = 96,
-            Height = 34,
-            HorizontalContentAlignment = HorizontalAlignment.Center,
-            CornerRadius = new Avalonia.CornerRadius(6),
-            IsDefault = true,
-        };
+        // ⚠️ Padding=0 + VerticalContentAlignment=Center 必须一起给，否则文字顶着
+        // 上边 —— 跟 MainWindow.axaml 的 Button.start 是同一个坑，理由见那里的注释。
+        var yes = MakeButton("Yes");
+        var no = MakeButton("No");
+        no.IsDefault = true;
 
         var dlg = new Window
         {
@@ -75,11 +63,25 @@ public static class Confirm
         // 确认框上的最小化按钮是没有意义的（它是模态的，缩起来只会让人找不到），
         // 所以把它禁掉。Avalonia 没有对应属性，清掉 WS_MINIMIZEBOX 即可 ——
         // 系统会把按钮画成灰的，而不是整个抹掉，正是"disable"。
-        dlg.Opened += (_, _) => DisableMinimize(dlg);
+        //
+        // **macOS 上不用做**：那边的模态窗口本来就不给最小化按钮 —— 系统自己就把
+        // 这件事办了，没有什么可禁的。
+        dlg.Opened += (_, _) => { if (OperatingSystem.IsWindows()) DisableMinimize(dlg); };
 
         await dlg.ShowDialog(owner);
         return result;
     }
+
+    private static Button MakeButton(string text) => new()
+    {
+        Content = text,
+        Width = 96,
+        Height = 34,
+        Padding = new Avalonia.Thickness(0),
+        HorizontalContentAlignment = HorizontalAlignment.Center,
+        VerticalContentAlignment = VerticalAlignment.Center,
+        CornerRadius = new Avalonia.CornerRadius(6),
+    };
 
     private const int GWL_STYLE = -16;
     private const int WS_MINIMIZEBOX = 0x00020000;
@@ -93,7 +95,6 @@ public static class Confirm
     [SupportedOSPlatform("windows")]
     private static void DisableMinimize(Window w)
     {
-        if (!OperatingSystem.IsWindows()) return;
         if (w.TryGetPlatformHandle()?.Handle is not { } h || h == IntPtr.Zero) return;
         SetWindowLong(h, GWL_STYLE, GetWindowLong(h, GWL_STYLE) & ~WS_MINIMIZEBOX);
     }

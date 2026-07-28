@@ -112,8 +112,8 @@ public sealed class TaskSession : IDisposable
         _tick.Interval = TimeSpan.FromSeconds(1);   // 秒级用来数休息和空闲；查 AW 只在整分钟
         _tick.Tick += OnTick;
         _tick.Start();
-        Log.Info($"任务开始：{string.Join("、", task.Groups)}  专注 {task.FocusMinutes} 分钟  " +
-                 $"起算 {task.StartedAt:HH:mm:ss}  休息 {task.RestMinutes} 分钟");
+        Log.Info($"Task started. Goals: {string.Join(", ", task.Groups)}  focus {task.FocusMinutes} min  " +
+                 $"from {task.StartedAt:HH:mm:ss}  break {task.RestMinutes} min");
     }
 
     /// <summary>中途补勾小目标。§5.4：用当前集合的并集重放整段历史，**追溯生效**。</summary>
@@ -124,7 +124,7 @@ public sealed class TaskSession : IDisposable
             Groups = groups,
             GroupChanges = [.. Task.GroupChanges, new GroupChange(DateTimeOffset.Now, groups)],
         };
-        Log.Info($"中途改勾选：{string.Join("、", groups)}（追溯整段历史生效）");
+        Log.Info($"Goal selection changed mid-task: {string.Join(", ", groups)} (applies retroactively to the whole span)");
         _lastAwMinute = DateTimeOffset.MinValue;   // 下一拍立刻重算，不等整分钟
     }
 
@@ -159,7 +159,7 @@ public sealed class TaskSession : IDisposable
                 Finished = true;
                 RestFrom = null;          // 扇形随休息一起消失
                 _tick.Stop();
-                Log.Info("休息结束，任务终结。程序不会替用户开始下一轮（原则 1）。");
+                Log.Info("Break over; task finished. The program never starts the next round for you (principle 1).");
                 Interrupted?.Invoke(Interrupt.RestDone);
             }
             return;
@@ -181,7 +181,7 @@ public sealed class TaskSession : IDisposable
         var idle = InputIdle.Elapsed().TotalSeconds;
         var idleNudge = idle is >= IdleNudgeSeconds and < AwAfkTimeoutSeconds;
         if (idleNudge)
-            Log.Info($"{idle:F0} 秒没动键鼠，叫一声（再过 {AwAfkTimeoutSeconds - idle:F0} 秒这段时间就白费了）");
+            Log.Info($"No input for {idle:F0}s, nudging (in another {AwAfkTimeoutSeconds - idle:F0}s this time is written off)");
 
         // 2) 查 AW、重放。
         var focusDone = false;
@@ -206,16 +206,16 @@ public sealed class TaskSession : IDisposable
             // 每拍记一行。这是这个程序**唯一**能让人事后看出"它到底有没有在数"的地方
             // ——界面对用户是沉默的，日志就得把过程留下来。一分钟一行，一轮任务
             // 最多五十行，1MB 的滚动上限绰绰有余。
-            Log.Info($"{State.FocusedSeconds / 60,5:F1}/{Task.FocusMinutes} 分钟  " +
-                     $"{State.Phase}  格子 {cells.Count}  " +
-                     $"偷懒 {State.Violations.Count} 次 {State.OffTaskSecondsByApp.Values.Sum() / 60:F1} 分  " +
-                     $"离开 {State.AbsentSeconds / 60:F1} 分  无数据 {State.GapSeconds / 60:F1} 分");
+            Log.Info($"{State.FocusedSeconds / 60,5:F1}/{Task.FocusMinutes} min  " +
+                     $"{State.Phase}  cells {cells.Count}  " +
+                     $"off-task {State.Violations.Count}x {State.OffTaskSecondsByApp.Values.Sum() / 60:F1}min  " +
+                     $"away {State.AbsentSeconds / 60:F1}min  no-data {State.GapSeconds / 60:F1}min");
 
             if (State.FocusCompletedAt is not null)
             {
                 focusDone = true;
-                Log.Info($"专注达成于 {State.FocusCompletedAt.Value.ToLocalTime():HH:mm:ss}，" +
-                         $"实际耗时 {(State.FocusCompletedAt.Value - Task.StartedAt).TotalMinutes:F1} 分钟");
+                Log.Info($"Focus completed at {State.FocusCompletedAt.Value.ToLocalTime():HH:mm:ss}, " +
+                         $"wall-clock {(State.FocusCompletedAt.Value - Task.StartedAt).TotalMinutes:F1} min");
             }
             // 用【刚走完的那一格】当触发条件，不是【此刻在干什么】。否则 10:00:10 切走、
             // 10:00:50 切回这种短切换会整个从提醒里溜掉 —— 而它在色块上明明是红的。
@@ -226,14 +226,14 @@ public sealed class TaskSession : IDisposable
                 // 跑偏**只记一行日志**，不打断用户（用户 2026-07-28）。
                 // 提醒的活交给表盘：那一格是红的，灰弧往前滑了一截。
                 if (last.OffTaskSeconds >= NudgeFloorSeconds)
-                    Log.Info($"刚过去那一分钟有 {last.OffTaskSeconds:F0} 秒跑偏");
+                    Log.Info($"The minute just past had {last.OffTaskSeconds:F0}s off-task");
             }
         }
         catch (Exception ex)
         {
             // §6.2：临时连不上不损坏任何东西 —— 历史在 aw-server 里，恢复后重查就补齐了。
             // 界面上不显示编造的进度，原因写进日志。
-            Log.Error("本轮查询 AW 失败，本轮跳过（不影响最终结果，§6.2）", ex);
+            Log.Error("ActivityWatch query failed this tick; skipping it (does not affect the final result, §6.2)", ex);
         }
         finally { _busy = false; }
 
@@ -249,7 +249,7 @@ public sealed class TaskSession : IDisposable
         Finished = true;
         _tick.Stop();
         Task = Task with { Status = RecordStatus.Abandoned, AbandonedAt = DateTimeOffset.Now };
-        Log.Info($"放弃任务。已专注 {(State?.FocusedSeconds ?? 0) / 60:F1}/{Task.FocusMinutes} 分钟");
+        Log.Info($"Task abandoned. Focused {(State?.FocusedSeconds ?? 0) / 60:F1}/{Task.FocusMinutes} min");
     }
 
     public void Dispose()

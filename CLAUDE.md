@@ -4,7 +4,7 @@
 
 ## 项目是什么
 
-ItamiTimer（中文名「一袋米要扛几楼」）是一个 Windows 桌面端**带强制约束的专注任务计时器**：用户勾选本轮允许的几组应用（「活动组」，预计 ≤5 组）并提交任务；此后程序拿任务开始时间去查 ActivityWatch 的事件历史，算出累计专注时长——只有待在已勾选的应用里、且人在座的时间才计入。切到别处那段时间不计入，任务因此被拖长。**痛感全部来自表盘**：那一分钟的格子变红，灰色的截止弧往前滑走 —— 不弹窗、不出声、不给账单，自己看，自己猜（§7.1、§8.3）。
+ItamiTimer（中文名「一袋米要扛几楼」）是一个桌面端**带强制约束的专注任务计时器**（Windows + macOS，见「跨平台」一节）：用户勾选本轮允许的几组应用（「活动组」，预计 ≤5 组）并提交任务；此后程序拿任务开始时间去查 ActivityWatch 的事件历史，算出累计专注时长——只有待在已勾选的应用里、且人在座的时间才计入。切到别处那段时间不计入，任务因此被拖长。**痛感全部来自表盘**：那一分钟的格子变红，灰色的截止弧往前滑走 —— 不弹窗、不出声、不给账单，自己看，自己猜（§7.1、§8.3）。
 
 ## 现状：功能已完整，在真机上跑通过
 
@@ -40,6 +40,23 @@ Artifact 版留个念想：https://claude.ai/code/artifact/8b803438-9eba-41c0-a2
 
 **本项目已纳入 git 管理**（2026-07-27）：远端 `https://github.com/Achillesy/CSharp_ItamiTimer.git`，默认分支 **`master`**（不是 `main`），公开仓库，Apache 2.0。`bin/`、`obj/`、`.vs/`、`*.user` 都已忽略。
 
+## 界面语言：英文（2026-07-28 傍晚）
+
+**运行时一切用户看得见的文字都是英文**，目的是扩大使用范围。**这不是多语言版**——没有资源文件、没有语言切换、没有 i18n 框架，英文直接写死在代码里。要加第二种语言再说，别提前搭架子。
+
+四条边界，**改之前先看清楚**：
+
+| | 语言 | 为什么 |
+|---|---|---|
+| 界面文案、CLI 输出、日志、异常消息 | **英文** | 用户看得见的全部 |
+| 窗口标题 / 确认框标题 `一袋米要扛几楼` | **保留中文** | 它是玩梗，是这个程序的名字，不是待翻译的短语 |
+| `rules.json`（组名、title 正则、注释） | **保留中文** | 是**用户数据**不是界面文案。那条 `{ "title": "经济学" }` 匹配的是窗口标题，翻成英文会当场失效 |
+| 源码注释、`CLAUDE.md`、`DESIGN.md` | **保留中文** | 开发记录，不是产品的一部分 |
+
+⚠️ **`App.axaml` 的 `Name="ItamiTimer"` 永远不要"本地化"。** 它是 §5.3 自身豁免的依据（见「跨平台」一节），改了不报错、不崩溃，只是**安静地把账算错**。
+
+顺带一提，`rules.json` 的 `ignore` 名单可能是**跟着系统语言变**的：macOS 的 aw-watcher-window 读的是 `NSWorkspace` 的 `localizedName`，所以中文系统下 `Finder` 很可能上报成 `访达`。**未验证**（本机是 en-US），但它影响的是**算账正确性**、且跟界面语言完全独立。真要支持非英文系统，这条得先在目标语言的系统上实测。
+
 ## 权威设计文档
 
 **[`DESIGN.md`](./DESIGN.md)（v3）是这个项目的架构设计源文档**，来自开发前与用户的多轮讨论确认，动手写核心逻辑前先完整读一遍。里面包含：四条核心原则、任务生命周期、判定模型、规则文件格式、AW 接口约定、重放算法、模块划分、启动行为、配置项、手动验证清单。文档里的决策已经和用户对齐过，不要在没有跟用户重新确认的情况下推翻或绕过。
@@ -62,16 +79,18 @@ Artifact 版留个念想：https://claude.ai/code/artifact/8b803438-9eba-41c0-a2
 C# / .NET 10。2026-07-27 拆成三个 csproj，**目的是让编译器强制执行 DESIGN.md §8 的边界纪律**（详见 §8.0）：
 
 ```
-src/ItamiTimer.Core/   net10.0          类库          模块 1~6，无 UI 无 Win32
-src/ItamiTimer.Cli/    net10.0          itami.exe     命令行原子层，用真实 AW 数据干跑
-src/ItamiTimer.App/    net10.0-windows  ItamiTimer.exe  界面（WinForms 脚手架，待换 Avalonia）
+src/ItamiTimer.Core/   net10.0   类库            模块 1~6，无 UI 无平台调用
+src/ItamiTimer.Cli/    net10.0   itami           命令行原子层，用真实 AW 数据干跑
+src/ItamiTimer.App/    net10.0   ItamiTimer      界面（Avalonia 12）
 ```
 
 三条不能动的：
 
-- **`Core` 必须保持 `net10.0`（无 `-windows`）**。这是纪律的执行机制本身：往 Core 里塞 WinForms/Avalonia/P/Invoke 会直接编不过。绝不要给它加 `UseWindowsForms`、`UseWPF` 或任何 UI 包引用。
-- **`App` 的 `AssemblyName` 钉死是 `ItamiTimer`**。AW 上报的 `data.app` 就是 exe 名，§5.3 第 1 步靠它做自身豁免；改了就死循环。
-- **`App` 是 Avalonia，且是唯一允许出现 Win32 调用的地方**（置顶、winmm 放音）。表盘、骨牌、番茄、exe 图标全部矢量绘制，**仓库里不放位图资源**——要改形状就改画它的那个 `.cs`。
+- **`Core` 必须保持 `net10.0`**。这是纪律的执行机制本身：往 Core 里塞 WinForms/Avalonia 会直接编不过。绝不要给它加 `UseWindowsForms`、`UseWPF` 或任何 UI 包引用。
+- **`App` 的 `AssemblyName` 钉死是 `ItamiTimer`**，且 **`App.axaml` 的 `Name` 也钉死是 `ItamiTimer`**。AW 上报的 `data.app`，Windows 上是 exe 名、macOS 上是 Avalonia 的 `Application.Name`；§5.3 第 1 步靠它做自身豁免，改了任一个就死循环。详见下面「跨平台」。
+- **`App` 是 Avalonia，且是唯一允许出现平台调用的地方**（置顶、放音、读键鼠空闲）。表盘、骨牌、番茄、exe 图标全部矢量绘制，**仓库里不放位图资源**——要改形状就改画它的那个 `.cs`。
+
+**`App` 的 TFM 2026-07-28 从 `net10.0-windows` 改成了 `net10.0`**。那个后缀对本项目从来没起过作用（`DllImport` 在 `net10.0` 上照样编得过，Core 的 csproj 注释里早就写明了），换来的只有平台分析器上下文。去掉之后 **CA1416 反而开始真的报没守住的平台调用**——移植时那 15 条警告就是待办清单本身。别加回去。
 
 转栈后表盘用手写 XAML 绘制（Shape/Transform/Path），**WPF 的纯 XAML 表盘项目是最可直接复用的参考**，两边几何模型一致。
 
@@ -97,7 +116,35 @@ dotnet publish src/ItamiTimer.App -c Release -r win-x64 --self-contained false -
 dotnet run --project src/ItamiTimer.Cli
 ```
 
-也可以直接用 VS2026 打开 `ItamiTimer.slnx`。`Core` 和 `Cli` 是跨平台的；`App` 目前只能在 Windows 上跑。
+macOS 打包成 `.app` 装进 `~/Applications/`（**必须走这个脚本，理由见下一节**）：
+
+```bash
+./pack-macos.sh
+```
+
+也可以直接用 VS2026 打开 `ItamiTimer.slnx`。**三个项目现在都是跨平台的**（2026-07-28）。
+
+## 跨平台（2026-07-28 加的 macOS 支持）
+
+**Core / Cli / 80 个测试在 macOS 上一行没改就全过了**，判定层"完全平台无关"这条设计经受住了实测。全部工作量在 App 层，而且平台差异**每一处都收口在一个文件里**：
+
+| 文件 | Windows | macOS |
+|---|---|---|
+| `Sound.cs` | `C:\Windows\Media\*.wav` + winmm `PlaySound` | `/System/Library/Sounds` 等三级 `*.aiff` + AudioToolbox |
+| `Tick.cs` | 合成的 PCM 走 `SND_MEMORY` | **合成那半段一个字不差**，落一次临时 wav 再交给 AudioToolbox |
+| `MacAudio.cs` | — | `AudioServicesPlaySystemSound`。**不用 `afplay`**：滴答每秒一次，子进程一小时 fork 三千六百次，启动延迟还会让钟听起来在喘 |
+| `InputIdle.cs` | `GetLastInputInfo` | `CGEventSourceSecondsSinceLastEventType`，不需要辅助功能权限 |
+| `WindowPin.cs` | `SetWindowPos` + `SWP_NOACTIVATE`（原 `Win32Topmost.cs`） | Avalonia 自带的 `Window.Topmost`，本来就不带激活语义 |
+| `AppData.cs` | `%LOCALAPPDATA%\ItamiTimer` | `~/Library/Application Support/ItamiTimer`。**不能用 `SpecialFolder.LocalApplicationData`**，.NET 在 Unix 上把它映射到 `~/.local/share`，Finder 里根本看不见 |
+| `ChromeIcons.cs` | 两边共用 | 新增：喇叭和图钉改成矢量画。原来用 Segoe Fluent Icons，macOS 上是豆腐块 |
+
+**三条踩过的坑，都是实测撞出来的，不要重犯：**
+
+- **⚠️ `App.axaml` 的 `Name="ItamiTimer"` 是正确性的一部分，不是好看。** macOS 的 aw-watcher-window 上报的 `data.app` 就是 Avalonia 的 `Application.Name`（**不是**进程名、**也不是** Info.plist 的 `CFBundleName`）。不设它时 Avalonia 默认叫 **`Avalonia Application`** —— 实测 AW 老老实实这么记了下来，而 §5.3 的 `SelfApps` 一个都对不上，**自身豁免直接失效**，触发的正是 GroupRules 注释里警告的那个死循环。修法是设 `Name`，**绝不是**往 `SelfApps` 里塞 `Avalonia Application`（那会把所有 Avalonia 应用一起豁免）。
+- **必须打成 `.app`，不能裸跑二进制。** 除了图标和 Dock，bundle 还是 LaunchServices 的入口。另外框架依赖的 apphost 要能找到 .NET 运行时，而**双击启动的 GUI 应用不继承 shell 的环境变量** —— .NET 装在 `/usr/local/share/dotnet` 之外时，终端里跑得好好的二进制，从 Finder 点开就是「You must install .NET」。`pack-macos.sh` 用 `LSEnvironment` 把 `DOTNET_ROOT` 写进 Info.plist 解决，**挪动 .NET 安装位置后要重新打包**。
+- **`rules.json` 的 `ignore` 两个平台的条目都在同一份文件里，是故意的。** AW 上报的 app 名两边完全不同（`explorer.exe` ↔ `Finder`、`LockApp.exe` ↔ `loginwindow`），一条在另一个平台上永远匹配不上的正则是无害的。拆成两份反而要维护两遍、还会漏同步。macOS 那段的名字取自本机真实上报，不是猜的。
+
+发布体积另记一笔：`-c Release -r win-x64 --self-contained false` 实测 **127MB**，其中绝大部分是 `libSkiaSharp.pdb`（160MB 未压缩）+ `libHarfBuzzSharp.pdb`（40MB）这两个 native 符号文件。**跟 §8.3.8 那个 27MB 不矛盾** —— 那个数字的限定词是「**删掉 `.pdb` 之后**约 27MB / 35 个文件」。也**跟 TFM 改动无关**：拿原始 HEAD（`net10.0-windows`）从 macOS 交叉编译，结果一模一样。要瘦身就发布后删 `*.pdb`。
 
 ## 架构要点
 
@@ -109,10 +156,10 @@ dotnet run --project src/ItamiTimer.Cli
 - **绝不自动开始下一个任务。** 休息结束就是任务终结，停在那里等用户。程序代替用户提交任务等于强制加任务（DESIGN.md 原则 1、§3）。
 - **检测层完全平台无关**：所有判定输入只来自 AW 本地 REST API（`http://127.0.0.1:5600`）的两个 bucket（`currentwindow` 和 `afkstatus` **都必需**），不调用任何系统原生窗口枚举/监听 API。不要为了「拿到真正的进程列表」而引入 `Process.GetProcesses()` 或 `EnumWindows`——界面上那个勾选列表是**预定义的活动组**，不是实时进程列表（DESIGN.md §8）。
 - **秒针一秒一跳，不是连续扫**（§8.2.6，2026-07-28 改）。理由是滴答：扫秒针的钟不会响，两者互斥。
-- **滴答声是运行时合成的**（§8.3.6），因为 `C:\Windows\Media` 里一个滴答都没有。别去找现成的 wav，也别打包一个进来。最小化照样响 —— 钟不会因为你没在看就停。
+- **滴答声是运行时合成的**（§8.3.6），因为 `C:\Windows\Media` 里一个滴答都没有（macOS 那 14 个 aiff 更没有，全是提示音）。别去找现成的 wav，也别打包一个进来。最小化照样响 —— 钟不会因为你没在看就停。
 - **右上角的喇叭只管滴答，不是总静音**（§8.3.7）。这条分界背后是个值得记住的判断：**这个程序其实是两样东西装在一个窗口里** —— 一个你愿意开在桌面上的钟，和一个盯着你学习的督工。喇叭和图钉属于前者；设置窗口那三张通知卡属于后者。
-- **⚠️ 不要再把【自动】置顶写回来。** 右上角那个图钉是**手动**开关，没有状态机 —— 跟被砍掉的那套自动置顶不是一回事（§8.3.7 末尾）。 2026-07-28 用户明确砍掉整套机制（原 §8.3）：「不要再纠结窗口置顶这种事情了。逻辑混乱，又容易出错。」`Win32Topmost.cs` 已删除。被否掉的是**表达方式**，不是那些检测本身——同一天用户就把键鼠空闲检测加了回来，只是改用声音（§8.3.4 的那段引言）。
-- **唯一需要 Windows 专属实现的地方**：`winmm.dll` 的 `PlaySound`，放系统自带的 wav（§8.3.1）。只用 `C:\Windows\Media` 里的文件，不打包音频资源——跟表盘不用位图是同一条纪律。
+- **⚠️ 不要再把【自动】置顶写回来。** 右上角那个图钉是**手动**开关，没有状态机 —— 跟被砍掉的那套自动置顶不是一回事（§8.3.7 末尾）。 2026-07-28 用户明确砍掉整套机制（原 §8.3）：「不要再纠结窗口置顶这种事情了。逻辑混乱，又容易出错。」（**被砍掉的是那套自动状态机**；手动图钉本身还在，实现在 `WindowPin.cs`，原名 `Win32Topmost.cs`，2026-07-28 因为多了 macOS 那条路而改成中性名。）被否掉的是**表达方式**，不是那些检测本身——同一天用户就把键鼠空闲检测加了回来，只是改用声音（§8.3.4 的那段引言）。
+- **只用系统自带的音，不打包音频资源**（§8.3.1）——跟表盘不用位图是同一条纪律。Windows 走 `winmm.dll` 的 `PlaySound` 放 `C:\Windows\Media` 的 wav；macOS 走 AudioToolbox 放 `/System/Library/Sounds` 的 aiff。两边都收口在 `Sound.cs`。
 - **提醒只有三声**：专注达成、休息结束、键鼠安静满 60 秒，都能在设置里单独关。**跑偏没有任何主动提醒，只写一行日志。**
 - **键鼠空闲那一声只在 `[60, 180)` 秒内响**（§8.3.5）。过了 180 秒 AW 已经回填 afk、救不回来了，再响就是噪音。这是它跟另外两声的本质区别：前两声是通报，它是**补救**。
 - **`Absent` 优先级高于一切。** 锁屏时 `LockApp.exe` 在 ignore 名单里（`Neutral`，计入）而 afk 说 `afk`（不计入），必须判 `Absent`。搞错了就是"锁屏一小时专注时长照涨"的漏洞（DESIGN.md §4）。
@@ -132,7 +179,7 @@ dotnet run --project src/ItamiTimer.Cli
 
 - **模拟表盘**（§8.2）从 §11 移进了 v1，已实现。
 - **收进任务栏常驻**（原 §8.3）曾移进 v1，2026-07-28 又**整个砍掉**——窗口从头到尾放在原地。
-- **日志只有 Debug 写**（§8.3.8，`[Conditional("DEBUG")]`）。所以 Release 下出错是**完全无声**的——排查问题得先切回 Debug 跑一遍。
+- **两个配置都写日志**（§8.3.8）。2026-07-28 傍晚用户推翻了同一天上午"只有 Debug 写"那条（`[Conditional("DEBUG")]` 已去掉），理由是界面对用户全程沉默、日志是唯一能事后查的东西，而省下的开销不值一提（一分钟一行，一轮最多五十行，且超 1MB 自动滚动）。**所以 Release 版出错现在也有据可查，不用再切回 Debug 复现。**
 - **`rules.json` 按三级找**（`AppData.RulesPath`）：`%LOCALAPPDATA%\ItamiTimer\` → exe 旁边 → 工作目录。用户自己那份在第一级，重新发布冲不掉。
 - **提示音 + 设置窗口**（§8.3.1~8.3.3）是 2026-07-28 新进 v1 的，已实现。三条通知音各自可关，外加合成的滴答声（开关在钟的右上角，音量在设置里）。
 

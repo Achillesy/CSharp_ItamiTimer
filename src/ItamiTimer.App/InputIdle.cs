@@ -33,11 +33,47 @@ public static class InputIdle
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetLastInputInfo(ref LastInputInfo plii);
 
+    private const string ApplicationServices =
+        "/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices";
+
+    /// <summary>
+    /// macOS 这一侧。<c>kCGEventSourceStateCombinedSessionState</c> = 0 表示"整个登录
+    /// 会话的输入"，跟 <c>GetLastInputInfo</c> 的口径一致（不是只看本进程）；
+    /// <c>kCGAnyInputEventType</c> = 0xFFFFFFFF 表示"任何一种输入事件"。
+    ///
+    /// **不需要辅助功能权限** —— 它只问"上一次输入过了多久"，不装事件钩子、
+    /// 读不到任何输入内容。已在 macOS 26.5.2 上实测。
+    /// </summary>
+    [DllImport(ApplicationServices)]
+    private static extern double CGEventSourceSecondsSinceLastEventType(uint stateId, uint eventType);
+
     /// <summary>距离最后一次键鼠输入过了多久。拿不到就返回 <see cref="TimeSpan.Zero"/>（当作刚动过，宁可不催）。</summary>
     public static TimeSpan Elapsed()
     {
-        if (!OperatingSystem.IsWindows()) return TimeSpan.Zero;
-        return WindowsElapsed();
+        if (OperatingSystem.IsWindows()) return WindowsElapsed();
+        if (OperatingSystem.IsMacOS()) return MacElapsed();
+        return TimeSpan.Zero;
+    }
+
+    [SupportedOSPlatform("macos")]
+    private static TimeSpan MacElapsed()
+    {
+        const uint CombinedSessionState = 0;
+        const uint AnyInputEventType = 0xFFFFFFFF;
+        try
+        {
+            var seconds = CGEventSourceSecondsSinceLastEventType(CombinedSessionState, AnyInputEventType);
+            return seconds > 0 ? TimeSpan.FromSeconds(seconds) : TimeSpan.Zero;
+        }
+        catch
+        {
+            // 读不到就当作刚动过 —— 宁可不催，也不要凭空催一声（§8.3.5：这一声是
+            // 补救，不是通报，误报比漏报更糟）。
+            //
+            // 这里**刻意不记日志**：本文件要能被 ItamiTimer.Cli 用 <Compile Link>
+            // 原样链过去（见类注释），所以它不能依赖 App 层的 Log。
+            return TimeSpan.Zero;
+        }
     }
 
     [SupportedOSPlatform("windows")]

@@ -11,11 +11,11 @@ internal static class Program
         // 谁也说不出发生了什么。
         AppDomain.CurrentDomain.UnhandledException += (_, e) =>
         {
-            if (e.ExceptionObject is Exception ex) Log.Error("未捕获的异常，程序即将退出", ex);
+            if (e.ExceptionObject is Exception ex) Log.Error("Unhandled exception; the program is about to exit", ex);
         };
         TaskScheduler.UnobservedTaskException += (_, e) =>
         {
-            Log.Error("后台任务里未观察到的异常", e.Exception);
+            Log.Error("Unobserved exception in a background task", e.Exception);
             e.SetObserved();
         };
 
@@ -39,11 +39,20 @@ internal static class Program
                 return;
             }
 
+            // 同上，macOS 那一侧：铺一个 .iconset 目录出来，交给 iconutil 压成 .icns
+            // 装进 .app（见 pack-macos.sh）。同一份美术，两种容器。
+            if (args is ["--export-iconset", var iconsetDir, ..])
+            {
+                BuildAvaloniaApp().SetupWithoutStarting();
+                IconExport.WriteIconset(iconsetDir);
+                return;
+            }
+
             BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
         }
         catch (Exception ex)
         {
-            Log.Error("启动失败", ex);
+            Log.Error("Startup failed", ex);
             throw;
         }
     }

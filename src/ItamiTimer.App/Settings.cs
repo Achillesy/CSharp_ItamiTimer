@@ -36,7 +36,7 @@ public sealed class Settings
     /// <summary>滴答音量 0~100。音色是合成的，没有可选项（<see cref="Tick"/>）。</summary>
     [JsonPropertyName("tickVolume")] public int TickVolume { get; set; } = 35;
 
-    /// <summary>右上角那个图钉：窗口置顶。手动开关，没有任何自动收放（<see cref="Win32Topmost"/>）。</summary>
+    /// <summary>右上角那个图钉：窗口置顶。手动开关，没有任何自动收放（<see cref="WindowPin"/>）。</summary>
     [JsonPropertyName("pinned")] public bool Pinned { get; set; }
 
     private static string Path_ => System.IO.Path.Combine(AppData.Dir, "settings.json");
@@ -54,18 +54,31 @@ public sealed class Settings
         }
         catch (Exception e)
         {
-            Log.Error("读设置失败，改用默认值", e);
+            Log.Error("Failed to read settings; falling back to defaults", e);
             s = new Settings();
         }
 
         // 第一次运行（或文件里没写）时挑一个装机自带的音色。挑不到就是 null = 不出声。
-        s.FocusDoneSound ??= Sound.PreferredOrFirst(
-            "Windows Notify System Generic", "Windows Notify", "Alarm01", "chimes");
-        s.RestDoneSound ??= Sound.PreferredOrFirst(
-            "Windows Notify Calendar", "Windows Proximity Notification", "Alarm02", "notify");
-        // 空闲那声要**轻**：它一分钟可能响两次，而且提醒的是"你还在吗"，不是"完成了"
-        s.IdleSound ??= Sound.PreferredOrFirst(
-            "Windows Message Nudge", "Windows Balloon", "Windows Background", "ding");
+        //
+        // 两个平台的音库没有一个名字重合，所以候选列表整份分开写。macOS 那 14 个
+        // aiff 的挑法：达成用 Glass（清亮、有"成了"的意思），休息结束用 Submarine
+        // （低沉一声，通报而不催促），空闲用 Tink —— 它是这 14 个里最轻的一个。
+        if (OperatingSystem.IsMacOS())
+        {
+            s.FocusDoneSound ??= Sound.PreferredOrFirst("Glass", "Hero", "Blow");
+            s.RestDoneSound ??= Sound.PreferredOrFirst("Submarine", "Bottle", "Purr");
+            s.IdleSound ??= Sound.PreferredOrFirst("Tink", "Pop", "Morse");
+        }
+        else
+        {
+            s.FocusDoneSound ??= Sound.PreferredOrFirst(
+                "Windows Notify System Generic", "Windows Notify", "Alarm01", "chimes");
+            s.RestDoneSound ??= Sound.PreferredOrFirst(
+                "Windows Notify Calendar", "Windows Proximity Notification", "Alarm02", "notify");
+            // 空闲那声要**轻**：它一分钟可能响两次，而且提醒的是"你还在吗"，不是"完成了"
+            s.IdleSound ??= Sound.PreferredOrFirst(
+                "Windows Message Nudge", "Windows Balloon", "Windows Background", "ding");
+        }
         return s;
     }
 
@@ -79,7 +92,7 @@ public sealed class Settings
         catch (Exception e)
         {
             // 存不下就算了，本次运行内仍然生效。绝不能因为写不了设置把程序搞挂。
-            Log.Error("写设置失败，本次改动只在内存里生效", e);
+            Log.Error("Failed to write settings; this change lives only in memory", e);
         }
     }
 }
