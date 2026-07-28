@@ -205,20 +205,33 @@ public class DialControl : Control
                 continue;
             }
 
-            var fill = cell.AbsentSeconds > cell.TotalSeconds / 2
-                ? p.Absent                       // 离开：灰，不是红
-                : p.Ramp(1 - cell.Purity);       // 绿 → 琥珀 → 红
+            // 「人不在」：**什么都不画**（用户 2026-07-28）。
+            //
+            // 原来画一块灰的。用户的话：「离开我觉得应该什么都不画，就是预计完成的
+            // 圆弧加长而已啊。」—— 离开不是你的错（§0.4.1「把起身离开画成红色等于
+            // 冤枉自己」），惩罚只该体现在**截止弧变长**这一处，盘面上不必再记一笔。
+            //
+            // 留下的空白不会跟"还没走到"混淆：写入头之前的每一分钟都已经发生过，
+            // 中间的空白只可能是离开；而"AW 没数据"另有虚线框，也分得开。
+            if (cell.AbsentSeconds > cell.TotalSeconds / 2) continue;
 
-            ctx.DrawGeometry(new SolidColorBrush(fill),
+            ctx.DrawGeometry(new SolidColorBrush(p.Ramp(1 - cell.Purity)),   // 绿 → 琥珀 → 红
                 new Pen(new SolidColorBrush(A(p.Face, 0xCC)), R(0.005)),
                 Annulus(c, R(rIn), R(rOut), d0, d1));
 
-            // 色盲的第二信号（§8.2.3）：重度偷懒的格子加一根径向短刻线，可以【数】出来
+            // 色盲的第二信号（§8.2.3）：重度偷懒的格子可以【数】出来，不必分辨红绿。
+            //
+            // **画成外缘上的一个缺口，不是把格子劈成两半**（用户 2026-07-28）。原来这根
+            // 刻线贯穿整个径向宽度，而一格在真实尺寸下只有约 8.7px 宽 —— 1.1px 的刻线
+            // 加上左右各 0.7px 的边框，红色只剩两条 3px 的窄边，整格读起来是"空心的框"
+            // 而不是"一块实心红砖"。**注解把被注解的东西吃掉了。**
+            // 现在只切外侧三成、并微微越过外缘，让它咬破轮廓 —— 数得出来，又不夺走颜色。
             if (cell.Purity < 0.34)
             {
                 var mid = (d0 + d1) / 2;
+                var notchIn = rOut - (rOut - rIn) * 0.32;
                 ctx.DrawLine(new Pen(new SolidColorBrush(A(p.Face, 0xDD)), R(0.008)),
-                    At(c, R(rIn + 0.02), mid), At(c, R(rOut - 0.02), mid));
+                    At(c, R(notchIn), mid), At(c, R(rOut + 0.005), mid));
             }
         }
 

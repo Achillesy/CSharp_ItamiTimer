@@ -31,6 +31,9 @@ public sealed record DialPalette(
         Focus: Color.FromRgb(0x2F, 0xA3, 0x6B),
         Amber: Color.FromRgb(0xE0, 0xA0, 0x3A),
         Slack: Color.FromRgb(0xD6, 0x45, 0x3F),
+        // ⚠️ 2026-07-28 起没有任何地方在用：「人不在」的格子改成什么都不画
+        // （§8.2.3）。留着这个 token 是因为它是四种结局之一的语义位置，
+        // 哪天想把离开重新画出来时不必再调一次色。
         Absent: Color.FromRgb(0x8A, 0x94, 0xA0),
         Pending: Color.FromRgb(0x3B, 0x7D, 0xD8),
         // §8.2.6：秒针【不能】用 slack 红。红是"偷懒"的语义色，色带全红时秒针
