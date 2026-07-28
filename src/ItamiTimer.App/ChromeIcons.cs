@@ -94,6 +94,29 @@ public static class ChromeIcons
         return canvas;
     }
 
+
+    /// <summary>
+    /// 齿轮（设置）。八齿 + 中心孔，用 EvenOdd 填充规则把孔挖出来。
+    ///
+    /// 跟喇叭、图钉一样是**算出来的**，不是字形：齿廓那 32 个点由外径 / 内径 / 齿宽
+    /// 三个数推出来（见本文件顶部注释 —— Segoe Fluent Icons 在 macOS 上是豆腐块）。
+    ///
+    /// 它没有开 / 关两态，所以不吃 <c>bool</c>：设置窗口开着的时候按钮本来就被
+    /// 模态挡住了，没有"当前打开着"这个状态要表达。
+    /// </summary>
+    public static Control Gear()
+    {
+        const string Outer = "M 14.91,6.85 L 14.91,9.15 L 12.98,9.49 L 12.58,10.47 L 13.70,12.07 L 12.07,13.70 L 10.47,12.58 L 9.49,12.98 L 9.15,14.91 L 6.85,14.91 L 6.51,12.98 L 5.53,12.58 L 3.93,13.70 L 2.30,12.07 L 3.42,10.47 L 3.02,9.49 L 1.09,9.15 L 1.09,6.85 L 3.02,6.51 L 3.42,5.53 L 2.30,3.93 L 3.93,2.30 L 5.53,3.42 L 6.51,3.02 L 6.85,1.09 L 9.15,1.09 L 9.49,3.02 L 10.47,3.42 L 12.07,2.30 L 13.70,3.93 L 12.58,5.53 L 12.98,6.51 Z";
+        const string Hole = "M 5.70,8.00 A 2.30,2.30 0 1 0 10.30,8.00 A 2.30,2.30 0 1 0 5.70,8.00 Z";
+
+        var geo = Geometry.Parse(Outer + " " + Hole);
+        if (geo is PathGeometry pg) pg.FillRule = FillRule.EvenOdd;
+
+        var canvas = new Canvas { Width = Box, Height = Box };
+        canvas.Children.Add(new Path { Data = geo, Fill = Ink });
+        return canvas;
+    }
+
     private static Path Stroke(string data, double thickness) => new()
     {
         Data = Geometry.Parse(data),

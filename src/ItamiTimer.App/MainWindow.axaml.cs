@@ -53,7 +53,9 @@ public partial class MainWindow : Window
 
         LoadRules();
         RefreshStartButton();
-        F<Button>("SettingsBtn").Click += OnSettings;
+        var gear = F<Button>("SettingsBtn");
+        gear.Content = ChromeIcons.Gear();     // 矢量，不是字形（macOS 上没有那个字体）
+        gear.Click += OnSettings;
         F<Button>("MuteBtn").Click += (_, _) => { _settings.TickEnabled = !_settings.TickEnabled; ApplyChrome(); _settings.Save(); };
         F<Button>("PinBtn").Click += (_, _) => { _settings.Pinned = !_settings.Pinned; ApplyChrome(); _settings.Save(); };
         ApplyChrome();

@@ -62,22 +62,6 @@
       <Setter Property="Foreground" Value="#FFFFFF"/>
     </Style>
 
-    <!-- 齿轮：唯一一个不属于「任务」的控件，所以画得尽量轻 -->
-    <Style Selector="Button.gear">
-      <Setter Property="Width" Value="30"/>
-      <Setter Property="Height" Value="30"/>
-      <Setter Property="Padding" Value="0"/>
-      <Setter Property="FontSize" Value="16"/>
-      <Setter Property="Opacity" Value="0.45"/>
-      <Setter Property="Background" Value="Transparent"/>
-      <Setter Property="BorderThickness" Value="0"/>
-      <Setter Property="HorizontalContentAlignment" Value="Center"/>
-      <Setter Property="VerticalContentAlignment" Value="Center"/>
-      <Setter Property="CornerRadius" Value="15"/>
-    </Style>
-    <Style Selector="Button.gear:pointerover">
-      <Setter Property="Opacity" Value="1"/>
-    </Style>
 
     <!-- 右上角那两个即时开关：喇叭（滴答声）、图钉（置顶）。
          图形是【矢量画的】（ChromeIcons.cs），不打包图片、也不依赖任何图标字体——
@@ -121,8 +105,17 @@
       </StackPanel>
     </Grid>
 
-    <!-- 七块骨牌 = 星期几。倒下几块就是周几，一个字都没有 -->
-    <app:DominoRow x:Name="Dominoes" Height="76" Margin="0,2,0,10"/>
+    <!-- 七块骨牌 = 星期几。倒下几块就是周几，一个字都没有。
+         齿轮压在这一行的右端、**图钉正下方**（用户 2026-07-28）。理由不是省地方，
+         是**增加迷惑性**：把一个功能按钮塞进骨牌这一行，骨牌就更像某种控件的
+         一部分，"这七块东西到底是什么"就更猜不出来了 —— 跟滑块不给数字、
+         分割线以下不给提示字是同一条（§8.4.2a）。 -->
+    <Grid Margin="0,2,0,10">
+      <app:DominoRow x:Name="Dominoes" Height="76"/>
+      <Button x:Name="SettingsBtn" Classes="chrome"
+              HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-6,-4,0"
+              ToolTip.Tip="Settings"/>
+    </Grid>
 
     <!-- ↓↓↓ 分割线以下：连不上 AW 时整块变灰，这个程序就只是一个钟（§6.2） -->
     <StackPanel x:Name="Controls" Spacing="10">
@@ -139,14 +132,10 @@
               Minimum="10" Maximum="50" TickFrequency="5"
               IsSnapToTickEnabled="True" TickPlacement="BottomRight" Value="25"/>
 
-      <!-- 小目标列表 + 齿轮。rules.json 有几个就排几行，窗口高度跟着变。
+      <!-- 小目标列表。rules.json 有几个就排几行，窗口高度跟着变。
            任务进行中仍然可点：补勾一个小目标是【追溯生效】的（§5.4）。
-           齿轮压在同一行的右端，不额外占一行高度。 -->
-      <Grid ColumnDefinitions="*,Auto">
-        <ItemsControl x:Name="Goals"/>
-        <Button x:Name="SettingsBtn" Grid.Column="1" Classes="gear" Content="⚙"
-                VerticalAlignment="Bottom" ToolTip.Tip="Settings"/>
-      </Grid>
+           番茄钟模式下整个隐藏（§11.1 第 3 条）。 -->
+      <ItemsControl x:Name="Goals"/>
 
     </StackPanel>
   </StackPanel>
