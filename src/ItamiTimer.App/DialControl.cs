@@ -30,6 +30,20 @@ public class DialControl : Control
     /// <summary>休息扇形的外缘。压在刻度圈里侧，别盖住数字（§8.4.4）。</summary>
     private const double RestWedgeOuter = 0.70;
 
+    /// <summary>
+    /// 木桶短板的最低高度（占色带径向宽度的比例）。**半高**（用户 2026-07-28）。
+    ///
+    /// 一格在真实尺寸下径向只有约 25px，取 0.18 时最短的那块只剩 4~5px ——
+    /// 用户看过之后的判断是"不要红色短板矮到看不到"。取 1/2 之后，纯度 0 的
+    /// 那一分钟仍有半块板那么显眼，而满格与最短之间还有一倍的落差，
+    /// 参差照样一眼可辨。
+    ///
+    /// **绝不能取 0**：「人不在」现在是什么都不画（§8.2.3a），零高度会让
+    /// "全程走神"跟它撞在一起 —— 而那正好是最不该混淆的一对：
+    /// 一个不怪你，一个全怪你。
+    /// </summary>
+    private const double StaveFloor = 0.5;
+
     /// <summary>§8.2.5 螺旋三圈。超过 180 分钟不再内缩，在 lane 2 上原地覆盖。</summary>
     private static readonly (double In, double Out)[] Lanes =
     [
@@ -215,24 +229,30 @@ public class DialControl : Control
             // 中间的空白只可能是离开；而"AW 没数据"另有虚线框，也分得开。
             if (cell.AbsentSeconds > cell.TotalSeconds / 2) continue;
 
-            ctx.DrawGeometry(new SolidColorBrush(p.Ramp(1 - cell.Purity)),   // 绿 → 琥珀 → 红
-                new Pen(new SolidColorBrush(A(p.Face, 0xCC)), R(0.005)),
-                Annulus(c, R(rIn), R(rOut), d0, d1));
-
-            // 色盲的第二信号（§8.2.3）：重度偷懒的格子可以【数】出来，不必分辨红绿。
+            // **木桶的短板**（用户 2026-07-28）：一格的【高度】= 那一分钟的纯度。
             //
-            // **画成外缘上的一个缺口，不是把格子劈成两半**（用户 2026-07-28）。原来这根
-            // 刻线贯穿整个径向宽度，而一格在真实尺寸下只有约 8.7px 宽 —— 1.1px 的刻线
-            // 加上左右各 0.7px 的边框，红色只剩两条 3px 的窄边，整格读起来是"空心的框"
-            // 而不是"一块实心红砖"。**注解把被注解的东西吃掉了。**
-            // 现在只切外侧三成、并微微越过外缘，让它咬破轮廓 —— 数得出来，又不夺走颜色。
-            if (cell.Purity < 0.34)
-            {
-                var mid = (d0 + d1) / 2;
-                var notchIn = rOut - (rOut - rIn) * 0.32;
-                ctx.DrawLine(new Pen(new SolidColorBrush(A(p.Face, 0xDD)), R(0.008)),
-                    At(c, R(notchIn), mid), At(c, R(rOut + 0.005), mid));
-            }
+            // 这一圈是个木桶，每一分钟是一块板。专注满了就是满高的一块；这一分钟
+            // 走神了，板子就短一截 —— **短板自己会露出来**。
+            //
+            // 它取代了原来那根"色盲第二信号"的刻线。刻线是往颜色上贴的补丁，而这个
+            // 是把同一个量编码进**长度**：长度不需要辨色，任何色盲都读得出来，也不必
+            // 再去数刻线。原来那根线还有个致命的副作用 —— 一格在真实尺寸下只有 8.7px
+            // 宽，1.1px 的刻线加左右各 0.7px 的边框，红色只剩两条 3px 的窄边，
+            // **注解把被注解的东西吃掉了**（用户：「看着像个空心的小块」）。
+            //
+            // 从内缘长出来、往外缘长：内圈保持一条干净的圆，参差的一边朝着刻度。
+            // 高度在 [StaveFloor, 1] 之间线性映射 —— 最短也有半块板，看得见。
+            // 而**满高的灰色承诺弧正好成了"这一分钟满格"的参照线** —— 绿板齐了它就
+            // 是满的，短了一眼就看得见。
+            //
+            // 颜色照旧（绿 → 琥珀 → 红），两个通道编同一个量：一个给正常视觉、
+            // 一个给所有人。
+            var purity = Math.Clamp(cell.Purity, 0, 1);
+            var top = rIn + (rOut - rIn) * (StaveFloor + (1 - StaveFloor) * purity);
+
+            ctx.DrawGeometry(new SolidColorBrush(p.Ramp(1 - purity)),
+                new Pen(new SolidColorBrush(A(p.Face, 0xCC)), R(0.005)),
+                Annulus(c, R(rIn), R(top), d0, d1));
         }
 
         DrawPendingArc(ctx, c, R, m0 + cells.Count, cells.Count);

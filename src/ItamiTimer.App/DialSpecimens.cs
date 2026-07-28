@@ -45,6 +45,21 @@ internal static class DialSpecimens
         // 跨圈：58 格已走完，承诺弧还剩 6 分钟 —— 必须在第 58→60 分钟处切到内圈
         var many = new List<MinuteCell>();
         for (var i = 0; i < 58; i++) many.Add(Cell(i, t1010, i % 7 == 0 ? 20 : 60, i % 7 == 0 ? 40 : 0));
+        // 木桶：纯度从满到零连续变化，看"短板"这个读法成不成立（§8.2.3a）
+        var barrel = new List<MinuteCell>();
+        for (var i = 0; i < 20; i++)
+        {
+            var counted = 60.0 * (1 - i / 19.0);
+            barrel.Add(Cell(i, t1010, counted, 60 - counted));
+        }
+        Save(outDir, "09-barrel-purity-from-full-to-zero", t1010, barrel, remaining: 6);
+
+        // 真实一点的样子：多数分钟满格，偶尔几块短板
+        var real = new List<MinuteCell>();
+        double[] mix = [60, 60, 60, 31, 60, 60, 60, 60, 12, 60, 60, 47, 60, 60, 60, 0, 60, 60];
+        for (var i = 0; i < mix.Length; i++) real.Add(Cell(i, t1010, mix[i], 60 - mix[i]));
+        Save(outDir, "10-barrel-mostly-full-with-a-few-short-staves", t1010, real, remaining: 7);
+
         Save(outDir, "05-arc-wraps-past-full-circle-tail-spirals-inward", t1010, many, remaining: 6);
 
         // 休息：**色环已经撤掉**（用户 2026-07-28：任务结束就不查 AW 了，不用画），
