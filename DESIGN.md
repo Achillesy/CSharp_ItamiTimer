@@ -1745,6 +1745,39 @@ macOS 那段名字**取自本机 aw-watcher-window 的真实上报，不是猜�
 代码路径跟已验证的试听是同一条（`Sound.Play` → `MacAudio`），但**达成 → 休息 → 结束**
 那段状态流转在 macOS 上确实还没跑过。
 
+### 15.6a 实测记录（2026-07-28 晚，Codex-Win11 / Windows 11 26200 / x64）
+
+`105183d` 那七处 Windows 专属路径是**在 macOS 上重构、交叉编译出 exe 但从未运行过**的。
+这一轮在 Windows 上逐条跑通：
+
+| 验证项 | 结果 |
+|---|---|
+| `dotnet build` / `dotnet test` | 零警告，**80 / 80 通过** |
+| 三个调试出口走 headless 后仍然渲染正确 | 8 张样张全对；`--export-icon` 产物与仓库里的 `tomato.ico` **逐字节一致** |
+| `Sound.cs` 的 `Library` / `Resolve` 重构 | 设置里三个下拉框列出真实音色（`Alarm01` / `Windows Unlock` / `Windows Message Nudge`），说明枚举 `C:\Windows\Media` 成功 |
+| `Sound.Play`（winmm，换音色触发） | 无异常 |
+| `Tick.Play`（`SND_MEMORY` 合成，拖音量滑块触发） | 无异常 |
+| `WindowPin.Set`（`SetWindowPos` + `SWP_NOACTIVATE`） | 置顶生效；**焦点未被抢**（见下） |
+| `Confirm.DisableMinimize` | 确认框 `WS_MINIMIZEBOX` = false，最小化与最大化按钮都不在，只剩 × |
+| 确认框 `WS_EX_TOPMOST` | true —— 主窗口被图钉钉住时模态框仍压得住 |
+| `ChromeIcons` 矢量图标（28px） | 喇叭 / 图钉两态都画得对 |
+| `InputIdle.GetLastInputInfo` | 通过：`19:24:00.659  No input for 77s, nudging (in another 103s this time is written off)` —— 落在整分钟、77s 在 `[60,180)` 窗口内、余量 180−77=103 也对 |
+| 按钮文字垂直居中 | `Start` / `Give up` / `Yes` / `No` 四个都正常 |
+| 计时点对齐 | 日志落在 `19:17:00.813` / `19:18:01.005`，误差 ≤1 秒 |
+| 休息时长 | 承诺 25 分钟 → `break 6 min`（⌊25/5⌋+1，§8.4.2） |
+
+⚠️ **只能证明没抛异常，证明不了声音真的从喇叭出来** —— 那需要人耳，自动化测不了。
+
+空闲督促那条花了三轮才验成，原因值得记：**这台机器有人在用**，每个计时点之前空闲都被
+真实输入清零，从没进过 `[60, 180)` 那个窗口。先直接量 `GetLastInputInfo`（读到 15.8 秒）
+才看清是测试条件没满足，不是功能坏了 —— 换句话说，**这一条只能在机器真的闲着的时候验**。
+
+**一个差点被误判成 bug 的观察，值得记下来。** 用 UIA 的 `InvokePattern.Invoke()` 点图钉，
+测出"焦点被抢走了"。但这是**测试工具的假象**：换成点喇叭（它的处理函数完全不碰窗口层级）
+同样会把窗口拉到前台，说明抢焦点的是 UIA 的 `Invoke()` 本身。单独调用 `WindowPin` 用的那组
+标志（`HWND_TOPMOST | SWP_NOACTIVATE`）时，置顶状态翻转而前台窗口不变 —— `SWP_NOACTIVATE`
+是生效的。**用 UIA 验"抢不抢焦点"这类问题时，必须先用一个不碰该行为的控件做对照。**
+
 ---
 
 ### 15.7 三个调试出口改走 headless（2026-07-28 晚）
