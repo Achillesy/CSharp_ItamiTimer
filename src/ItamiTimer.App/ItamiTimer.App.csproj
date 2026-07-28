@@ -40,6 +40,14 @@
     <PackageReference Include="Avalonia" Version="12.1.0" />
     <PackageReference Include="Avalonia.Desktop" Version="12.1.0" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.0" />
+    <!--
+      三个调试出口（dial-specimens / export-icon / export-iconset）用它，
+      正常启动那条路径不碰。它们只往 RenderTargetBitmap 上画，不需要窗口平台；
+      UsePlatformDetect 会去初始化原生窗口系统，在没有图形会话的环境（CI、
+      纯 ssh 会话）上直接崩。详见 Program.cs 里 HeadlessBuilder 的注释。
+      注意 pack-macos.sh 依赖 export-iconset，所以这条直接关系到能不能在 CI 上打包。
+    -->
+    <PackageReference Include="Avalonia.Headless" Version="12.1.0" />
   </ItemGroup>
 
   <ItemGroup>

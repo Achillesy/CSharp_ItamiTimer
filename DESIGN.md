@@ -1739,12 +1739,46 @@ macOS 那段名字**取自本机 aw-watcher-window 的真实上报，不是猜�
 | 真机跑一轮 10 分钟任务 | 灰弧、红格、放弃确认、色环撤除全部正确 |
 | **自身豁免** | **正确**：CLI 独立重放交叉验证，偷懒清单里只有 `Claude`，ItamiTimer 自己判 Neutral 计入 |
 | 从 macOS 交叉编译 win-x64 | 通过，产出正确的 PE32+ GUI 可执行文件 |
+| 三个调试出口不再需要图形会话 | 通过（§15.7）。`ssh localhost` 能跑完整 `pack-macos.sh`；`libAvaloniaNative.dylib` 不再被加载 |
 
 **尚未验证**：专注达成那一声和休息阶段（要真的连续专注满 10 分钟才会走到，本轮没等）。
 代码路径跟已验证的试听是同一条（`Sound.Play` → `MacAudio`），但**达成 → 休息 → 结束**
 那段状态流转在 macOS 上确实还没跑过。
 
 ---
+
+### 15.7 三个调试出口改走 headless（2026-07-28 晚）
+
+`--dial-specimens` / `--export-icon` / `--export-iconset` 原来都调 `BuildAvaloniaApp().SetupWithoutStarting()`，也就是走 `UsePlatformDetect` —— 那会去**初始化原生窗口平台**。
+
+可这三条路径只往 `RenderTargetBitmap` 上画，**压根不需要窗口**。多出来的这个依赖在有图形会话的机器上看不出区别，一旦没有（CI、纯 ssh 会话）就崩：
+
+```
+Avalonia.Native was not able to start the RenderTimer   (-6661)
+```
+
+**这条不是洁癖，是真的会拦路**：`pack-macos.sh` 里那句 `--export-iconset` 是**构建的一环**，意味着「打包」这件事依赖有没有人登录着桌面。放到 CI 上必然栽。构建步骤依赖图形会话本来就是错的。
+
+改法：加 `Avalonia.Headless` 包引用，这三条路径换成
+
+```csharp
+AppBuilder.Configure<App>()
+    .UseHeadless(new AvaloniaHeadlessPlatformOptions { UseHeadlessDrawing = false })
+    .UseSkia()
+```
+
+`UseHeadlessDrawing = false` 是关键的一半：headless 平台**默认连绘制都是空的**，关掉它再挂 `UseSkia`，画出来的才是真实像素、跟正常启动同一个后端。**正常启动那条路径一个字没动**，仍然是 `UsePlatformDetect`。
+
+#### 验证（结论都是测出来的，不是推断的）
+
+| 手段 | 结果 |
+|---|---|
+| `--export-icon` + `--export-iconset` 共 11 个产物的 SHA-256 | **改前改后逐字节一致** —— 渲染结果没有任何变化 |
+| 8 张表盘样张 | **不能用校验和比**：盘上画着当前时刻的指针，同一个构建连跑两次哈希就不同（实测）。改为看图确认 |
+| `DYLD_PRINT_LIBRARIES` 对比加载的原生库 | 调试出口只加载 `libSkiaSharp.dylib`；正常启动才加载 `libAvaloniaNative.dylib` |
+| `ssh localhost` 跑完整 `pack-macos.sh` | 通过 |
+
+⚠️ **第四行那个测试的证明力有限，别被它骗了**：本机图形登录着的时候，同一用户的 ssh 会话仍然够得到 window server —— 改之前的旧二进制在 `ssh localhost` 下**照样能跑**，原始崩溃在本机复现不出来。真正的证据是第三行：`libAvaloniaNative.dylib` 在调试出口上根本不再被加载，而 `-6661` 就是从那个库里抛的，**故障模式从结构上消失了**。要复现原始崩溃得找一台没有人登录桌面的机器（真 CI）。
 
 ## 16. 界面语言：英文（2026-07-28 傍晚）
 

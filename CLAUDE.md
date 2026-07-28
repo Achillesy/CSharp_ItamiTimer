@@ -38,6 +38,8 @@ ItamiTimer.exe --dial-specimens <目录>
 
 Artifact 版留个念想：https://claude.ai/code/artifact/8b803438-9eba-41c0-a296-5c98848abbe6
 
+⚠️ **那三个调试出口走的是 headless，不是 `UsePlatformDetect`**（`Program.cs` 的 `HeadlessBuilder`，DESIGN.md §15.7）。它们只往 `RenderTargetBitmap` 上画，不需要窗口平台；用 `UsePlatformDetect` 在**没有图形会话**的环境（CI、纯 ssh）上会崩在 `Avalonia.Native ... RenderTimer (-6661)`。而 `pack-macos.sh` 里那句 `--export-iconset` 是构建的一环 —— 改回去等于让打包依赖「有没有人登录着桌面」。**正常启动那条路径不要动。**
+
 **本项目已纳入 git 管理**（2026-07-27）：远端 `https://github.com/Achillesy/CSharp_ItamiTimer.git`，默认分支 **`master`**（不是 `main`），公开仓库，Apache 2.0。`bin/`、`obj/`、`.vs/`、`*.user` 都已忽略。
 
 ## 界面语言：英文（2026-07-28 傍晚）
