@@ -946,7 +946,7 @@ lane 2 内缘（0.14）仍在中心毂（0.045）之外。**超过 180 分钟不
 
 > 想回到"只在出事时留痕"的中间档：给 `Log.Info` / `Log.Warn` 加回 `[Conditional("DEBUG")]`、`Log.Error` 不加即可。正常一轮任务零写入（没有 ERROR 就没有行），出事时又有据可查。
 
-**发布形态**：框架依赖 + RID 限定（`-c Release -r win-x64 --self-contained false`），**再手工删掉 `.pdb`**，约 **27 MB / 35 个文件**。
+**发布形态**：框架依赖 + RID 限定（`-c Release -r win-x64 --self-contained false`），**27 MB / 35 个文件**。
 
 两个尺寸陷阱，都实测过：
 
@@ -958,13 +958,11 @@ lane 2 内缘（0.14）仍在中心毂（0.045）之外。**超过 180 分钟不
 
 **`dotnet publish` 自己不会剔除调试符号**——它只是把 NuGet 原生包里的内容照搬到输出目录。那 100 MB 的差额就两个文件：`libSkiaSharp.pdb`（80.1 MB）和 `libHarfBuzzSharp.pdb`（19.9 MB）。
 
-```bash
-find "$LOCALAPPDATA/Programs/ItamiTimer" -name '*.pdb' -delete
-```
+**这一步已经自动化了**，不需要人记得做：`ItamiTimer.App.csproj` 里的 `StripPdbFromPublish` 挂在 `AfterTargets="Publish"` 上，Windows 和 macOS 两条线一起受益。
 
-> ⚠️ **这是一个「必须记得做」的手工步骤，也就是迟早会被忘掉的那种。** 2026-07-28 第一次写文档时就漏了，照文档跑的人会拿到 127 MB 还以为正常。
+> **为什么值得做进构建，而不是写进文档。** 它先以"文档里的第二条命令"的形式存在过几个小时，而在那之前它压根没被写下来 —— 第一版发布文档只有一条 `dotnet publish`，照着跑的人拿到 127 MB，没有任何提示。**一个"必须记得做"的手工步骤，就是迟早会被忘掉的步骤**；这一条已经被忘过一次，没理由赌第二次。
 >
-> 真正的解法是在 csproj 里挂一个 `AfterTargets="Publish"` 的 `Delete` 任务，让 27 MB 成为发布命令的**自然产物**，两个平台一起受益。**目前还没做**，先把步骤写进文档。
+> 顺带删掉的还有本项目自己那两个 pdb（各几十 KB）。现在没有任何东西读它们 —— `Log.Error` 记的是异常类型和消息、不记堆栈。哪天想让 Release 的日志带上行号，要改的是 `Log.Error`，并在那个 target 里把自家的 pdb 排除掉。
 
 **文件都在哪**：
 

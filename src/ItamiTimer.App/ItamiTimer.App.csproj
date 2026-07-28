@@ -57,4 +57,30 @@
              Link="rules.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <!--
+    发布产物里剔掉调试符号：127MB -> 27MB（DESIGN.md §8.3.8）。
+
+    那 100MB 的差额就两个文件 —— libSkiaSharp.pdb 80MB + libHarfBuzzSharp.pdb 20MB。
+    它们由 SkiaSharp / HarfBuzzSharp 的原生 NuGet 包带进来，`dotnet publish` 只负责
+    把包里的内容照搬到输出目录，**不会剔除任何东西**。
+
+    为什么做进 csproj 而不是写进文档让人记得删：这一步已经被忘过一次了。原来
+    README / CLAUDE 里只有一条 publish 命令，照着跑拿到的是 127MB，而且没有任何
+    提示 —— 一个"必须记得做"的手工步骤，就是迟早会被忘掉的步骤。放在这里之后
+    27MB 成了发布命令的自然产物，Windows 和 macOS 两条线一起受益。
+
+    连本项目自己那两个 pdb 也一并删掉（各几十 KB，删不删无所谓）：Log.Error 记的是
+    异常类型和消息、不记堆栈，所以现在没有任何东西会去读它们。哪天想在 Release 的
+    日志里带上行号，要改的是 Log.Error，并在这里把自家的 pdb 排除掉。
+
+    只在 Publish 之后跑，不影响 `dotnet build` 和调试。
+  -->
+  <Target Name="StripPdbFromPublish" AfterTargets="Publish">
+    <ItemGroup>
+      <_PdbToStrip Include="$(PublishDir)**\*.pdb" />
+    </ItemGroup>
+    <Delete Files="@(_PdbToStrip)" ContinueOnError="true" />
+    <Message Importance="high" Text="已剔除 @(_PdbToStrip->Count()) 个 .pdb（见 csproj 的 StripPdbFromPublish）" />
+  </Target>
+
 </Project>

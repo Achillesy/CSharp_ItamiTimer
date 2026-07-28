@@ -4,13 +4,9 @@
 # 对应 Windows 那边的：
 #     dotnet publish src/ItamiTimer.App -c Release -r win-x64 --self-contained false \
 #         -o "$LOCALAPPDATA/Programs/ItamiTimer"
-#     find "$LOCALAPPDATA/Programs/ItamiTimer" -name '*.pdb' -delete
 #
-# 那第二行 find 不是可选的：dotnet publish 只把 NuGet 原生包照搬出来、不剔除调试
-# 符号，Windows 那边实测原样输出 127MB，删掉 pdb 才是 27MB（差额就 libSkiaSharp.pdb
-# 80MB + libHarfBuzzSharp.pdb 20MB 两个文件）。详见 DESIGN.md §8.3.8。
-#
-# 本脚本这边同理 —— 见下面 publish 之后那一步。
+# 两边都是 27MB 上下：dotnet publish 自己不剔除调试符号（原样输出 127MB），
+# csproj 里的 StripPdbFromPublish 替两个平台都删掉了。详见 DESIGN.md §8.3.8。
 #
 # ⚠️ **打包不是锦上添花，是正确性的一部分。**
 #
@@ -42,12 +38,8 @@ echo "==> publish（$RID，框架依赖）"
 dotnet publish src/ItamiTimer.App -c Release -r "$RID" --self-contained false \
     -o "$STAGE/publish" --nologo -v quiet
 
-# dotnet publish 只把 NuGet 原生包照搬出来，**不剔除调试符号**。Windows 那边实测
-# 原样输出 127MB、删掉 pdb 才 27MB（差额就 libSkiaSharp.pdb 80MB +
-# libHarfBuzzSharp.pdb 20MB 两个文件）。macOS 的原生包目前不带 .pdb，但 SkiaSharp
-# 哪天改了打包方式就会跟着长——一条无害的清理胜过一个装进 .app 才发现的意外。
-# 详见 DESIGN.md §8.3.8。
-find "$STAGE/publish" \( -name '*.pdb' -o -name '*.dSYM' \) -exec rm -rf {} + 2>/dev/null || true
+# .pdb 由 csproj 的 StripPdbFromPublish 在 AfterTargets="Publish" 上自动删掉了
+# （DESIGN.md §8.3.8）。macOS 的原生包目前也不带 .dSYM，所以这里不用再清理。
 echo "    $(du -sh "$STAGE/publish" | cut -f1)"
 
 echo "==> 画图标（代码画的，仓库里不放位图）"
