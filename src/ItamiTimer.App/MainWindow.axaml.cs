@@ -43,6 +43,14 @@ public partial class MainWindow : Window
     private readonly List<TextBlock> _tomatoLabels = [];
     /// <summary>启动时定一次，整个会话不再变（§11.1 第 2 条，见 <see cref="AppMode"/>）。</summary>
     private AppMode _mode = AppMode.Constrained;
+
+    /// <summary>
+    /// 模式裁决（<see cref="CheckAwAsync"/>）出结果了没。**出结果之前 Start 一律
+    /// 禁用**（用户 2026-07-30）：探活是异步的，裁决前 _mode 只是个默认值——
+    /// 不挡的话，那几毫秒里点 Start 会开出一个查不到 AW 的约束任务。
+    /// 禁用按钮让这条竞态从结构上消失，而不是赌手速。
+    /// </summary>
+    private bool _modeDecided;
     private readonly Settings _settings = Settings.Load();
 
     private TaskSession? _session;
@@ -255,6 +263,7 @@ public partial class MainWindow : Window
     /// </summary>
     private void ApplyMode()
     {
+        _modeDecided = true;   // 从这一刻起 Start 才可能亮起来
         F<ItemsControl>("Goals").IsVisible = _mode == AppMode.Constrained;
         F<StackPanel>("Controls").IsEnabled = true;
         Log.Info($"Mode: {_mode}");
@@ -290,8 +299,10 @@ public partial class MainWindow : Window
         }
         btn.Content = "Start";
         btn.Classes.Set("danger", false);
+        // 模式裁决出结果之前一律禁用（见 _modeDecided）；之后按模式判：
         // 番茄钟模式下没有小目标可勾，自然也不能拿"勾了没有"当启用条件（§11.1 第 3 条）。
-        btn.IsEnabled = _mode == AppMode.Pomodoro || (_rules is not null && Picked().Count > 0);
+        btn.IsEnabled = _modeDecided
+            && (_mode == AppMode.Pomodoro || (_rules is not null && Picked().Count > 0));
     }
 
     // ---------------------------------------------------------------- 任务
