@@ -6,5 +6,6 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/ItamiTimer.Core.Tests/ItamiTimer.Core.Tests.csproj" />
+    <Project Path="tests/ItamiTimer.App.Tests/ItamiTimer.App.Tests.csproj" />
   </Folder>
 </Solution>

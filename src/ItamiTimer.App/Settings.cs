@@ -86,7 +86,10 @@ public sealed class Settings
             s.FocusDoneSound ??= Sound.PreferredOrFirst("Glass", "Hero", "Blow");
             s.RestDoneSound ??= Sound.PreferredOrFirst("Submarine", "Bottle", "Purr");
             s.IdleSound ??= Sound.PreferredOrFirst("Tink", "Pop", "Morse");
-            s.AlarmSound ??= Sound.PreferredOrFirst("Alarm02", "Alarm01", "Ring01");
+            // 闹钟要响亮：Sosumi 是 14 个系统音里最"闹钟"的一个。
+            // ⚠️ 别抄 Windows 分支的名字——Alarm01/Alarm02 在 macOS 上不存在，
+            // PreferredOrFirst 会静默退回字母序第一个（Basso，一声闷响）。
+            s.AlarmSound ??= Sound.PreferredOrFirst("Sosumi", "Glass", "Ping");
         }
         else
         {

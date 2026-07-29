@@ -247,5 +247,5 @@ public sealed class GroupRules
         }
         return result;
     }
-    }
+}
 

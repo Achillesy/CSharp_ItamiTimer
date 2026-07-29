@@ -9,15 +9,14 @@ namespace ItamiTimer.App;
 /// 外加闹钟（响铃 + 到点关机）和滴答的**音量**。照 Windows 时钟应用的
 /// 「专注时段」设置页排版。
 ///
-/// **滴答的开关不在这里** —— 它在钟的右上角那个喇叭上（用户 2026-07-28）。
-/// 滴答是钟本身的功能，跟督促学习那三声不是一类东西，混在一页里会让人以为
-/// 它也是任务的一部分。
+/// **滴答的开关不在这里** —— 它在钟的右上角那个喇叭上（DECISIONS C4）。
+/// 滴答是钟本身的功能，跟督促学习那三声不是一类东西。
 ///
-/// **一个字的说明都没有**（用户 2026-07-28）：标题 + 控件，剩下的自己猜。
+/// **一个字的说明都没有**（DECISIONS D6）：标题 + 控件，剩下的自己猜。
 ///
-/// 没有「确定 / 取消」：改一下存一下，跟系统设置一个路数。选中音色立刻试听一次 ——
-/// 从一串文件名里盲选是选不出来的，**且不看对应的开关是否打开**：挑铃声本身
-/// 就是想听个响，跟"这声以后会不会真的响"是两回事。
+/// 没有「确定 / 取消」：改一下存一下，跟系统设置一个路数。选中音色立刻试听一次，
+/// **且不看对应开关是否打开**：挑铃声本身就是想听个响，跟"这声以后会不会真的响"
+/// 是两回事。
 /// </summary>
 public partial class SettingsWindow : Window
 {
@@ -33,94 +32,33 @@ public partial class SettingsWindow : Window
 
         var names = Sound.Available();
 
-        var focusOn = this.FindControl<ToggleSwitch>("FocusOn")!;
-        var restOn = this.FindControl<ToggleSwitch>("RestOn")!;
-        var idleOn = this.FindControl<ToggleSwitch>("IdleOn")!;
+        // 三张「开关 + 音色」卡，接线完全同构。
+        WireSoundCard("FocusOn", "FocusSound", names,
+            () => settings.FocusDoneEnabled, v => settings.FocusDoneEnabled = v,
+            () => settings.FocusDoneSound, v => settings.FocusDoneSound = v);
+        WireSoundCard("RestOn", "RestSound", names,
+            () => settings.RestDoneEnabled, v => settings.RestDoneEnabled = v,
+            () => settings.RestDoneSound, v => settings.RestDoneSound = v);
+        WireSoundCard("IdleOn", "IdleSound", names,
+            () => settings.IdleEnabled, v => settings.IdleEnabled = v,
+            () => settings.IdleSound, v => settings.IdleSound = v);
+
+        // 闹钟卡：开关不禁用下拉框（关着也能挑、能试听），旁边多一个关机开关。
+        WireSoundCard("AlarmOn", "AlarmSound", names,
+            () => settings.AlarmEnabled, v => settings.AlarmEnabled = v,
+            () => settings.AlarmSound, v => settings.AlarmSound = v,
+            comboFollowsToggle: false);
+
         var shutdownOn = this.FindControl<ToggleSwitch>("ShutdownOn")!;
-        var alarmOn = this.FindControl<ToggleSwitch>("AlarmOn")!;
-        var focusSound = this.FindControl<ComboBox>("FocusSound")!;
-        var restSound = this.FindControl<ComboBox>("RestSound")!;
-        var idleSound = this.FindControl<ComboBox>("IdleSound")!;
-        var alarmSound = this.FindControl<ComboBox>("AlarmSound")!;
-        var tickVol = this.FindControl<Slider>("TickVol")!;
-
-        focusSound.ItemsSource = names;
-        restSound.ItemsSource = names;
-        idleSound.ItemsSource = names;
-        alarmSound.ItemsSource = names;
-
-        focusOn.IsChecked = settings.FocusDoneEnabled;
-        restOn.IsChecked = settings.RestDoneEnabled;
-        idleOn.IsChecked = settings.IdleEnabled;
         shutdownOn.IsChecked = settings.ShutdownEnabled;
-        alarmOn.IsChecked = settings.AlarmEnabled;
-        focusSound.SelectedItem = settings.FocusDoneSound;
-        restSound.SelectedItem = settings.RestDoneSound;
-        idleSound.SelectedItem = settings.IdleSound;
-        alarmSound.SelectedItem = settings.AlarmSound;
-        focusSound.IsEnabled = settings.FocusDoneEnabled;
-        restSound.IsEnabled = settings.RestDoneEnabled;
-        idleSound.IsEnabled = settings.IdleEnabled;
-        tickVol.Value = settings.TickVolume;
-
-        focusOn.IsCheckedChanged += (_, _) =>
-        {
-            settings.FocusDoneEnabled = focusOn.IsChecked == true;
-            focusSound.IsEnabled = settings.FocusDoneEnabled;
-            Persist();
-        };
-        focusSound.SelectionChanged += (_, _) =>
-        {
-            settings.FocusDoneSound = focusSound.SelectedItem as string;
-            if (!_loading) Sound.Play(settings.FocusDoneSound);
-            Persist();
-        };
-
-        restOn.IsCheckedChanged += (_, _) =>
-        {
-            settings.RestDoneEnabled = restOn.IsChecked == true;
-            restSound.IsEnabled = settings.RestDoneEnabled;
-            Persist();
-        };
-        restSound.SelectionChanged += (_, _) =>
-        {
-            settings.RestDoneSound = restSound.SelectedItem as string;
-            if (!_loading) Sound.Play(settings.RestDoneSound);
-            Persist();
-        };
-
-        idleOn.IsCheckedChanged += (_, _) =>
-        {
-            settings.IdleEnabled = idleOn.IsChecked == true;
-            idleSound.IsEnabled = settings.IdleEnabled;
-            Persist();
-        };
-        idleSound.SelectionChanged += (_, _) =>
-        {
-            settings.IdleSound = idleSound.SelectedItem as string;
-            if (!_loading) Sound.Play(settings.IdleSound);
-            Persist();
-        };
-
         shutdownOn.IsCheckedChanged += (_, _) =>
         {
             settings.ShutdownEnabled = shutdownOn.IsChecked == true;
             Persist();
         };
 
-        alarmOn.IsCheckedChanged += (_, _) =>
-        {
-            settings.AlarmEnabled = alarmOn.IsChecked == true;
-            Persist();
-        };
-        // 铃声试听——刻意不看 AlarmEnabled，挑铃声就是想听个响
-        alarmSound.SelectionChanged += (_, _) =>
-        {
-            settings.AlarmSound = alarmSound.SelectedItem as string;
-            if (!_loading) Sound.Play(settings.AlarmSound);
-            Persist();
-        };
-
+        var tickVol = this.FindControl<Slider>("TickVol")!;
+        tickVol.Value = settings.TickVolume;
         tickVol.PropertyChanged += (_, e) =>
         {
             if (e.Property != RangeBase.ValueProperty) return;
@@ -133,6 +71,39 @@ public partial class SettingsWindow : Window
         };
 
         _loading = false;
+    }
+
+    /// <summary>
+    /// 一张「开关 + 音色下拉框」卡的全部接线：初值、开关联动、选中即试听即保存。
+    /// <paramref name="comboFollowsToggle"/> 控制下拉框是否随开关禁用——
+    /// 闹钟那张卡传 false：关着也能挑铃声。
+    /// </summary>
+    private void WireSoundCard(
+        string toggleName, string comboName, IReadOnlyList<string> names,
+        Func<bool> getEnabled, Action<bool> setEnabled,
+        Func<string?> getSound, Action<string?> setSound,
+        bool comboFollowsToggle = true)
+    {
+        var toggle = this.FindControl<ToggleSwitch>(toggleName)!;
+        var combo = this.FindControl<ComboBox>(comboName)!;
+
+        combo.ItemsSource = names;
+        toggle.IsChecked = getEnabled();
+        combo.SelectedItem = getSound();
+        if (comboFollowsToggle) combo.IsEnabled = getEnabled();
+
+        toggle.IsCheckedChanged += (_, _) =>
+        {
+            setEnabled(toggle.IsChecked == true);
+            if (comboFollowsToggle) combo.IsEnabled = getEnabled();
+            Persist();
+        };
+        combo.SelectionChanged += (_, _) =>
+        {
+            setSound(combo.SelectedItem as string);
+            if (!_loading) Sound.Play(getSound());
+            Persist();
+        };
     }
 
     /// <summary>改一下存一下。<c>_loading</c> 挡住构造期间那几次赋值触发的回调。</summary>
