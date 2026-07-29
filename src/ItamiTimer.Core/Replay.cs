@@ -172,6 +172,7 @@ public static class Replay
             var afk = CoveringAt(afkEvents, a);
 
             IntervalKind kind;
+            string? groupName = null;
             if (afk is null && !PendingPresent(afkEvents, a))
             {
                 // afk 没数据就是没数据。**绝不能当成"在座"**——那会把"停在目标应用
@@ -192,10 +193,10 @@ public static class Replay
             }
             else
             {
-                kind = rules.Classify(win.Value.App ?? "", win.Value.Title ?? "", task.Groups);
+                kind = rules.Classify(win.Value.App ?? "", win.Value.Title ?? "", task.Groups, out groupName);
             }
 
-            result.Add(new ClassifiedInterval(a, b, kind, win?.App, win?.Title));
+            result.Add(new ClassifiedInterval(a, b, kind, win?.App, win?.Title, groupName));
         }
         return result;
     }

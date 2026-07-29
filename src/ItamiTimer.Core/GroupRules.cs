@@ -18,6 +18,9 @@ public sealed class GoalGroup
     public bool Disabled { get; init; }
 
     public IReadOnlyList<MatchRule> Rules { get; init; } = [];
+
+    /// <summary>该组历史上累计的专注总时长（分钟）。跨任务持久化，每次任务结束时更新。</summary>
+    public double AccumulatedMinutes { get; set; }
 }
 
 /// <summary>rules.json 的原始形状。</summary>
@@ -142,18 +145,71 @@ public sealed class GroupRules
     ///
     /// <paramref name="activeGroups"/> 是全段统一的并集，不随时刻变（§5.4）。
     /// </summary>
-    public IntervalKind Classify(string app, string title, IReadOnlyCollection<string> activeGroups)
+    public IntervalKind Classify(string app, string title, IReadOnlyCollection<string> activeGroups, out string? groupName)
     {
         if (SelfApps.Contains(app, StringComparer.OrdinalIgnoreCase))
+        {
+            groupName = null;
             return IntervalKind.Neutral;
+        }
 
         foreach (var name in activeGroups)
             if (GroupMatches(name, app, title))
+            {
+                groupName = name;
                 return IntervalKind.OnTask;
+            }
 
         if (_ignore.Any(re => re.IsMatch(app)))
+        {
+            groupName = null;
             return IntervalKind.Neutral;
+        }
 
+        groupName = null;
         return IntervalKind.OffTask;
     }
-}
+
+    /// <summary>
+    /// 任务结束时，把本轮各组的 OnTask 时长（分钟）累加到 rules.json 对应组的
+    /// <see cref="GoalGroup.AccumulatedMinutes"/> 字段中。跨任务持久化。
+    ///
+    /// 只计 OnTask（明确命中小目标的区间），Neutral 不计入任何组。
+    /// 读取 → 累加 → 写回，全程原子操作。
+    /// </summary>
+    public static void Accumulate(string rulesPath, IReadOnlyList<ClassifiedInterval> intervals)
+    {
+        // 1. 从 intervals 中按组名累加 OnTask 秒数
+        var byGroup = new Dictionary<string, double>();
+        foreach (var iv in intervals)
+        {
+            if (iv.Kind != IntervalKind.OnTask || iv.GroupName is null) continue;
+            var secs = iv.Seconds;
+            byGroup[iv.GroupName] = byGroup.GetValueOrDefault(iv.GroupName) + secs;
+        }
+
+        if (byGroup.Count == 0) return;  // 没有 OnTask 时间，不写文件
+
+        // 2. 读取 rules.json
+        var json = File.ReadAllText(rulesPath);
+        var file = JsonSerializer.Deserialize<RulesFile>(json, JsonOpts)
+                   ?? throw new InvalidDataException("rules.json is empty.");
+
+        // 3. 累加到各组的 AccumulatedMinutes（秒→分钟，保留小数）
+        foreach (var (name, secs) in byGroup)
+        {
+            if (!file.Groups.TryGetValue(name, out var g)) continue;
+            g.AccumulatedMinutes += secs / 60.0;
+        }
+
+        // 4. 写回（注释会丢失，这是方案 A 已接受的代价）
+        var writeOpts = new JsonSerializerOptions
+        {
+            WriteIndented = true,
+            DefaultIgnoreCondition = JsonIgnoreCondition.Never,
+        };
+        var updated = JsonSerializer.Serialize(file, writeOpts);
+        File.WriteAllText(rulesPath, updated);
+    }
+    }
+

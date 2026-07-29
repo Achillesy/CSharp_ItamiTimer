@@ -36,12 +36,14 @@ public enum TaskPhase
 
 /// <summary>切成一段一段之后的分类结果，重放的中间产物。</summary>
 /// <param name="App">Gap 区间为 null。</param>
+/// <param name="GroupName">OnTask 区间所属的小目标组名；其它 Kind 为 null。</param>
 public readonly record struct ClassifiedInterval(
     DateTimeOffset Start,
     DateTimeOffset End,
     IntervalKind Kind,
     string? App,
-    string? Title)
+    string? Title,
+    string? GroupName = null)
 {
     public double Seconds => (End - Start).TotalSeconds;
 }

@@ -1,0 +1,2 @@
+# 统一 Unix 换行符（LF）—— 跨平台兼容 macOS / WSL2 / Windows
+* text=auto eol=lf

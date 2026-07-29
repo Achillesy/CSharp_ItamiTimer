@@ -350,6 +350,15 @@ public partial class MainWindow : Window
     /// <summary>任务终结：回到空盘。**色环 = 当前任务的投影，没有任务就没有色环**（§8.4.5a）。</summary>
     private void EndSession()
     {
+        if (_session is { State: { } st } && _rules is not null)
+        {
+            try
+            {
+                GroupRules.Accumulate(AppData.RulesPath(), st.Intervals);
+                Log.Info($"Accumulated minutes to rules.json");
+            }
+            catch (Exception ex) { Log.Error("Failed to accumulate minutes to rules.json", ex); }
+        }
         _session?.Dispose();
         _session = null;
 
@@ -386,6 +395,15 @@ public partial class MainWindow : Window
         if (await Confirm.AskAsync(this, "The task isn't finished. Quit anyway?"))
         {
             _session?.Abandon();
+            if (_session is { State: { } st } && _rules is not null)
+            {
+                try
+                {
+                    GroupRules.Accumulate(AppData.RulesPath(), st.Intervals);
+                    Log.Info("Accumulated minutes to rules.json");
+                }
+                catch (Exception ex) { Log.Error("Failed to accumulate minutes to rules.json", ex); }
+            }
             _closeApproved = true;
             Close();
         }
