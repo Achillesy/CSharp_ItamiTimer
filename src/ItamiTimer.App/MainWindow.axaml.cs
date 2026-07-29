@@ -37,6 +37,8 @@ public partial class MainWindow : Window
 
     private GroupRules? _rules;
     private readonly List<CheckBox> _goalBoxes = [];
+    /// <summary>每个小目标的番茄数标签（和 _goalBoxes 一一对应）。</summary>
+    private readonly List<TextBlock> _tomatoLabels = [];
     /// <summary>启动时定一次，整个会话不再变（§11.1 第 2 条，见 <see cref="AppMode"/>）。</summary>
     private AppMode _mode = AppMode.Constrained;
     private readonly Settings _settings = Settings.Load();
@@ -169,6 +171,7 @@ public partial class MainWindow : Window
         }
 
         ApplyMode();
+        _ = RefreshTomatoesAsync();
     }
 
     private void LoadRules()
@@ -181,8 +184,16 @@ public partial class MainWindow : Window
                 var box = new CheckBox { Content = name };
                 box.IsCheckedChanged += OnGoalToggled;
                 _goalBoxes.Add(box);
+                var label = new TextBlock
+                {
+                    Text = "",
+                    FontSize = 14,
+                    VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
+                    Margin = new Avalonia.Thickness(6, 0, 0, 0),
+                };
+                _tomatoLabels.Add(label);
             }
-            F<ItemsControl>("Goals").ItemsSource = _goalBoxes;
+            RefreshGoalItems();
             if (_goalBoxes.Count == 1) _goalBoxes[0].IsChecked = true;
             Log.Info($"rules.json loaded. Goals: {string.Join(", ", _rules.SelectableGroups)}");
         }
@@ -221,6 +232,21 @@ public partial class MainWindow : Window
         F<StackPanel>("Controls").IsEnabled = true;
         Log.Info($"Mode: {_mode}");
         RefreshStartButton();
+    }
+
+    /// <summary>把 _goalBoxes 和 _tomatoLabels 拼成水平 StackPanel 喂给 ItemsControl。</summary>
+    private void RefreshGoalItems()
+    {
+        var items = new List<StackPanel>();
+        for (var i = 0; i < _goalBoxes.Count; i++)
+        {
+            items.Add(new StackPanel
+            {
+                Orientation = Avalonia.Layout.Orientation.Horizontal,
+                Children = { _goalBoxes[i], _tomatoLabels[i] },
+            });
+        }
+        F<ItemsControl>("Goals").ItemsSource = items;
     }
 
     private void RefreshStartButton()
@@ -347,6 +373,33 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>从 AW 查今天窗口事件，按组估算番茄数（OnTask 时长 ÷25 向上取整），更新标签。</summary>
+    private async Task RefreshTomatoesAsync()
+    {
+        if (_mode == AppMode.Pomodoro || _rules is null) return;
+
+        try
+        {
+            using var aw = new AwClient(_settings.AwBaseUrl);
+            var bucketId = await aw.FindBucketIdAsync(AwClient.WindowBucketType);
+            var todayStart = DateTimeOffset.Now.Date;
+            var now = DateTimeOffset.Now;
+            var events = await aw.FetchEventsAsync(bucketId, todayStart, now);
+
+            var tomatoes = _rules.TodayTomatoes(events);
+            for (var i = 0; i < _goalBoxes.Count; i++)
+            {
+                var name = (string)_goalBoxes[i].Content!;
+                var count = tomatoes.GetValueOrDefault(name, 0);
+                _tomatoLabels[i].Text = count > 0 ? $"🍅 {count}" : "";
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Failed to refresh tomato counts", ex);
+        }
+    }
+
     /// <summary>任务终结：回到空盘。**色环 = 当前任务的投影，没有任务就没有色环**（§8.4.5a）。</summary>
     private void EndSession()
     {
@@ -361,6 +414,9 @@ public partial class MainWindow : Window
         }
         _session?.Dispose();
         _session = null;
+
+        // 任务结束后刷新今日番茄计数
+        _ = RefreshTomatoesAsync();
 
         var dial = F<DialControl>("Dial");
         dial.Cells = [];

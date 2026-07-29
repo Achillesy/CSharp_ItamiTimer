@@ -211,5 +211,36 @@ public sealed class GroupRules
         var updated = JsonSerializer.Serialize(file, writeOpts);
         File.WriteAllText(rulesPath, updated);
     }
+
+    /// <summary>
+    /// 粗略估算今天的番茄数：遍历今日窗口事件，对每条 OnTask 事件累加 duration，
+    /// 按组 ÷25 分钟、向上取整。不查 afk——番茄数是粗略统计，不需要精确账单。
+    /// </summary>
+    /// <param name="windowEvents">今日窗口事件（已按 Start 排序）</param>
+    /// <returns>组名 → 番茄数</returns>
+    public Dictionary<string, int> TodayTomatoes(IReadOnlyList<AwEvent> windowEvents)
+    {
+        var byGroup = new Dictionary<string, double>();
+        var selectable = new HashSet<string>(SelectableGroups);
+
+        foreach (var ev in windowEvents)
+        {
+            var app = ev.App ?? "";
+            var title = ev.Title ?? "";
+            var kind = Classify(app, title, selectable, out var groupName);
+            if (kind == IntervalKind.OnTask && groupName is not null)
+            {
+                byGroup[groupName] = byGroup.GetValueOrDefault(groupName) + ev.DurationSeconds;
+            }
+        }
+
+        var result = new Dictionary<string, int>();
+        foreach (var (name, secs) in byGroup)
+        {
+            var tomatoes = (int)Math.Ceiling(secs / 60.0 / 25.0);
+            if (tomatoes > 0) result[name] = tomatoes;
+        }
+        return result;
+    }
     }
 
