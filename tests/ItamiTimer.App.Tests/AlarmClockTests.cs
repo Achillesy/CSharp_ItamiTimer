@@ -99,6 +99,29 @@ public class AlarmClockTests
     }
 
     [Fact]
+    public void 逆时针拨过十二点_环绕到另一头_不出负数()
+    {
+        var a = new AlarmClock();
+        a.Bump(-5, At(10, 0));         // 0 → 逆时针一格
+        Assert.Equal(715, a.Position);
+        a.Bump(-30, At(10, 0));
+        Assert.Equal(685, a.Position);
+    }
+
+    [Fact]
+    public void 顺拨再逆拨回到原位_响铃时刻也回到原值()
+    {
+        var a = new AlarmClock();
+        var now = At(8, 58);
+        a.Bump(5, now);
+        var first = a.FireAt;
+        a.Bump(30, now);
+        a.Bump(-30, now);
+        Assert.Equal(5, a.Position);
+        Assert.Equal(first, a.FireAt);
+    }
+
+    [Fact]
     public void 没拨过针就永远不响()
     {
         var a = new AlarmClock();

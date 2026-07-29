@@ -22,13 +22,15 @@ public sealed class AlarmClock
     public DateTime? FireAt { get; private set; }
 
     /// <summary>
-    /// 把黄针往前拨 <paramref name="minutes"/> 分钟，并立刻用严格算法把
+    /// 把黄针拨 <paramref name="minutes"/> 分钟——正数顺时针、**负数逆时针**
+    /// （2026-07-30：左键/前滚逆时针，右键/后滚顺时针）。拨完立刻用严格算法把
     /// 「下一次几点响」算死存住。悬浮提示直接读 <see cref="FireAt"/>——
     /// 显示的和会响的保证是同一个值。
     /// </summary>
     public void Bump(double minutes, DateTime now)
     {
-        Position = (Position + minutes) % FaceMinutes;
+        // C# 的 % 对负数会给出负值，逆时针跨过 12 点要做真模运算才能环绕
+        Position = ((Position + minutes) % FaceMinutes + FaceMinutes) % FaceMinutes;
         FireAt = NextRing(now, Position);
     }
 

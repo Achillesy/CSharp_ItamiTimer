@@ -56,9 +56,10 @@ restart the program.
   A gray arc marks the promised deadline; slacking makes it slide forward.
 - **Seven dominoes** — fallen count = day of week. No labels. Guessing is part of the design.
 - **Speaker / pin (top-right)** — synthesized tick-tock on/off, and manual always-on-top.
-- **Alarm** — press the clock face to set the yellow alarm hand (+5 min per click,
-  hold to accelerate; 144 positions, 5 minutes each). A tooltip shows the resolved ring
-  time. Optionally the alarm can shut the computer down.
+- **Alarm** — set the yellow alarm hand on the clock face itself: left-click moves it
+  counter-clockwise, right-click clockwise (hold to accelerate), or scroll the wheel
+  (forward = counter-clockwise). 144 positions, 5 minutes each; a tooltip shows the
+  resolved ring time. Optionally the alarm can shut the computer down.
 - **Gear** — settings: three notification sounds (focus done / break over / idle nudge),
   each with its own toggle, plus tick volume, alarm and shutdown switches.
 - **The Start button is the dividing line** — above it, things to look at; below it,
