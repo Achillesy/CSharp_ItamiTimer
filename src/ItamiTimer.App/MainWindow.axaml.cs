@@ -69,10 +69,10 @@ public partial class MainWindow : Window
         gear.Click += OnSettings;
         // 闹钟没有自己的图标——在钟面上滚滚轮（2026-07-30）：前滚逆时针、后滚顺时针。
         // 左右键点击已取消，把点击留给以后的功能扩展。
-        // 黄针位置从上次会话恢复；响铃时刻只恢复还没过期的（AlarmClock.Restore）。
+        // 上次会话的响铃时间点恢复进来：黄针位置由它推导，过期的只剩位置不再响。
         var dial = F<DialControl>("Dial");
         dial.PointerWheelChanged += OnAlarmWheel;
-        _alarm.Restore(_settings.AlarmHandMinutes, _settings.AlarmFireAt, DateTime.Now);
+        _alarm.Restore(_settings.AlarmFireAt, DateTime.Now);
         dial.AlarmMinutes = _alarm.Position;
         F<Button>("MuteBtn").Click += (_, _) => { _settings.TickEnabled = !_settings.TickEnabled; ApplyChrome(); _settings.Save(); };
         F<Button>("PinBtn").Click += (_, _) => { _settings.Pinned = !_settings.Pinned; ApplyChrome(); _settings.Save(); };
@@ -517,17 +517,13 @@ public partial class MainWindow : Window
     //  闹钟按钮交互
     // ================================================================
     /// <summary>
-    /// 闹钟状态**只在退出这一刻落盘**（用户 2026-07-30：运行期变多少次都没关系）：
-    /// 记下黄针位置；响铃时刻直接取内存里的现值——本轮拨过针且还没响就是那个
-    /// 未来时刻，响过了或压根没拨过就是 null，不需要单独去"检查变没变、响没响"；
-    /// 顺手把 Shutdown 标记取消（关机绝不跨会话，Settings.Load 里还有一道
-    /// 兜崩溃的复位）。
+    /// 闹钟**只在退出这一刻落盘**，而且只落一个值：响铃时间点（用户 2026-07-30）。
+    /// 黄针位置是它对 12 小时取余的推导值，变没变、响没响都不用记。
+    /// Shutdown 标记这里不管——启动时 Settings.Load 一律复位为关。
     /// </summary>
     private void SaveAlarmOnExit()
     {
-        _settings.AlarmHandMinutes = _alarm.Position;
         _settings.AlarmFireAt = _alarm.FireAt;
-        _settings.ShutdownEnabled = false;
         _settings.Save();
     }
 

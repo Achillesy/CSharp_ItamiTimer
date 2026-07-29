@@ -35,14 +35,10 @@ public sealed class Settings
     [JsonPropertyName("shutdownEnabled")] public bool ShutdownEnabled { get; set; }
 
     /// <summary>
-    /// 黄针停在表盘上的位置（0~719 分钟）。**位置永远持久化**——不存的话每次
-    /// 打开黄针都复位到 12 点，像闹钟被清了一样怪异（用户 2026-07-30）。
-    /// </summary>
-    [JsonPropertyName("alarmHandMinutes")] public double AlarmHandMinutes { get; set; }
-
-    /// <summary>
-    /// 下一次响铃的绝对时刻。跟位置一起存，重启时只恢复**还没过期**的
-    /// （<see cref="AlarmClock.Restore"/>）；关着程序时错过的闹钟不补响。
+    /// 闹钟唯一要持久化的东西：最后一次拨针算出的响铃时间点（退出时写，见
+    /// <c>MainWindow.SaveAlarmOnExit</c>）。黄针位置由它对 12 小时取余推导
+    /// （<see cref="AlarmClock.Position"/>），变没变、响没响都不用记——时间点
+    /// 没过就有效，过了就只剩黄针位置这个残影（<see cref="AlarmClock.Restore"/>）。
     /// </summary>
     [JsonPropertyName("alarmFireAt")] public DateTime? AlarmFireAt { get; set; }
 

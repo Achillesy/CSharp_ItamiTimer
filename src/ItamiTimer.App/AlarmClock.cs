@@ -4,10 +4,13 @@ namespace ItamiTimer.App;
 /// 闹钟模型（DESIGN.md §10）。**纯逻辑，不碰 UI、不碰时钟**——now 全部是参数，
 /// 所以整个类可以直接单元测试（tests/ItamiTimer.App.Tests/AlarmClockTests.cs）。
 ///
-/// 黄针只能停在表盘的 144 个格子上（0~719 分钟，5 分钟 = 2.5° 一格）。
-/// **响铃时刻在拨针那一刻就算死**（<see cref="NextRing"/>），之后只拿
-/// <see cref="ShouldFire"/> 单调比较——不做角度容差判定（0.5°/分钟，1.5° 的
-/// "容差"等于提前 3 分钟就响，DECISIONS E1）。
+/// 状态只有一个：<see cref="FireAt"/>，最后一次拨针算出的响铃时间点。
+/// **黄针位置是它的推导值**（时间点对 12 小时取余，用户 2026-07-30 定）——
+/// 不单独存位置、不记"变没变、响没响"，跟本项目「状态是推导出来的，
+/// 不是攒出来的」（原则 4）一个路数。
+///
+/// 响铃判定是单调比较 <see cref="ShouldFire"/>，不做角度容差（0.5°/分钟，
+/// 1.5° 的"容差"等于提前 3 分钟就响，DECISIONS E1）。
 /// </summary>
 public sealed class AlarmClock
 {
@@ -15,41 +18,55 @@ public sealed class AlarmClock
     public const double SlotMinutes = 5;
     public const double FaceMinutes = 720;
 
-    /// <summary>黄针停在表盘上的位置（0~719 分钟，5 的倍数）。喂给 DialControl 画针。</summary>
-    public double Position { get; private set; }
-
-    /// <summary>下一次响铃的绝对时刻。null = 未设置（或已经响过）。</summary>
+    /// <summary>
+    /// 最后一次拨针算出的响铃时间点。**响过也不清**——它还是黄针位置的来源；
+    /// "已经响过"由 <see cref="_fired"/> 记。null = 从来没拨过针。
+    /// </summary>
     public DateTime? FireAt { get; private set; }
 
+    /// <summary>本轮时间点已经响过（或恢复进来时就已过期 = 无效）。</summary>
+    private bool _fired;
+
     /// <summary>
-    /// 把黄针拨 <paramref name="minutes"/> 分钟——正数顺时针、**负数逆时针**
-    /// （2026-07-30：左键/前滚逆时针，右键/后滚顺时针）。拨完立刻用严格算法把
-    /// 「下一次几点响」算死存住。悬浮提示直接读 <see cref="FireAt"/>——
-    /// 显示的和会响的保证是同一个值。
+    /// 黄针停在表盘上的位置（0~719 分钟）：**时间点对 12 小时取余**。
+    /// 没拨过针时黄针停在 12 点（0）。
+    /// </summary>
+    public double Position => FireAt is { } at
+        ? (at.Hour % 12) * 60 + at.Minute + at.Second / 60.0
+        : 0;
+
+    /// <summary>
+    /// 把黄针拨 <paramref name="minutes"/> 分钟——正数顺时针、负数逆时针
+    /// （滚轮：前滚逆时针、后滚顺时针）。拨完立刻用严格算法把「下一次几点响」
+    /// 算死存住；悬浮提示直接读 <see cref="FireAt"/>——显示的和会响的是同一个值。
+    ///
+    /// <see cref="NextRing"/> 保持钟面位置不变（今天 T / T+12 / 明天 T 对 12 小时
+    /// 取余相同），所以推导出的 <see cref="Position"/> 恰好就是拨完的新位置。
     /// </summary>
     public void Bump(double minutes, DateTime now)
     {
         // C# 的 % 对负数会给出负值，逆时针跨过 12 点要做真模运算才能环绕
-        Position = ((Position + minutes) % FaceMinutes + FaceMinutes) % FaceMinutes;
-        FireAt = NextRing(now, Position);
+        var pos = ((Position + minutes) % FaceMinutes + FaceMinutes) % FaceMinutes;
+        FireAt = NextRing(now, pos);
+        _fired = false;
     }
 
     /// <summary>到点了吗。单调比较，不重新判黄针位置。</summary>
-    public bool ShouldFire(DateTime now) => FireAt is { } at && now >= at;
+    public bool ShouldFire(DateTime now) => !_fired && FireAt is { } at && now >= at;
+
+    /// <summary>响过即撤——闹钟是一次性的，不是每日重复（DECISIONS E5）。时间点留着当黄针位置。</summary>
+    public void MarkFired() => _fired = true;
 
     /// <summary>
-    /// 从上次会话恢复（2026-07-30：黄针位置要持久化，不然每次打开都复位到 12 点，
-    /// 像闹钟被清了一样怪异）。**位置永远恢复**；响铃时刻只恢复**还没过期**的——
-    /// 关着程序的时候错过的闹钟不补响，黄针只是停在原处（用户选定的语义）。
+    /// 从上次会话恢复（2026-07-30）：只需要那一个时间点。黄针位置自动从它推导
+    /// 出来（每次打开都复位到 12 点会像闹钟被清了一样怪异）；时间点没过就有效、
+    /// 过了就当已响——关着程序时错过的闹钟不补响。
     /// </summary>
-    public void Restore(double position, DateTime? fireAt, DateTime now)
+    public void Restore(DateTime? fireAt, DateTime now)
     {
-        Position = ((position % FaceMinutes) + FaceMinutes) % FaceMinutes;
-        FireAt = fireAt > now ? fireAt : null;
+        FireAt = fireAt;
+        _fired = fireAt is not { } at || at <= now;
     }
-
-    /// <summary>响过即撤——闹钟是一次性的，不是每日重复（DECISIONS E5）。</summary>
-    public void MarkFired() => FireAt = null;
 
     /// <summary>
     /// 黄针格子（12 小时制钟面时刻 T）→ 下一次会响的具体时刻。

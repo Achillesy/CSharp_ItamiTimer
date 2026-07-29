@@ -139,49 +139,50 @@ public class AlarmClockTests
         Assert.True(a.ShouldFire(At(12, 05)));
 
         a.MarkFired();
-        Assert.Null(a.FireAt);
         Assert.False(a.ShouldFire(At(23, 59)));
+        Assert.Equal(5, a.Position);    // 时间点留着——它还是黄针位置的来源
     }
 
-    // ---- Restore：位置永远恢复，响铃只恢复未过期的（2026-07-30 持久化）----
+    // ---- Restore：只存一个时间点，黄针位置是它对 12 小时取余的推导值（2026-07-30）----
 
     [Fact]
-    public void 恢复未过期的闹钟_重启后照样响那一次()
+    public void 恢复未过期的闹钟_黄针位置由时间点推导_重启后照样响那一次()
     {
         var a = new AlarmClock();
-        a.Restore(125, At(21, 05), At(20, 00));
-        Assert.Equal(125, a.Position);
+        a.Restore(At(21, 05), At(20, 00));
+        Assert.Equal((21 % 12) * 60 + 5, a.Position);   // 21:05 → 表盘 9:05 的位置
         Assert.Equal(At(21, 05), a.FireAt);
+        Assert.False(a.ShouldFire(At(21, 04, 59)));
         Assert.True(a.ShouldFire(At(21, 05)));
     }
 
     [Fact]
-    public void 过期的闹钟不补响_黄针只是停在原处()
+    public void 过期的时间点不补响_黄针只剩位置这个残影()
     {
         var a = new AlarmClock();
-        a.Restore(125, At(9, 05), At(20, 00));   // 存的响铃时刻已过
-        Assert.Equal(125, a.Position);
+        a.Restore(At(9, 05), At(20, 00));   // 存的响铃时刻已过
+        Assert.Equal(9 * 60 + 5, a.Position);
+        Assert.False(a.ShouldFire(At(23, 59)));
+    }
+
+    [Fact]
+    public void 从没拨过针_黄针停在12点_永不响()
+    {
+        var a = new AlarmClock();
+        a.Restore(null, At(10, 00));
+        Assert.Equal(0, a.Position);
         Assert.Null(a.FireAt);
         Assert.False(a.ShouldFire(At(23, 59)));
     }
 
     [Fact]
-    public void 没存过响铃时刻_只恢复位置()
+    public void 恢复的残影上继续拨针_从残影位置起步()
     {
         var a = new AlarmClock();
-        a.Restore(300, null, At(10, 00));
-        Assert.Equal(300, a.Position);
-        Assert.Null(a.FireAt);
-    }
-
-    [Fact]
-    public void 恢复时位置越界或为负也归一到表盘上()
-    {
-        var a = new AlarmClock();
-        a.Restore(725, null, At(10, 00));    // 手改 settings.json 写坏了也不炸
-        Assert.Equal(5, a.Position);
-        a.Restore(-5, null, At(10, 00));
-        Assert.Equal(715, a.Position);
+        a.Restore(At(9, 05), At(20, 00));   // 过期残影在 545
+        a.Bump(5, At(20, 00));              // 拨一格 → 550 = 面时刻 9:10
+        Assert.Equal(550, a.Position);
+        Assert.Equal(At(21, 10), a.FireAt); // 20:00 < 21:10（9:10+12h）
     }
 
     [Fact]
