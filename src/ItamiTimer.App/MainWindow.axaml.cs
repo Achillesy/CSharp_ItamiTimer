@@ -81,6 +81,7 @@ public partial class MainWindow : Window
         _frame.Tick += OnFrame;
         _frame.Start();
         Closing += OnClosing;
+        Closed += (_, _) => SaveAlarmOnExit();
 
         _ = CheckAwAsync();
     }
@@ -126,9 +127,8 @@ public partial class MainWindow : Window
         // 检查节拍是**每秒一次**（上面那道秒边界的闸门），最多晚 1 秒。
         if (DateTime.Now >= _alarmQuietUntil && _alarm.ShouldFire(DateTime.Now))
         {
-            _alarm.MarkFired();   // 一次性——响过就撤，不是每天重复的闹钟
-            _settings.AlarmFireAt = null;   // 落盘里的也清掉，位置留着
-            _settings.Save();
+            _alarm.MarkFired();   // 一次性——响过就撤，不是每天重复的闹钟。
+                                  // 内存里清掉就够了，退出时 SaveAlarmOnExit 自会写成 null。
             if (_settings.AlarmEnabled) Sound.Play(_settings.AlarmSound);
             if (_settings.ShutdownEnabled) Shutdown.Now();
         }
@@ -516,6 +516,21 @@ public partial class MainWindow : Window
     // ================================================================
     //  闹钟按钮交互
     // ================================================================
+    /// <summary>
+    /// 闹钟状态**只在退出这一刻落盘**（用户 2026-07-30：运行期变多少次都没关系）：
+    /// 记下黄针位置；响铃时刻直接取内存里的现值——本轮拨过针且还没响就是那个
+    /// 未来时刻，响过了或压根没拨过就是 null，不需要单独去"检查变没变、响没响"；
+    /// 顺手把 Shutdown 标记取消（关机绝不跨会话，Settings.Load 里还有一道
+    /// 兜崩溃的复位）。
+    /// </summary>
+    private void SaveAlarmOnExit()
+    {
+        _settings.AlarmHandMinutes = _alarm.Position;
+        _settings.AlarmFireAt = _alarm.FireAt;
+        _settings.ShutdownEnabled = false;
+        _settings.Save();
+    }
+
     /// <summary>滚轮拨针：前滚（远离自己）逆时针，后滚顺时针。一格滚一档，快滚按刻度数走。</summary>
     private void OnAlarmWheel(object? sender, PointerWheelEventArgs e)
     {
@@ -524,13 +539,8 @@ public partial class MainWindow : Window
         var direction = e.Delta.Y > 0 ? -1 : +1;   // 前滚 Delta.Y > 0 → 逆时针
         Bump(direction * notches * AlarmClock.SlotMinutes);
         _alarmQuietUntil = DateTime.Now.AddSeconds(2);
-
-        // 黄针位置和响铃时刻都落盘（用户 2026-07-30：不存的话每次打开黄针都复位
-        // 到 12 点，像闹钟被清了一样怪异）。重启时只恢复还没过期的响铃时刻。
-        _settings.AlarmHandMinutes = _alarm.Position;
-        _settings.AlarmFireAt = _alarm.FireAt;
-        _settings.Save();
-
+        // 这里【不落盘】（用户 2026-07-30）：运行期黄针随便变、变多少次都无所谓，
+        // 唯一的落盘时机是退出（见 SaveAlarmOnExit）。
         e.Handled = true;
     }
 
