@@ -47,15 +47,12 @@ public partial class MainWindow : Window
 
     private TaskSession? _session;
 
-    // 闹钟：模型全在 AlarmClock（可测的纯逻辑），这里只剩输入手势的接线。
+    // 闹钟：模型全在 AlarmClock（可测的纯逻辑），这里只剩滚轮的接线。
+    // 左右键点击已取消（2026-07-30，用户：免得影响以后的功能扩展）——只有滚轮。
     private readonly AlarmClock _alarm = new();
     // 调整期间抑制误触发。用「静默截止时刻」而不是布尔量：滚轮是连续离散事件，
     // 布尔 + Task.Delay 复位会互相踩（早来的复位把晚来的调整期掐断）。
     private DateTime _alarmQuietUntil = DateTime.MinValue;
-    private DateTime _alarmPressedAt;
-    private DispatcherTimer? _alarmTimer;
-    private int _alarmHoldDirection = +1;   // 这次按住的方向：右键 +1 顺时针，左键 -1 逆时针
-    private bool _alarmBumpedDuringHold;    // 长按定时器有没有在这次按压里已经走过至少一步
 
     public MainWindow()
     {
@@ -70,13 +67,9 @@ public partial class MainWindow : Window
         var gear = F<Button>("SettingsBtn");
         gear.Content = ChromeIcons.Gear();
         gear.Click += OnSettings;
-        // 闹钟没有自己的图标——直接按在钟面上（2026-07-30）。DialControl 不是
-        // Button，不会替你把事件标成 Handled，普通 += 订阅就够。
-        // 左键逆时针、右键顺时针（长按都加速）；滚轮前滚逆时针、后滚顺时针。
-        var dial = F<DialControl>("Dial");
-        dial.PointerPressed += OnAlarmPressed;
-        dial.PointerReleased += OnAlarmReleased;
-        dial.PointerWheelChanged += OnAlarmWheel;
+        // 闹钟没有自己的图标——在钟面上滚滚轮（2026-07-30）：前滚逆时针、后滚顺时针。
+        // 左右键点击已取消，把点击留给以后的功能扩展。
+        F<DialControl>("Dial").PointerWheelChanged += OnAlarmWheel;
         F<Button>("MuteBtn").Click += (_, _) => { _settings.TickEnabled = !_settings.TickEnabled; ApplyChrome(); _settings.Save(); };
         F<Button>("PinBtn").Click += (_, _) => { _settings.Pinned = !_settings.Pinned; ApplyChrome(); _settings.Save(); };
         ApplyChrome();
@@ -516,47 +509,6 @@ public partial class MainWindow : Window
     // ================================================================
     //  闹钟按钮交互
     // ================================================================
-    private void OnAlarmPressed(object? sender, PointerPressedEventArgs e)
-    {
-        // 左键逆时针、右键顺时针（2026-07-30）。别的键（中键等）不管。
-        var props = e.GetCurrentPoint((Control)sender!).Properties;
-        if (props.IsLeftButtonPressed) _alarmHoldDirection = -1;
-        else if (props.IsRightButtonPressed) _alarmHoldDirection = +1;
-        else return;
-
-        _alarmQuietUntil = DateTime.MaxValue;   // 按住期间绝不触发，释放时再定 2 秒余量
-        _alarmPressedAt = DateTime.Now;
-        _alarmBumpedDuringHold = false;
-
-        // 短按（点一下）和长按（按住不放）分开计数，绝不重叠（DECISIONS E3）：
-        // 按下先不动，等释放时如果长按定时器一次都没触发过，才算一次单击的一格。
-        // 定时器 500ms 才开始重复，比多数人一次"点击"的按住时长更长，
-        // 不会出现"点一下却走了两步"的重复计数。
-        _alarmTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
-        _alarmTimer.Tick += OnAlarmTick;
-        _alarmTimer.Start();
-
-        e.Handled = true;
-    }
-
-    private void OnAlarmTick(object? sender, EventArgs e)
-    {
-        var held = (DateTime.Now - _alarmPressedAt).TotalSeconds;
-        _alarmBumpedDuringHold = true;
-
-        Bump(_alarmHoldDirection * AlarmClock.SpeedForHold(held));
-        _alarmTimer!.Interval = TimeSpan.FromMilliseconds(AlarmClock.RepeatIntervalMs(held));
-    }
-
-    private void OnAlarmReleased(object? sender, PointerReleasedEventArgs e)
-    {
-        if (_alarmTimer is null) return;   // 中键之类没进入调整的释放，别动静默期
-        _alarmTimer.Stop();
-        _alarmTimer = null;
-        if (!_alarmBumpedDuringHold) Bump(_alarmHoldDirection * AlarmClock.SlotMinutes);
-        _alarmQuietUntil = DateTime.Now.AddSeconds(2);   // 恢复响铃检测前给 2 秒余量
-    }
-
     /// <summary>滚轮拨针：前滚（远离自己）逆时针，后滚顺时针。一格滚一档，快滚按刻度数走。</summary>
     private void OnAlarmWheel(object? sender, PointerWheelEventArgs e)
     {

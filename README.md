@@ -47,24 +47,6 @@ The mode is **locked at launch** and never switches mid-session — otherwise ki
 aw-server would be a free way to farm focus minutes. If ActivityWatch comes up later,
 restart the program.
 
-## What you see
-
-- **The dial** — an analog clock, fully vector-drawn (no bitmap assets anywhere in the
-  repo). One cell per minute grows along the rim: full-height green = focused; shorter,
-  redder staves = that minute was impure ("barrel stave" encoding — any kind of color
-  blindness can still read the length). Blank = you were away. Dashed outline = no data.
-  A gray arc marks the promised deadline; slacking makes it slide forward.
-- **Seven dominoes** — fallen count = day of week. No labels. Guessing is part of the design.
-- **Speaker / pin (top-right)** — synthesized tick-tock on/off, and manual always-on-top.
-- **Alarm** — set the yellow alarm hand on the clock face itself: left-click moves it
-  counter-clockwise, right-click clockwise (hold to accelerate), or scroll the wheel
-  (forward = counter-clockwise). 144 positions, 5 minutes each; a tooltip shows the
-  resolved ring time. Optionally the alarm can shut the computer down.
-- **Gear** — settings: three notification sounds (focus done / break over / idle nudge),
-  each with its own toggle, plus tick volume, alarm and shutdown switches.
-- **The Start button is the dividing line** — above it, things to look at; below it,
-  things to touch. Below the line the UI never explains itself.
-
 ## Requirements
 
 - **[ActivityWatch](https://activitywatch.net/) running locally** for constrained mode,

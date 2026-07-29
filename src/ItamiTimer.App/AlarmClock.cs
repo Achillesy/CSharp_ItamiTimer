@@ -61,15 +61,4 @@ public sealed class AlarmClock
         if (now < tPlus12) return tPlus12;
         return t.AddDays(1);
     }
-
-    /// <summary>
-    /// 长按加速的步长（分钟）：每 1.6 秒翻一倍、封顶 30。
-    /// 比最初那版（1 秒翻倍、封顶 60）缓和不止一档——用户嫌快（2026-07-30）。
-    /// </summary>
-    public static int SpeedForHold(double heldSeconds)
-        => Math.Min(30, 5 * (1 << (int)(heldSeconds / 1.6)));
-
-    /// <summary>长按重复的间隔（毫秒）：从 500ms 渐进加速，最快 150ms。</summary>
-    public static double RepeatIntervalMs(double heldSeconds)
-        => Math.Max(150, 500 - heldSeconds * 15);
 }

@@ -154,22 +154,4 @@ public class AlarmClockTests
         Assert.Equal(new DateTime(2026, 7, 31, 1, 0, 0), a.FireAt);
     }
 
-    // ---- 长按加速曲线（用户 2026-07-30：比第一版慢）----
-
-    [Theory]
-    [InlineData(0.0, 5)]
-    [InlineData(1.5, 5)]
-    [InlineData(1.6, 10)]
-    [InlineData(3.3, 20)]
-    [InlineData(5.0, 30)]
-    [InlineData(60.0, 30)]   // 封顶 30，绝不会更快
-    public void 步长每一点六秒翻倍_封顶三十(double held, int expected)
-        => Assert.Equal(expected, AlarmClock.SpeedForHold(held));
-
-    [Theory]
-    [InlineData(0.0, 500)]
-    [InlineData(10.0, 350)]
-    [InlineData(60.0, 150)]  // 间隔最快 150ms
-    public void 重复间隔渐进加速_最快一百五十毫秒(double held, double expected)
-        => Assert.Equal(expected, AlarmClock.RepeatIntervalMs(held));
 }
