@@ -4,193 +4,68 @@
 
 ## 项目是什么
 
-ItamiTimer（中文名「一袋米要扛几楼」）是一个桌面端**带强制约束的专注任务计时器**（Windows + macOS，见「跨平台」一节）：用户勾选本轮允许的几组应用（「活动组」，预计 ≤5 组）并提交任务；此后程序拿任务开始时间去查 ActivityWatch 的事件历史，算出累计专注时长——只有待在已勾选的应用里、且人在座的时间才计入。切到别处那段时间不计入，任务因此被拖长。**痛感全部来自表盘**：那一分钟的格子变红，灰色的截止弧往前滑走 —— 不弹窗、不出声、不给账单，自己看，自己猜（§7.1、§8.3）。
+ItamiTimer（一袋米要扛几楼）：桌面端带强制约束的专注计时器（Windows + macOS，
+Avalonia 12 / .NET 10）。勾选允许的小目标后提交任务，程序拿开始时刻查 ActivityWatch
+的事件历史重放整段——只有命中规则且人在座的时间计入。偷懒不弹窗不出声，只有表盘上
+的红格和越滑越远的截止弧。没装 AW 时退化成纯番茄钟。
 
-## 现状：功能已完整，在真机上跑通过
+**功能已完整，真机验证过多轮。当前工作模式是改进和修 bug**，不是从设计推进实现。
 
-**设计阶段和实现阶段都结束了**（2026-07-28）。`DESIGN.md` §0 的待定决策全部清空，界面、任务循环、提示音、设置窗口都已实现并用真实 AW 数据验证过若干轮，Release 版已发布到 `%LOCALAPPDATA%\Programs\ItamiTimer\`，桌面有快捷方式。80 个测试。
+## 三份文档，各司其职
 
-所以**不要再照旧文档去"推进下一步"**。现在的工作模式是改进和修 bug，改之前先确认那条设计是不是已经被推翻过——这个项目在两天里推翻过自己好几次，文档里每一条作废都标了原因。
-
-**最容易照旧文档做错的几条**（都在 2026-07-27~28 被推翻）：
-
-| 旧文档说 | 实际 |
-|---|---|
-| §0.4「要亚秒扫秒针」 | **一秒一跳**（§8.2.6）。扫秒针的钟不会响，跟滴答互斥 |
-| §0.5「置顶提醒、收进任务栏」 | **整套废弃**（§8.3）。窗口从头到尾放在原地，提醒只剩三声系统音 |
-| §7.1「最终账单是痛感的载体」 | **界面任何时候都不给账单**。痛感载体换成表盘本身 |
-| §8.4「休息时色环线性淡出」 | **换成一块蓝色扇形**（§8.4.4），色环在达成那一刻整个撤掉 |
-| §5.4 带时间戳的 `groupTimeline` | **勾选集合用并集、追溯生效**（§5.4.1） |
-| §2「关掉界面不影响结果」 | **任务不落盘，退出 = 放弃** |
-
-**后续改进**（2026-07-29）：
-
-- **骨牌在点击 Start 时更新**：启动时骨牌根据当日星期初始化一次，这个"bug"被故意保留用来增加神秘感。现在当用户点击 Start 按钮时，会补充检查一次当前日期并重绘骨牌。这样跨过午夜点击时骨牌能反映新的日期，但检查密度不高，用户也不容易猜到骨牌代表什么含义（`MainWindow.axaml.cs` 的 `OnStart` 方法）。
-
-仍然成立、且**不要翻案**的几条：
-
-- **§0.1 `Absent` 完全照搬 AW 的判断**。AW 说 `afk` 就是 `Absent`，不管当时在读书还是看视频。不做 AFK 段长度分析、不做每组容忍阈值。用户明知代价（安静读 PDF 超过 180 秒会被判离开）并**两次**选择了简单方案。要放宽就去改 AW 自己的 `aw-watcher-afk.toml`——旋钮在底座上，不在本程序里。
-- **§0.2 UI 是 Avalonia 12**，表盘全部手写矢量绘制，不含任何位图资源。
-- **§0.3 AWJ 是纯参考**，不搬 Python 代码、不跨进程调用。
-- **§7.2 不做缓存**。每轮重查 `[startedAt, now]` 整段、重放一遍。任务最长 50 分钟，事件量是分钟级的，开销可忽略；而缓存会引入一个"必须永远和重算结果一致"的不变量，错了以后症状极其隐蔽（色块看着对，账不对）。**但有一条必须保留**：查询窗口要比目标区间**宽** 6 小时——AW 只按事件自己的开始时间过滤，跨过区间起点的事件会静默消失。
-
-**早期那个 HTML 样板页 `design/dial-specimens.html` 已删除**（2026-07-28）。它有个 bug（画盘面那行没分支到 `o.face`，两张卡渲染结果逐字节相同）、色带位置也跟最终规格不符，留着只会误导。现在要看表盘长什么样，用**真实渲染代码**导样张：
-
-```bash
-ItamiTimer.exe --dial-specimens <目录>
-```
-
-Artifact 版留个念想：https://claude.ai/code/artifact/8b803438-9eba-41c0-a296-5c98848abbe6
-
-⚠️ **那三个调试出口走的是 headless，不是 `UsePlatformDetect`**（`Program.cs` 的 `HeadlessBuilder`，DESIGN.md §15.7）。它们只往 `RenderTargetBitmap` 上画，不需要窗口平台；用 `UsePlatformDetect` 在**没有图形会话**的环境（CI、纯 ssh）上会崩在 `Avalonia.Native ... RenderTimer (-6661)`。而 `pack-macos.sh` 里那句 `--export-iconset` 是构建的一环 —— 改回去等于让打包依赖「有没有人登录着桌面」。**正常启动那条路径不要动。**
-
-**本项目已纳入 git 管理**（2026-07-27）：远端 `https://github.com/Achillesy/CSharp_ItamiTimer.git`，默认分支 **`master`**（不是 `main`），公开仓库，Apache 2.0。`bin/`、`obj/`、`.vs/`、`*.user` 都已忽略。
-
-## 界面语言：英文（2026-07-28 傍晚）
-
-**运行时一切用户看得见的文字都是英文**，目的是扩大使用范围。**这不是多语言版**——没有资源文件、没有语言切换、没有 i18n 框架，英文直接写死在代码里。要加第二种语言再说，别提前搭架子。
-
-四条边界，**改之前先看清楚**：
-
-| | 语言 | 为什么 |
+| 文件 | 内容 | 改代码前 |
 |---|---|---|
-| 界面文案、CLI 输出、日志、异常消息 | **英文** | 用户看得见的全部 |
-| 窗口标题 / 确认框标题 `一袋米要扛几楼` | **保留中文** | 它是玩梗，是这个程序的名字，不是待翻译的短语 |
-| `rules.json`（组名、title 正则、注释） | **保留中文** | 是**用户数据**不是界面文案。那条 `{ "title": "经济学" }` 匹配的是窗口标题，翻成英文会当场失效 |
-| 源码注释、`CLAUDE.md`、`DESIGN.md` | **保留中文** | 开发记录，不是产品的一部分 |
+| [`DESIGN.md`](./DESIGN.md) | 当前系统设计（按主题组织）：判定模型、重放算法、时间模型、表盘规格、闹钟、跨平台 | **必读相关章节** |
+| [`DECISIONS.md`](./DECISIONS.md) | 护栏清单：被推翻的方案、知情接受的代价、「不要翻案」 | **动手前先查**——你觉得「显然可以改进」的地方多半在这里有一条 |
+| [`README.md`](./README.md) | 英文对外介绍 | 用户可见的行为变了要同步 |
 
-⚠️ **`App.axaml` 的 `Name="ItamiTimer"` 永远不要"本地化"。** 它是 §5.3 自身豁免的依据（见「跨平台」一节），改了不报错、不崩溃，只是**安静地把账算错**。
+**这个项目两天里推翻过自己很多次，全部有案可查。** 想改一条现有行为时：先查
+DECISIONS.md 有没有这条；有，就先跟用户确认再动；没有，也要在改完后把新决策补进去。
 
-顺带一提，`rules.json` 的 `ignore` 名单可能是**跟着系统语言变**的：macOS 的 aw-watcher-window 读的是 `NSWorkspace` 的 `localizedName`，所以中文系统下 `Finder` 很可能上报成 `访达`。**未验证**（本机是 en-US），但它影响的是**算账正确性**、且跟界面语言完全独立。真要支持非英文系统，这条得先在目标语言的系统上实测。
+## 硬性约束（违反即事故）
 
-## 权威设计文档
-
-**[`DESIGN.md`](./DESIGN.md)（v3）是这个项目的架构设计源文档**，来自开发前与用户的多轮讨论确认，动手写核心逻辑前先完整读一遍。里面包含：四条核心原则、任务生命周期、判定模型、规则文件格式、AW 接口约定、重放算法、模块划分、启动行为、配置项、手动验证清单。文档里的决策已经和用户对齐过，不要在没有跟用户重新确认的情况下推翻或绕过。
-
-`wild-enchanting-planet.md` 是**已被取代的 v1 设计**，只作历史记录，不要拿它当实现依据。DESIGN.md §12 有 v1→v2→v3 的完整变更对照。
-
-## 与 ActivityWatchJournal 的关系：纯参考
-
-姊妹项目 `D:\Users\Achilles\Workspace_01Active\Python\ActivityWatchJournal`（AWJ）是同一个 AW 底座的另一个读者（回溯记账）。两者是**兄弟关系，不是上下层**（DESIGN.md §2.1）。
-
-**用户 2026-07-26 决定把它收窄为纯参考**（DESIGN.md §0.3）：不搬 Python 代码、不做跨进程调用、需要的部分用 C# 重新实现。
-
-- **读 AWJ 是为了不重犯它踩过的坑、不漏掉它已识别出的原子**，不是为了调用它。核心入口是那个项目的 **`ATOMS.md`**（原子分解评审），另有 `DESIGN.md` §13（4 个被真实数据否决的方案 + 幽灵事件 bug）和 §10（AW 数据被删事故）。
-- **绝不**把约束判定或任务核算做成"调 Python"。顺带记一个事实：AWJ 每个命令都是 `--date <整天>` 且有 `ensure_day_finished()` 守卫（今天直接抛 `DayNotFinishedError`），而本项目要的是 `[任务开始时刻, 现在]` 这种未闭合区间——形状本来就不匹配。
-- **共享规则、不共享代码**：`rules.json` 的 app 名可以拿 AWJ 的 `config/classify_rules.yaml` 当字典抄，但两边的匹配语义和粒度独立演进（AWJ 是 5 大类做统计，本项目是紧白名单做约束——粒度不同，见 DESIGN.md §5.1）。
-- AWJ 里那些**AW 行为特性的硬知识**要搬结论（不是搬代码）：心跳续期让 duration 自己长大、afk 分不清"走开"和"认真看"、系统代理吞 localhost 请求。都在下面「架构要点」里。
-
-## 技术栈与项目布局
-
-C# / .NET 10。2026-07-27 拆成三个 csproj，**目的是让编译器强制执行 DESIGN.md §8 的边界纪律**（详见 §8.0）：
-
-```
-src/ItamiTimer.Core/   net10.0   类库            模块 1~6，无 UI 无平台调用
-src/ItamiTimer.Cli/    net10.0   itami           命令行原子层，用真实 AW 数据干跑
-src/ItamiTimer.App/    net10.0   ItamiTimer      界面（Avalonia 12）
-```
-
-三条不能动的：
-
-- **`Core` 必须保持 `net10.0`**。这是纪律的执行机制本身：往 Core 里塞 WinForms/Avalonia 会直接编不过。绝不要给它加 `UseWindowsForms`、`UseWPF` 或任何 UI 包引用。
-- **`App` 的 `AssemblyName` 钉死是 `ItamiTimer`**，且 **`App.axaml` 的 `Name` 也钉死是 `ItamiTimer`**。AW 上报的 `data.app`，Windows 上是 exe 名、macOS 上是 Avalonia 的 `Application.Name`；§5.3 第 1 步靠它做自身豁免，改了任一个就死循环。详见下面「跨平台」。
-- **`App` 是 Avalonia，且是唯一允许出现平台调用的地方**（置顶、放音、读键鼠空闲）。表盘、骨牌、番茄、exe 图标全部矢量绘制，**仓库里不放位图资源**——要改形状就改画它的那个 `.cs`。
-
-**`App` 的 TFM 2026-07-28 从 `net10.0-windows` 改成了 `net10.0`**。那个后缀对本项目从来没起过作用（`DllImport` 在 `net10.0` 上照样编得过，Core 的 csproj 注释里早就写明了），换来的只有平台分析器上下文。去掉之后 **CA1416 反而开始真的报没守住的平台调用**——移植时那 15 条警告就是待办清单本身。别加回去。
-
-转栈后表盘用手写 XAML 绘制（Shape/Transform/Path），**WPF 的纯 XAML 表盘项目是最可直接复用的参考**，两边几何模型一致。
-
-测试项目 `tests/ItamiTimer.Core.Tests`（**xUnit**）已就位。§7 的重放算法是纯函数，喂合成事件就能穷举边界，不用真等 25 分钟。
-
-**原子清单和时间模型见 DESIGN.md §14**。命令行层保留 `itami start` / `replay` 两个子命令，拿真实 AW 数据干跑很方便（`itami idle` 已随键鼠督促的改版删掉）。它也是 Core 唯一还在给账单的地方——界面**任何时候**都不给。
-
-§8.5 那份"先 spike 置顶不抢焦点和任务栏图标动态重画"的风险排序已经完成使命:两件都做成了,但**用户 2026-07-28 把它们连同整章 §8.3 一起砍了**,理由是置顶"逻辑混乱,又容易出错"(实机连塌三次,见 §8.3 开头)。**这段经历值得记住**:一个功能连着塌三次、每次修完塌在新地方,往往不是实现没写好,而是需求本身自相矛盾 —— 这里是"弹出来"和"绝不抢焦点"在文档里并存了很久没人发现。
+- `App.axaml` 的 `Name="ItamiTimer"`、csproj 的 `AssemblyName=ItamiTimer` **永不改**
+  ——自身豁免的依据，改了不报错，只是安静把账算错（DECISIONS F1/F2）。
+- Core 保持 `net10.0`、零 UI 引用；App 的 TFM 也是 `net10.0`，`-windows` 别加回去。
+- 不落盘任务状态；不做缓存；不自动降级模式；不自动开始下一轮。
+- `Neutral` 计入、`SelfApps` 硬编码——动之前看 `PomodoroFallbackTests`。
+- 仓库不放位图和音频；界面文字英文（窗口标题中文是产品名）；`rules.json` 是用户数据
+  不翻译。
 
 ## 构建 / 运行
 
 ```bash
 dotnet build ItamiTimer.slnx
+dotnet test ItamiTimer.slnx
 ```
 
-发布（框架依赖 + 限定 RID，**27MB / 35 个文件**；**不加 `-r win-x64` 会变成 560MB**，因为 Skia/HarfBuzz 各平台的原生库和 pdb 全进来了）：
+发布（**必须限定 RID**，否则 560MB；pdb 由 csproj 的 `StripPdbFromPublish` 自动剔除）：
 
 ```bash
 dotnet publish src/ItamiTimer.App -c Release -r win-x64 --self-contained false -o "$LOCALAPPDATA/Programs/ItamiTimer"
 ```
 
-**`dotnet publish` 自己不删调试符号**（原样输出 127MB / 39 个文件），所以 csproj 里挂了个 `StripPdbFromPublish` 目标在 `AfterTargets="Publish"` 上替你删。那 100MB 就两个文件：`libSkiaSharp.pdb` 80.1MB + `libHarfBuzzSharp.pdb` 19.9MB。**不要把这个 target 删掉**，也不要退回"文档里写一步手工命令"——那一步已经被忘过一次了。
+发布目标被正在运行的 ItamiTimer 锁住时会重试 10 次然后失败——先让用户关程序。
+用户从桌面快捷方式启动 `%LOCALAPPDATA%\Programs\ItamiTimer\ItamiTimer.exe`，
+要用户实机验证就得先发布。
 
-```bash
-dotnet run --project src/ItamiTimer.Cli
+macOS 打包必须走 `./pack-macos.sh`（bundle 承载图标 + DOTNET_ROOT）。
+
+调试出口（headless，不开窗口）：`--dial-specimens <目录>` / `--export-icon <路径>` /
+`--export-iconset <目录>`。
+
+## 布局与惯例
+
+```
+src/ItamiTimer.Core/   判定与重放（纯函数为主）   ← 逻辑改动优先落这里，可测
+src/ItamiTimer.Cli/    itami 命令行，真实数据干跑  ← 唯一给账单的地方
+src/ItamiTimer.App/    Avalonia 界面              ← 平台差异每处收口在单个文件
+tests/                 xUnit，测试名是中文句子，直接陈述行为
 ```
 
-macOS 打包成 `.app` 装进 `~/Applications/`（**必须走这个脚本，理由见下一节**）：
-
-```bash
-./pack-macos.sh
-```
-
-也可以直接用 VS2026 打开 `ItamiTimer.slnx`。**三个项目现在都是跨平台的**（2026-07-28）。
-
-## 跨平台（2026-07-28 加的 macOS 支持）
-
-**Core / Cli / 80 个测试在 macOS 上一行没改就全过了**，判定层"完全平台无关"这条设计经受住了实测。全部工作量在 App 层，而且平台差异**每一处都收口在一个文件里**：
-
-| 文件 | Windows | macOS |
-|---|---|---|
-| `Sound.cs` | `C:\Windows\Media\*.wav` + winmm `PlaySound` | `/System/Library/Sounds` 等三级 `*.aiff` + AudioToolbox |
-| `Tick.cs` | 合成的 PCM 走 `SND_MEMORY` | **合成那半段一个字不差**，落一次临时 wav 再交给 AudioToolbox |
-| `MacAudio.cs` | — | `AudioServicesPlaySystemSound`。**不用 `afplay`**：滴答每秒一次，子进程一小时 fork 三千六百次，启动延迟还会让钟听起来在喘 |
-| `InputIdle.cs` | `GetLastInputInfo` | `CGEventSourceSecondsSinceLastEventType`，不需要辅助功能权限 |
-| `WindowPin.cs` | `SetWindowPos` + `SWP_NOACTIVATE`（原 `Win32Topmost.cs`） | Avalonia 自带的 `Window.Topmost`，本来就不带激活语义 |
-| `AppData.cs` | `%LOCALAPPDATA%\ItamiTimer` | `~/Library/Application Support/ItamiTimer`。**不能用 `SpecialFolder.LocalApplicationData`**，.NET 在 Unix 上把它映射到 `~/.local/share`，Finder 里根本看不见 |
-| `ChromeIcons.cs` | 两边共用 | 新增：喇叭和图钉改成矢量画。原来用 Segoe Fluent Icons，macOS 上是豆腐块 |
-
-**三条踩过的坑，都是实测撞出来的，不要重犯：**
-
-- **⚠️ `App.axaml` 的 `Name="ItamiTimer"` 是正确性的一部分，不是好看。** macOS 的 aw-watcher-window 上报的 `data.app` 就是 Avalonia 的 `Application.Name`（**不是**进程名、**也不是** Info.plist 的 `CFBundleName`）。不设它时 Avalonia 默认叫 **`Avalonia Application`** —— 实测 AW 老老实实这么记了下来，而 §5.3 的 `SelfApps` 一个都对不上，**自身豁免直接失效**，触发的正是 GroupRules 注释里警告的那个死循环。修法是设 `Name`，**绝不是**往 `SelfApps` 里塞 `Avalonia Application`（那会把所有 Avalonia 应用一起豁免）。
-- **必须打成 `.app`，不能裸跑二进制。** 除了图标和 Dock，bundle 还是 LaunchServices 的入口。另外框架依赖的 apphost 要能找到 .NET 运行时，而**双击启动的 GUI 应用不继承 shell 的环境变量** —— .NET 装在 `/usr/local/share/dotnet` 之外时，终端里跑得好好的二进制，从 Finder 点开就是「You must install .NET」。`pack-macos.sh` 用 `LSEnvironment` 把 `DOTNET_ROOT` 写进 Info.plist 解决，**挪动 .NET 安装位置后要重新打包**。
-- **`rules.json` 的 `ignore` 两个平台的条目都在同一份文件里，是故意的。** AW 上报的 app 名两边完全不同（`explorer.exe` ↔ `Finder`、`LockApp.exe` ↔ `loginwindow`），一条在另一个平台上永远匹配不上的正则是无害的。拆成两份反而要维护两遍、还会漏同步。macOS 那段的名字取自本机真实上报，不是猜的。
-
-发布体积另记一笔：`-c Release -r win-x64 --self-contained false` 实测 **127MB**，其中绝大部分是 `libSkiaSharp.pdb`（160MB 未压缩）+ `libHarfBuzzSharp.pdb`（40MB）这两个 native 符号文件。**跟 §8.3.8 那个 27MB 不矛盾** —— 那个数字的限定词是「**删掉 `.pdb` 之后**约 27MB / 35 个文件」。也**跟 TFM 改动无关**：拿原始 HEAD（`net10.0-windows`）从 macOS 交叉编译，结果一模一样。要瘦身就发布后删 `*.pdb`。
-
-## 架构要点
-
-细节看 `DESIGN.md`，这里只列最容易被写错的几条：
-
-- **不要写倒计时累加器。** 进程内**不持有**"剩余多少秒"这种可变累加值。任何时刻的状态 = 纯函数(任务记录, AW 事件历史, now)。要知道进度就拿 `startedAt` 向 AW 做**区间查询** `?start=&end=` 并重放整段历史（DESIGN.md §7）。写成"每秒 tick 一下减 1"就丢掉了这个模型的全部好处：轮询间隔不影响精度、临时连不上 AW 不损坏任何东西、重放可以喂合成事件穷举测试。
-- **任务不落盘，退出程序 = 放弃任务**（2026-07-27 变更，DESIGN.md §2）。没有 `current-task.json`、没有 `history.jsonl`、没有 `TaskStore`，程序对磁盘只读。**v3 原本的招牌性质「关掉界面/重启电脑不影响结果」已被用户明确砍掉**，理由是"这个项目本身要求短时间的专注，简化需求"——任务最长 50 分钟，崩溃最多丢这一轮。变更前已提示过代价（程序区分不了"点了关闭"和"进程被杀"），用户知情后仍选最简方案。**不要改回去**，也不要重新引入任何持久化。历史统计是 AWJ 的活（§2.1）。
-- **勾选集合用并集，追溯生效——不要"改进"成时间线。** 重放整段历史时，一律用**当前**勾选的全部小目标的规则并集打标。没有 `groupTimeline`、没有生效时刻。**用户 2026-07-27 明确否决了带时间戳的方案**：他的用法是「经济学学腻了，补勾一个 Blender，剩下的时间不算偷懒」，而那不算作弊。代价（先在 Blender 里待 20 分钟再补勾，红格子会变绿）是他知情后接受的。同一条规则也覆盖改 `rules.json` 和 `disabled` 一个组：**一切改动，一律对整段历史生效**（DESIGN.md §5.4、§5.4.1）。
-- **绝不自动开始下一个任务。** 休息结束就是任务终结，停在那里等用户。程序代替用户提交任务等于强制加任务（DESIGN.md 原则 1、§3）。
-- **检测层完全平台无关**：所有判定输入只来自 AW 本地 REST API（`http://127.0.0.1:5600`）的两个 bucket（`currentwindow` 和 `afkstatus` **都必需**），不调用任何系统原生窗口枚举/监听 API。不要为了「拿到真正的进程列表」而引入 `Process.GetProcesses()` 或 `EnumWindows`——界面上那个勾选列表是**预定义的活动组**，不是实时进程列表（DESIGN.md §8）。
-- **没装 AW 时退化成纯番茄钟**（§11.1，2026-07-28 实现）。模式在**程序启动那一刻**定死、整个会话不再变。⚠️ **绝不能做成"AW 断了就自动降级"** —— 那样杀掉 aw-server 就是免费刷时长。任务开始后 AW 才挂的，仍按 §6.2 报无法工作。AW 后启动就重开程序，不做重探、不做重试按钮。
-- **番茄钟模式靠自身豁免计时**：喂一条 `app="ItamiTimer"` 的合成窗口事件，`GroupRules` 硬编码判它 `Neutral`，而 `Neutral` **计入**。所以 Core 一行没改。⚠️ 动 `Neutral` 的计入语义或 `SelfApps` 那几个名字之前，先看 `PomodoroFallbackTests` —— 改了会让番茄钟**静默地不再计时**。
-- **秒针一秒一跳，不是连续扫**（§8.2.6，2026-07-28 改）。理由是滴答：扫秒针的钟不会响，两者互斥。
-- **滴答声是运行时合成的**（§8.3.6），因为 `C:\Windows\Media` 里一个滴答都没有（macOS 那 14 个 aiff 更没有，全是提示音）。别去找现成的 wav，也别打包一个进来。最小化照样响 —— 钟不会因为你没在看就停。
-- **右上角的喇叭只管滴答，不是总静音**（§8.3.7）。这条分界背后是个值得记住的判断：**这个程序其实是两样东西装在一个窗口里** —— 一个你愿意开在桌面上的钟，和一个盯着你学习的督工。喇叭和图钉属于前者；设置窗口那三张通知卡属于后者。
-- **⚠️ 不要再把【自动】置顶写回来。** 右上角那个图钉是**手动**开关，没有状态机 —— 跟被砍掉的那套自动置顶不是一回事（§8.3.7 末尾）。 2026-07-28 用户明确砍掉整套机制（原 §8.3）：「不要再纠结窗口置顶这种事情了。逻辑混乱，又容易出错。」（**被砍掉的是那套自动状态机**；手动图钉本身还在，实现在 `WindowPin.cs`，原名 `Win32Topmost.cs`，2026-07-28 因为多了 macOS 那条路而改成中性名。）被否掉的是**表达方式**，不是那些检测本身——同一天用户就把键鼠空闲检测加了回来，只是改用声音（§8.3.4 的那段引言）。
-- **只用系统自带的音，不打包音频资源**（§8.3.1）——跟表盘不用位图是同一条纪律。Windows 走 `winmm.dll` 的 `PlaySound` 放 `C:\Windows\Media` 的 wav；macOS 走 AudioToolbox 放 `/System/Library/Sounds` 的 aiff。两边都收口在 `Sound.cs`。
-- **提醒只有三声**：专注达成、休息结束、键鼠安静满 60 秒，都能在设置里单独关。**跑偏没有任何主动提醒，只写一行日志。**
-- **键鼠空闲那一声只在 `[60, 180)` 秒内响**（§8.3.5）。过了 180 秒 AW 已经回填 afk、救不回来了，再响就是噪音。这是它跟另外两声的本质区别：前两声是通报，它是**补救**。
-- **`Absent` 优先级高于一切。** 锁屏时 `LockApp.exe` 在 ignore 名单里（`Neutral`，计入）而 afk 说 `afk`（不计入），必须判 `Absent`。搞错了就是"锁屏一小时专注时长照涨"的漏洞（DESIGN.md §4）。
-- **自身必须硬编码豁免**：ItamiTimer 自己的窗口判 `Neutral`，且这条**不能放进配置文件**。否则用户点提醒窗口/看进度时程序会把自己判成违规，陷入「提醒 → 用户看提醒 → 又违规 → 再提醒」死循环（DESIGN.md §5.3）。
-- **两个 bucket 的时间线边界不对齐**，重放要做区间求交，不能只遍历一个列表（DESIGN.md §7 第 2 步）。
-- **AW 访问不了就直接说无法工作**，不显示任何编造的进度数字。但注意临时不可达**不影响最终结果的正确性**——历史在 aw-server 里，恢复后重新查区间就能补齐；真正留窟窿的只有 aw-server 自己宕掉，那种时间段算 `Gap`，不计入也不惩罚（DESIGN.md §6.2、§6.3）。
-- **afk bucket 是必需的，不是可选的。** AW 的窗口监听器即使用户不在电脑前也会**心跳续期**当前聚焦窗口那条事件，`duration` 会一路长大且事件流里不留空白（AWJ 项目 2026-07-14 已确认，一个后台 SSH 终端因此显示了 6 小时）。所以不看 afk 数据的话，「把目标应用停在前台然后起身走开」是完全隐形的——也是最省力的作弊路径。**不要**给 afk 缺失写"降级为永远视为在座"的兼容分支（DESIGN.md §6.1.1）。
-- **`Absent` 就是 AW 说 `afk`，不加解释层**（2026-07-27 定稿，DESIGN.md §0.1）。已知代价：认真读 PDF 超过 afk 阈值不动键鼠，那几分钟判 `Absent`、不计入、任务被拖长——AWJ 已经因此把真实的学习记录连根丢掉过（2026-07-14：ETF 视频、Blender 教程）。**用户明知这个代价并两次选择了简单方案，不要翻案，也不要"顺手改进"成 AFK 段长度分析。** 要放宽就去改 AW 自己的 `aw-watcher-afk.toml`（默认 180 秒）——旋钮在底座上，不在本程序里。
-- **HttpClient 必须关掉代理**：`new HttpClientHandler { UseProxy = false }`。系统级 SOCKS/HTTP 代理会吞掉 localhost 请求，表现成莫名的连不上（DESIGN.md §6.1.2）。
-- **重放算法要保持纯函数**：无 I/O、无时钟，`now` 是参数。这样测"专注 25 分钟走完"不用真等 25 分钟，喂合成事件列表就能穷举边界（DESIGN.md §7）。
-
-## v1 范围边界
-
-除非用户明确要求，不要主动实现 `DESIGN.md` §11 里列出的内容。最容易手滑做进去的几项：经典番茄钟的长休息、违规宽限期（v1 恒为 0）、独立的悬浮提醒窗、规则文件的图形化编辑器、跨机器合并。
-
-范围在两天里动过三次，以现在这版为准：
-
-- **模拟表盘**（§8.2）从 §11 移进了 v1，已实现。
-- **收进任务栏常驻**（原 §8.3）曾移进 v1，2026-07-28 又**整个砍掉**——窗口从头到尾放在原地。
-- **两个配置都写日志**（§8.3.8）。2026-07-28 傍晚用户推翻了同一天上午"只有 Debug 写"那条（`[Conditional("DEBUG")]` 已去掉），理由是界面对用户全程沉默、日志是唯一能事后查的东西，而省下的开销不值一提（一分钟一行，一轮最多五十行，且超 1MB 自动滚动）。**所以 Release 版出错现在也有据可查，不用再切回 Debug 复现。**
-- **`rules.json` 按三级找**（`AppData.RulesPath`）：`%LOCALAPPDATA%\ItamiTimer\` → exe 旁边 → 工作目录。用户自己那份在第一级，重新发布冲不掉。
-- **提示音 + 设置窗口**（§8.3.1~8.3.3）是 2026-07-28 新进 v1 的，已实现。三条通知音各自可关，外加合成的滴答声（开关在钟的右上角，音量在设置里）。
-
-滑块量程是 §8.4.2a 的正式值 **10~50 分钟、步进 5、默认 25**。2026-07-27~28 期间它临时是 2~10 分钟，核心循环跑通后已改回；文档里如果还看到"调试量程"字样，那是历史记录。
+- git：远端 `github.com/Achillesy/CSharp_ItamiTimer.git`，默认分支 **`master`**。
+  仓库现为 private；对外发布时用户会另建仓库拷贝内容。
+- 源码注释、提交信息、开发文档用中文；日志、异常、界面文字用英文。
+- 运行时数据在 `%LOCALAPPDATA%\ItamiTimer\`（settings.json / rules.json / itami.log）。
+  Release 也写日志——界面全程沉默，日志是唯一能事后查的地方。
+- 姊妹项目 ActivityWatchJournal（Python）是**纯参考**：搬结论不搬代码、不跨进程调用。
