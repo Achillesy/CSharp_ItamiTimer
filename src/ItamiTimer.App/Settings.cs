@@ -25,6 +25,8 @@ public sealed class Settings
     [JsonPropertyName("restDoneSound")] public string? RestDoneSound { get; set; }
     [JsonPropertyName("idleEnabled")] public bool IdleEnabled { get; set; } = true;
     [JsonPropertyName("idleSound")] public string? IdleSound { get; set; }
+    [JsonPropertyName("alarmEnabled")] public bool AlarmEnabled { get; set; } = true;
+    [JsonPropertyName("alarmSound")] public string? AlarmSound { get; set; }
 
     /// <summary>
     /// 滴答声开关。**就是右上角那个喇叭**，设置窗口里没有它 —— 滴答是
@@ -78,6 +80,7 @@ public sealed class Settings
             s.FocusDoneSound ??= Sound.PreferredOrFirst("Glass", "Hero", "Blow");
             s.RestDoneSound ??= Sound.PreferredOrFirst("Submarine", "Bottle", "Purr");
             s.IdleSound ??= Sound.PreferredOrFirst("Tink", "Pop", "Morse");
+            s.AlarmSound ??= Sound.PreferredOrFirst("Alarm01", "Alarm02", "Ring01");
         }
         else
         {

@@ -37,17 +37,23 @@ public partial class SettingsWindow : Window
         var focusSound = this.FindControl<ComboBox>("FocusSound")!;
         var restSound = this.FindControl<ComboBox>("RestSound")!;
         var idleSound = this.FindControl<ComboBox>("IdleSound")!;
+        var alarmOn = this.FindControl<ToggleSwitch>("AlarmOn")!;
+        var alarmSound = this.FindControl<ComboBox>("AlarmSound")!;
         var tickVol = this.FindControl<Slider>("TickVol")!;
 
         focusSound.ItemsSource = names;
         restSound.ItemsSource = names;
         idleSound.ItemsSource = names;
+        alarmSound.ItemsSource = names;
         focusOn.IsChecked = settings.FocusDoneEnabled;
         restOn.IsChecked = settings.RestDoneEnabled;
         idleOn.IsChecked = settings.IdleEnabled;
         focusSound.SelectedItem = settings.FocusDoneSound;
         restSound.SelectedItem = settings.RestDoneSound;
         idleSound.SelectedItem = settings.IdleSound;
+        alarmOn.IsChecked = settings.AlarmEnabled;
+        alarmSound.SelectedItem = settings.AlarmSound;
+        alarmSound.IsEnabled = settings.AlarmEnabled;
         focusSound.IsEnabled = settings.FocusDoneEnabled;
         restSound.IsEnabled = settings.RestDoneEnabled;
         idleSound.IsEnabled = settings.IdleEnabled;
@@ -86,6 +92,20 @@ public partial class SettingsWindow : Window
         {
             settings.IdleSound = idleSound.SelectedItem as string;
             if (!_loading) Sound.Play(settings.IdleSound);
+
+        alarmOn.IsCheckedChanged += (_, _) =>
+        {
+            settings.AlarmEnabled = alarmOn.IsChecked == true;
+            alarmSound.IsEnabled = settings.AlarmEnabled;
+            settings.Save();
+        };
+
+        alarmSound.SelectionChanged += (_, _) =>
+        {
+            settings.AlarmSound = alarmSound.SelectedItem as string;
+            if (!_loading) Sound.Play(settings.AlarmSound);
+            settings.Save();
+        };
             Persist();
         };
         focusSound.SelectionChanged += (_, _) =>

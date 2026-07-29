@@ -67,6 +67,16 @@
         <ComboBox x:Name="IdleSound" HorizontalAlignment="Stretch" MaxDropDownHeight="320"/>
       </StackPanel>
     </Border>
+    <Border Classes="card">
+      <StackPanel Spacing="12">
+        <Grid ColumnDefinitions="*,Auto">
+          <TextBlock Classes="title" Text="Alarm"/>
+          <ToggleSwitch x:Name="AlarmOn" Grid.Column="1" VerticalAlignment="Center"
+                        OnContent="On" OffContent="Off"/>
+        </Grid>
+        <ComboBox x:Name="AlarmSound" HorizontalAlignment="Stretch" MaxDropDownHeight="320"/>
+      </StackPanel>
+    </Border>
 
     <!-- 滴答**只有音量**，没有开关（用户 2026-07-28）：开关是钟上那个喇叭，
          滴答是钟本身的功能，跟督促学习无关，不该混进这一页。 -->

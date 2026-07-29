@@ -25,6 +25,7 @@ public class DialControl : Control
     private const double RNumerals = 0.745;  // 0.795 挤刻度、0.70 离刻度太远，取中
     private const double RTickMinor = 0.918, RTickMajor = 0.893, RTickOuter = 0.955;
     private const double RHour = 0.55, RMinute = 0.775, RSecond = 0.88;
+    private const double RAlarm = 0.62;    // 闹钟黄针：比分针短，比时针略长
     private const double RHub = 0.035;
 
     /// <summary>休息扇形的外缘。压在刻度圈里侧，别盖住数字（§8.4.4）。</summary>
@@ -75,6 +76,13 @@ public class DialControl : Control
     public static readonly StyledProperty<double> RestMinutesProperty =
         AvaloniaProperty.Register<DialControl, double>(nameof(RestMinutes));
 
+    /// <summary>闹钟时刻，从 0:00 起算的总分钟数（0~719，12 小时制）。</summary>
+    public static readonly StyledProperty<double> AlarmMinutesProperty =
+        AvaloniaProperty.Register<DialControl, double>(nameof(AlarmMinutes));
+
+    /// <summary>闹钟时间变更时回调，参数为总分钟数。</summary>
+    public Action<double>? OnAlarmChanged;
+
 
     public DialPalette Palette { get => GetValue(PaletteProperty); set => SetValue(PaletteProperty, value); }
     public IReadOnlyList<MinuteCell> Cells { get => GetValue(CellsProperty); set => SetValue(CellsProperty, value); }
@@ -82,10 +90,26 @@ public class DialControl : Control
     public double RemainingMinutes { get => GetValue(RemainingMinutesProperty); set => SetValue(RemainingMinutesProperty, value); }
     public DateTimeOffset? RestFrom { get => GetValue(RestFromProperty); set => SetValue(RestFromProperty, value); }
     public double RestMinutes { get => GetValue(RestMinutesProperty); set => SetValue(RestMinutesProperty, value); }
+    public double AlarmMinutes { get => GetValue(AlarmMinutesProperty); set => SetValue(AlarmMinutesProperty, value); }
 
     static DialControl()
         => AffectsRender<DialControl>(PaletteProperty, CellsProperty, StartedAtProperty,
-                                      RemainingMinutesProperty, RestFromProperty, RestMinutesProperty);
+                                      RemainingMinutesProperty, RestFromProperty, RestMinutesProperty,
+                                      AlarmMinutesProperty);
+
+    public static string FormatAlarmTime(double totalMinutes)
+    {
+        int h = (int)(totalMinutes / 60) % 12;
+        int m = (int)(totalMinutes % 60);
+        var now = DateTime.Now;
+        int cur12h = now.Hour % 12;
+        int curMin = now.Minute;
+        // 自动判断上午/下午
+        int displayH = (h < cur12h || (h == cur12h && m <= curMin)) ? h + 12 : h;
+        if (displayH == 0) displayH = 12;
+        if (displayH == 12 && h == 0) displayH = 0;  // 午夜 0:xx
+        return $"{displayH:D2}:{m:D2}";
+    }
 
     // 12 点为 0°，顺时针，分钟 × 6°（§8.2）
     private static Point At(Point c, double r, double deg)
@@ -427,6 +451,10 @@ public class DialControl : Control
         var shift = Matrix.CreateTranslation(rFace * 0.014, rFace * 0.018);
         var shadowBrush = new SolidColorBrush(A(Shadow, 0x38));
 
+        // 闹钟黄针：从 AlarmMinutes 算角度（720分钟=360°）
+        var alarmDeg = (AlarmMinutes % 720) / 2.0;
+        var alarmGeo = Taper(c, alarmDeg, R(RAlarm), rFace * 0.024, rFace * 0.006, rFace * 0.06);
+
         var hourGeo = Taper(c, hour * 30, R(RHour), rFace * 0.030, rFace * 0.013, rFace * 0.10);
         var minGeo = Taper(c, min * 6, R(RMinute), rFace * 0.022, rFace * 0.008, rFace * 0.10);
         var secPen = new Pen(new SolidColorBrush(Palette.Sweep), rFace * 0.008) { LineCap = PenLineCap.Round };
@@ -434,14 +462,17 @@ public class DialControl : Control
         var tail = At(c, -rFace * 0.16, sec * 6);
         var tip = At(c, R(RSecond), sec * 6);
 
-        // 三根指针的影子一起画，只推一次变换
+        // 三根指针的影子 + 黄针影子一起画
         using (ctx.PushTransform(shift))
         {
+            ctx.DrawGeometry(shadowBrush, null, alarmGeo);
             ctx.DrawGeometry(shadowBrush, null, hourGeo);
             ctx.DrawGeometry(shadowBrush, null, minGeo);
             ctx.DrawLine(secShadowPen, tail, tip);
         }
 
+        // 黄针要画在时针【之前】，这样被时针盖住 = 到点
+        ctx.DrawGeometry(new SolidColorBrush(Palette.Alarm), null, alarmGeo);
         ctx.DrawGeometry(new SolidColorBrush(Palette.Ink), null, hourGeo);
         ctx.DrawGeometry(new SolidColorBrush(Palette.Ink), null, minGeo);
         // 秒针：细、轻、独立色。它是装饰，不该跟时分针抢（§8.2.6）
@@ -480,4 +511,5 @@ public class DialControl : Control
         g.EndFigure(true);
         return geo;
     }
+
 }

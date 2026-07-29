@@ -16,7 +16,8 @@ public sealed record DialPalette(
     Color Face, Color FaceRim, Color Ink, Color Tick,
     Color BezelLit, Color BezelMid, Color BezelDark,
     Color Focus, Color Amber, Color Slack, Color Absent, Color Pending, Color Sweep, Color Rest,
-    Color DominoTop, Color DominoFace, Color DominoSide)
+    Color DominoTop, Color DominoFace, Color DominoSide,
+    Color Alarm)
 {
     /// <summary>日面：素白盘 + 木质边框（对着用户给的那张实物照片调的）。</summary>
     public static readonly DialPalette Light = new(
@@ -50,7 +51,9 @@ public sealed record DialPalette(
         // DominoTop 保留但不再使用：相机在骨牌顶端一线，看不到顶面。
         DominoTop: Color.FromRgb(0xE2, 0xC6, 0xA4),
         DominoFace: Color.FromRgb(0xC4, 0x9E, 0x74),
-        DominoSide: Color.FromRgb(0xE6, 0xC8, 0xA4));
+        DominoSide: Color.FromRgb(0xE6, 0xC8, 0xA4),
+        // 闹钟指针：暖黄，老式闹钟那种。比分针短、比时针粗。
+        Alarm: Color.FromRgb(0xF0, 0xC0, 0x40));
 
     /// <summary>夜面：深灰盘 + 深色金属边框。</summary>
     public static readonly DialPalette Dark = new(
@@ -70,7 +73,8 @@ public sealed record DialPalette(
         Rest: Color.FromRgb(0x63, 0xA6, 0xE0),      // 夜面提亮一档，见 §8.4.4
         DominoTop: Color.FromRgb(0x8A, 0x6E, 0x50),
         DominoFace: Color.FromRgb(0x6E, 0x56, 0x3C),
-        DominoSide: Color.FromRgb(0x93, 0x77, 0x57));
+        DominoSide: Color.FromRgb(0x93, 0x77, 0x57),
+        Alarm: Color.FromRgb(0xF5, 0xD0, 0x50));
 
     /// <summary>
     /// §8.2.3 的三段过渡：focus → amber → slack。

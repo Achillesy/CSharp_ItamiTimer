@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
 using Avalonia.Styling;
@@ -45,6 +46,12 @@ public partial class MainWindow : Window
     private readonly Settings _settings = Settings.Load();
 
     private TaskSession? _session;
+    private double _alarmMinutes;          // 闹钟总分钟数
+    private bool _alarmFired;              // 本轮闹钟是否已触发
+    private bool _alarmAdjusting;          // 正在调整闹钟，抑制误触发
+    private DateTime _alarmBtnPressedAt;
+    private DispatcherTimer? _alarmTimer;
+    private int _alarmSpeed;
 
     public MainWindow()
     {
@@ -57,11 +64,17 @@ public partial class MainWindow : Window
         LoadRules();
         RefreshStartButton();
         var gear = F<Button>("SettingsBtn");
-        gear.Content = ChromeIcons.Gear();     // 矢量，不是字形（macOS 上没有那个字体）
+        gear.Content = ChromeIcons.Gear();
         gear.Click += OnSettings;
+        var alarm = F<Button>("AlarmBtn");
+        alarm.Content = ChromeIcons.Alarm();
+        alarm.PointerPressed += OnAlarmPressed;
+        alarm.PointerReleased += OnAlarmReleased;
         F<Button>("MuteBtn").Click += (_, _) => { _settings.TickEnabled = !_settings.TickEnabled; ApplyChrome(); _settings.Save(); };
         F<Button>("PinBtn").Click += (_, _) => { _settings.Pinned = !_settings.Pinned; ApplyChrome(); _settings.Save(); };
         ApplyChrome();
+        var dial = F<DialControl>("Dial");
+        dial.OnAlarmChanged = mins => _alarmMinutes = mins;
 
         _frame.Tick += OnFrame;
         _frame.Start();
@@ -106,6 +119,25 @@ public partial class MainWindow : Window
         if (sec == _tickedSecond) return;
         _tickedSecond = sec;
         if (_settings.TickEnabled) Tick.Play(sec, _settings.TickVolume);
+
+        // 闹钟检测：时针盖住黄针 → 响铃（调整中不触发）
+        if (_alarmMinutes > 0 && !_alarmAdjusting)
+        {
+            var now = DateTime.Now;
+            var hourDeg = (now.Hour % 12 + now.Minute / 60.0) * 30;
+            var alarmDeg = (_alarmMinutes % 720) / 2.0;
+            var diff = Math.Abs(hourDeg - alarmDeg);
+            if (diff > 180) diff = 360 - diff;
+            if (diff < 1.5 && !_alarmFired)
+            {
+                _alarmFired = true;
+                if (_settings.AlarmEnabled) Sound.Play(_settings.AlarmSound);
+            }
+            else if (diff >= 3.0)
+            {
+                _alarmFired = false;
+            }
+        }
     }
 
     /// <summary>
@@ -477,6 +509,60 @@ public partial class MainWindow : Window
         if (!await Confirm.AskAsync(this, "The task isn't finished. Give up?")) return;
         _session?.Abandon();
         EndSession();
+    }
+
+    // ================================================================
+    //  闹钟按钮交互
+    // ================================================================
+    private void OnAlarmPressed(object? sender, PointerPressedEventArgs e)
+    {
+        _alarmAdjusting = true;
+        _alarmBtnPressedAt = DateTime.Now;
+        _alarmSpeed = 5;  // 步进 5 分钟
+
+        // 单击：+5 分钟
+        _alarmMinutes = (_alarmMinutes + 5) % 720;
+        UpdateAlarm();
+
+        // 长按加速定时器
+        _alarmTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(350) };
+        _alarmTimer.Tick += OnAlarmTick;
+        _alarmTimer.Start();
+
+        e.Handled = true;
+    }
+
+    private void OnAlarmTick(object? sender, EventArgs e)
+    {
+        var held = (DateTime.Now - _alarmBtnPressedAt).TotalSeconds;
+        if (held < 0.3) return;
+
+        _alarmSpeed = Math.Min(60, 5 * (1 << (int)(held / 1.0)));  // 5,10,20,40,60...
+        _alarmMinutes = (Math.Round((_alarmMinutes + _alarmSpeed) / 5) * 5) % 720;
+        UpdateAlarm();
+
+        _alarmTimer!.Interval = TimeSpan.FromMilliseconds(Math.Max(60, 350 - held * 25));
+    }
+
+    private void OnAlarmReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        _alarmTimer?.Stop();
+        _alarmTimer = null;
+        // 对齐到最近的 5 分钟
+        _alarmMinutes = Math.Round(_alarmMinutes / 5) * 5 % 720;
+        UpdateAlarm();
+        // 延迟恢复响铃检测（给用户 2 秒余量）
+        Task.Delay(2000).ContinueWith(_ => _alarmAdjusting = false, TaskScheduler.Default);
+    }
+
+    private void UpdateAlarm()
+    {
+        var dial = F<DialControl>("Dial");
+        dial.AlarmMinutes = _alarmMinutes;
+        // 一直显示时间 Tooltip
+        var time = DialControl.FormatAlarmTime(_alarmMinutes);
+        ToolTip.SetTip(dial, time);
+        ToolTip.SetIsOpen(dial, true);
     }
 
     /// <summary>齿轮：打开设置。两条声音，改一下存一下（见 <see cref="SettingsWindow"/>）。</summary>

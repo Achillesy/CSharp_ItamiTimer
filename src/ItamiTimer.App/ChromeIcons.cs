@@ -95,6 +95,27 @@ public static class ChromeIcons
     }
 
 
+
+    /// <summary>
+    /// 闹钟。简笔铃铛：圆底 + 两侧弧 + 顶部小圆。开着时填实，无状态切换。
+    /// </summary>
+    public static Control Alarm()
+    {
+        // 铃铛主体：两个弧从底部圆交汇到顶部
+        const string Body = "M 5,14 A 3,3 0 0 0 11,14 L 12,8 L 13.5,6.5 L 12.5,6 L 11,6 L 5,6 L 3.5,6 L 2.5,6.5 L 4,8 Z";
+        // 铃舌（底部小球）
+        const string Clapper = "M 7,13.5 A 1,1 0 1 0 9,13.5 Z";
+        // 顶部钮
+        const string Knob = "M 7.5,2.5 A 0.8,0.8 0 1 0 8.5,2.5 Z";
+
+        var geo = Geometry.Parse(Body + " " + Clapper + " " + Knob);
+        if (geo is PathGeometry pg) pg.FillRule = FillRule.NonZero;
+
+        var canvas = new Canvas { Width = Box, Height = Box };
+        canvas.Children.Add(new Path { Data = geo, Fill = Ink });
+        return canvas;
+    }
+
     /// <summary>
     /// 齿轮（设置）。八齿 + 中心孔，用 EvenOdd 填充规则把孔挖出来。
     ///
