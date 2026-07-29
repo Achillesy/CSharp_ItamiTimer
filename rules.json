@@ -23,7 +23,8 @@
     "学习经济学": {
       "rules": [
         { "title": "经济学" }
-      ]
+      ],
+      "accumulatedMinutes": 68.9
     }
 
   },
