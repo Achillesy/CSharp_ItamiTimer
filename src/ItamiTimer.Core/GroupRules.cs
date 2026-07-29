@@ -218,19 +218,24 @@ public sealed class GroupRules
     /// </summary>
     /// <param name="windowEvents">今日窗口事件（已按 Start 排序）</param>
     /// <returns>组名 → 番茄数</returns>
-    public Dictionary<string, int> TodayTomatoes(IReadOnlyList<AwEvent> windowEvents)
+    public Dictionary<string, int> TodayTomatoes(IReadOnlyList<AwEvent> windowEvents, DateTimeOffset todayStart, DateTimeOffset now)
     {
         var byGroup = new Dictionary<string, double>();
         var selectable = new HashSet<string>(SelectableGroups);
 
         foreach (var ev in windowEvents)
         {
+            // 裁剪到今日 [todayStart, now]
+            var start = ev.Start > todayStart ? ev.Start : todayStart;
+            var end = ev.End < now ? ev.End : now;
+            if (end <= start) continue;
+
             var app = ev.App ?? "";
             var title = ev.Title ?? "";
             var kind = Classify(app, title, selectable, out var groupName);
             if (kind == IntervalKind.OnTask && groupName is not null)
             {
-                byGroup[groupName] = byGroup.GetValueOrDefault(groupName) + ev.DurationSeconds;
+                byGroup[groupName] = byGroup.GetValueOrDefault(groupName) + (end - start).TotalSeconds;
             }
         }
 

@@ -4,6 +4,7 @@ using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
 using Avalonia.Styling;
 using Avalonia.Threading;
+using System.Linq;
 using ItamiTimer.Core;
 using ItamiTimer;
 
@@ -386,12 +387,12 @@ public partial class MainWindow : Window
             var now = DateTimeOffset.Now;
             var events = await aw.FetchEventsAsync(bucketId, todayStart, now);
 
-            var tomatoes = _rules.TodayTomatoes(events);
+            var tomatoes = _rules.TodayTomatoes(events, todayStart, now);
             for (var i = 0; i < _goalBoxes.Count; i++)
             {
                 var name = (string)_goalBoxes[i].Content!;
                 var count = tomatoes.GetValueOrDefault(name, 0);
-                _tomatoLabels[i].Text = count > 0 ? $"🍅 {count}" : "";
+                _tomatoLabels[i].Text = count > 0 ? string.Concat(System.Linq.Enumerable.Repeat("🍅", count)) : "";
             }
         }
         catch (Exception ex)
