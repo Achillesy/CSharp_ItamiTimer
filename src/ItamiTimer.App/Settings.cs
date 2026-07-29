@@ -35,6 +35,18 @@ public sealed class Settings
     [JsonPropertyName("shutdownEnabled")] public bool ShutdownEnabled { get; set; }
 
     /// <summary>
+    /// 黄针停在表盘上的位置（0~719 分钟）。**位置永远持久化**——不存的话每次
+    /// 打开黄针都复位到 12 点，像闹钟被清了一样怪异（用户 2026-07-30）。
+    /// </summary>
+    [JsonPropertyName("alarmHandMinutes")] public double AlarmHandMinutes { get; set; }
+
+    /// <summary>
+    /// 下一次响铃的绝对时刻。跟位置一起存，重启时只恢复**还没过期**的
+    /// （<see cref="AlarmClock.Restore"/>）；关着程序时错过的闹钟不补响。
+    /// </summary>
+    [JsonPropertyName("alarmFireAt")] public DateTime? AlarmFireAt { get; set; }
+
+    /// <summary>
     /// 滴答声开关。**就是右上角那个喇叭**，设置窗口里没有它 —— 滴答是
     /// **钟本身**的功能，跟督促学习无关，所以开关摆在钟上，随手一点（§8.3.7）。
     /// 设置窗口只管它的音量。
@@ -75,6 +87,11 @@ public sealed class Settings
             Log.Error("Failed to read settings; falling back to defaults", e);
             s = new Settings();
         }
+
+        // 到点关机**不跨会话**（用户 2026-07-30）：每次启动强制复位。重启后未过期的
+        // 闹钟会继续响，但绝不再执行关机——想关机就得本次会话里重新打开开关。
+        // 放在 Load 里而不是退出时清除：崩溃退出也一样被覆盖到（fail-safe）。
+        s.ShutdownEnabled = false;
 
         // 第一次运行（或文件里没写）时挑一个装机自带的音色。挑不到就是 null = 不出声。
         //

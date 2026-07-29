@@ -69,7 +69,11 @@ public partial class MainWindow : Window
         gear.Click += OnSettings;
         // 闹钟没有自己的图标——在钟面上滚滚轮（2026-07-30）：前滚逆时针、后滚顺时针。
         // 左右键点击已取消，把点击留给以后的功能扩展。
-        F<DialControl>("Dial").PointerWheelChanged += OnAlarmWheel;
+        // 黄针位置从上次会话恢复；响铃时刻只恢复还没过期的（AlarmClock.Restore）。
+        var dial = F<DialControl>("Dial");
+        dial.PointerWheelChanged += OnAlarmWheel;
+        _alarm.Restore(_settings.AlarmHandMinutes, _settings.AlarmFireAt, DateTime.Now);
+        dial.AlarmMinutes = _alarm.Position;
         F<Button>("MuteBtn").Click += (_, _) => { _settings.TickEnabled = !_settings.TickEnabled; ApplyChrome(); _settings.Save(); };
         F<Button>("PinBtn").Click += (_, _) => { _settings.Pinned = !_settings.Pinned; ApplyChrome(); _settings.Save(); };
         ApplyChrome();
@@ -119,9 +123,12 @@ public partial class MainWindow : Window
         if (_settings.TickEnabled) Tick.Play(sec, _settings.TickVolume);
 
         // 闹钟检测：到了拨黄针那一刻算死的目标时刻 → 响一次（调整中不触发）。
+        // 检查节拍是**每秒一次**（上面那道秒边界的闸门），最多晚 1 秒。
         if (DateTime.Now >= _alarmQuietUntil && _alarm.ShouldFire(DateTime.Now))
         {
             _alarm.MarkFired();   // 一次性——响过就撤，不是每天重复的闹钟
+            _settings.AlarmFireAt = null;   // 落盘里的也清掉，位置留着
+            _settings.Save();
             if (_settings.AlarmEnabled) Sound.Play(_settings.AlarmSound);
             if (_settings.ShutdownEnabled) Shutdown.Now();
         }
@@ -517,6 +524,13 @@ public partial class MainWindow : Window
         var direction = e.Delta.Y > 0 ? -1 : +1;   // 前滚 Delta.Y > 0 → 逆时针
         Bump(direction * notches * AlarmClock.SlotMinutes);
         _alarmQuietUntil = DateTime.Now.AddSeconds(2);
+
+        // 黄针位置和响铃时刻都落盘（用户 2026-07-30：不存的话每次打开黄针都复位
+        // 到 12 点，像闹钟被清了一样怪异）。重启时只恢复还没过期的响铃时刻。
+        _settings.AlarmHandMinutes = _alarm.Position;
+        _settings.AlarmFireAt = _alarm.FireAt;
+        _settings.Save();
+
         e.Handled = true;
     }
 

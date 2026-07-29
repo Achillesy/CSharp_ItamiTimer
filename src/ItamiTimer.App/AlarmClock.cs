@@ -37,6 +37,17 @@ public sealed class AlarmClock
     /// <summary>到点了吗。单调比较，不重新判黄针位置。</summary>
     public bool ShouldFire(DateTime now) => FireAt is { } at && now >= at;
 
+    /// <summary>
+    /// 从上次会话恢复（2026-07-30：黄针位置要持久化，不然每次打开都复位到 12 点，
+    /// 像闹钟被清了一样怪异）。**位置永远恢复**；响铃时刻只恢复**还没过期**的——
+    /// 关着程序的时候错过的闹钟不补响，黄针只是停在原处（用户选定的语义）。
+    /// </summary>
+    public void Restore(double position, DateTime? fireAt, DateTime now)
+    {
+        Position = ((position % FaceMinutes) + FaceMinutes) % FaceMinutes;
+        FireAt = fireAt > now ? fireAt : null;
+    }
+
     /// <summary>响过即撤——闹钟是一次性的，不是每日重复（DECISIONS E5）。</summary>
     public void MarkFired() => FireAt = null;
 
