@@ -29,6 +29,12 @@ public sealed class Settings
     [JsonPropertyName("alarmSound")] public string? AlarmSound { get; set; }
 
     /// <summary>
+    /// 到点关机。闹钟命中时除了（或代替）响铃，直接调用系统自带的关机命令
+    /// （<see cref="Shutdown"/>）。默认关闭——这不是一个该悄悄生效的开关。
+    /// </summary>
+    [JsonPropertyName("shutdownEnabled")] public bool ShutdownEnabled { get; set; }
+
+    /// <summary>
     /// 滴答声开关。**就是右上角那个喇叭**，设置窗口里没有它 —— 滴答是
     /// **钟本身**的功能，跟督促学习无关，所以开关摆在钟上，随手一点（§8.3.7）。
     /// 设置窗口只管它的音量。
@@ -80,7 +86,7 @@ public sealed class Settings
             s.FocusDoneSound ??= Sound.PreferredOrFirst("Glass", "Hero", "Blow");
             s.RestDoneSound ??= Sound.PreferredOrFirst("Submarine", "Bottle", "Purr");
             s.IdleSound ??= Sound.PreferredOrFirst("Tink", "Pop", "Morse");
-            s.AlarmSound ??= Sound.PreferredOrFirst("Alarm01", "Alarm02", "Ring01");
+            s.AlarmSound ??= Sound.PreferredOrFirst("Alarm02", "Alarm01", "Ring01");
         }
         else
         {
@@ -91,6 +97,8 @@ public sealed class Settings
             // 空闲那声要**轻**：它一分钟可能响两次，而且提醒的是"你还在吗"，不是"完成了"
             s.IdleSound ??= Sound.PreferredOrFirst(
                 "Windows Message Nudge", "Windows Balloon", "Windows Background", "ding");
+            // 之前这里漏了 AlarmSound 的默认值，第一次运行永远是 null = 不出声
+            s.AlarmSound ??= Sound.PreferredOrFirst("Alarm02", "Alarm01", "Ring01");
         }
         return s;
     }

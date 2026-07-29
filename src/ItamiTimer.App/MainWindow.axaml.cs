@@ -46,12 +46,20 @@ public partial class MainWindow : Window
     private readonly Settings _settings = Settings.Load();
 
     private TaskSession? _session;
-    private double _alarmMinutes;          // 闹钟总分钟数
+    // 闹钟目标：表盘上 0~719 分钟、以 5 分钟（=2.5°）为一格，144 格里选一个——
+    // 这是黄针能停的位置，也是用户唯一能拨动的东西。
+    private double _alarmMinutes;
+    // 真正响铃靠比较这个：拨动黄针的那一刻，就用严格算法把"下一次几点几分响"
+    // 算死存起来，之后只单调地跟 DateTime.Now 比大小，不再每帧重新判黄针位置——
+    // 否则黄针恰好拨到跟时针重合的那一格时会被判成"到点"立刻响，而不是等 12 小时后
+    // 那一圈（2026-07-30 用户明确要求：拨的瞬间必须严格晚于现在）。
+    private DateTime? _alarmFireAt;
     private bool _alarmFired;              // 本轮闹钟是否已触发
     private bool _alarmAdjusting;          // 正在调整闹钟，抑制误触发
     private DateTime _alarmBtnPressedAt;
     private DispatcherTimer? _alarmTimer;
     private int _alarmSpeed;
+    private bool _alarmBumpedDuringHold;    // 长按定时器有没有在这次按压里已经走过至少一步
 
     public MainWindow()
     {
@@ -66,15 +74,14 @@ public partial class MainWindow : Window
         var gear = F<Button>("SettingsBtn");
         gear.Content = ChromeIcons.Gear();
         gear.Click += OnSettings;
-        var alarm = F<Button>("AlarmBtn");
-        alarm.Content = ChromeIcons.Alarm();
-        alarm.PointerPressed += OnAlarmPressed;
-        alarm.PointerReleased += OnAlarmReleased;
+        // 闹钟没有自己的图标——直接按在钟面上（2026-07-30）。DialControl 不是
+        // Button，不会替你把事件标成 Handled，普通 += 订阅就够。
+        var dial = F<DialControl>("Dial");
+        dial.PointerPressed += OnAlarmPressed;
+        dial.PointerReleased += OnAlarmReleased;
         F<Button>("MuteBtn").Click += (_, _) => { _settings.TickEnabled = !_settings.TickEnabled; ApplyChrome(); _settings.Save(); };
         F<Button>("PinBtn").Click += (_, _) => { _settings.Pinned = !_settings.Pinned; ApplyChrome(); _settings.Save(); };
         ApplyChrome();
-        var dial = F<DialControl>("Dial");
-        dial.OnAlarmChanged = mins => _alarmMinutes = mins;
 
         _frame.Tick += OnFrame;
         _frame.Start();
@@ -120,23 +127,14 @@ public partial class MainWindow : Window
         _tickedSecond = sec;
         if (_settings.TickEnabled) Tick.Play(sec, _settings.TickVolume);
 
-        // 闹钟检测：时针盖住黄针 → 响铃（调整中不触发）
-        if (_alarmMinutes > 0 && !_alarmAdjusting)
+        // 闹钟检测：到了拨黄针那一刻算死的目标时刻 → 响一次（调整中不触发）。
+        // 单调比较，不重新判黄针位置——见 _alarmFireAt 字段上的注释。
+        if (_alarmFireAt is { } at && !_alarmAdjusting && !_alarmFired && DateTime.Now >= at)
         {
-            var now = DateTime.Now;
-            var hourDeg = (now.Hour % 12 + now.Minute / 60.0) * 30;
-            var alarmDeg = (_alarmMinutes % 720) / 2.0;
-            var diff = Math.Abs(hourDeg - alarmDeg);
-            if (diff > 180) diff = 360 - diff;
-            if (diff < 1.5 && !_alarmFired)
-            {
-                _alarmFired = true;
-                if (_settings.AlarmEnabled) Sound.Play(_settings.AlarmSound);
-            }
-            else if (diff >= 3.0)
-            {
-                _alarmFired = false;
-            }
+            _alarmFired = true;
+            _alarmFireAt = null;   // 一次性——响过就撤，不是每天重复的闹钟
+            if (_settings.AlarmEnabled) Sound.Play(_settings.AlarmSound);
+            if (_settings.ShutdownEnabled) Shutdown.Now();
         }
     }
 
@@ -518,14 +516,14 @@ public partial class MainWindow : Window
     {
         _alarmAdjusting = true;
         _alarmBtnPressedAt = DateTime.Now;
-        _alarmSpeed = 5;  // 步进 5 分钟
+        _alarmSpeed = 5;
+        _alarmBumpedDuringHold = false;
 
-        // 单击：+5 分钟
-        _alarmMinutes = (_alarmMinutes + 5) % 720;
-        UpdateAlarm();
-
-        // 长按加速定时器
-        _alarmTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(350) };
+        // 短按（点一下）和长按（按住不放）分开计数，绝不重叠：
+        // 按下先不动，等释放时如果长按定时器一次都没触发过，才算一次单击的 +5。
+        // 定时器 500ms 才开始重复，比多数人一次"点击"的按住时长更长，
+        // 不会出现"点一下却走了两步"的重复计数。
+        _alarmTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
         _alarmTimer.Tick += OnAlarmTick;
         _alarmTimer.Start();
 
@@ -535,34 +533,63 @@ public partial class MainWindow : Window
     private void OnAlarmTick(object? sender, EventArgs e)
     {
         var held = (DateTime.Now - _alarmBtnPressedAt).TotalSeconds;
-        if (held < 0.3) return;
+        _alarmBumpedDuringHold = true;
 
-        _alarmSpeed = Math.Min(60, 5 * (1 << (int)(held / 1.0)));  // 5,10,20,40,60...
-        _alarmMinutes = (Math.Round((_alarmMinutes + _alarmSpeed) / 5) * 5) % 720;
-        UpdateAlarm();
+        // 每 1.6 秒翻一倍、封顶 30
+        _alarmSpeed = Math.Min(30, 5 * (1 << (int)(held / 1.6)));
+        Bump(_alarmSpeed);
 
-        _alarmTimer!.Interval = TimeSpan.FromMilliseconds(Math.Max(60, 350 - held * 25));
+        _alarmTimer!.Interval = TimeSpan.FromMilliseconds(Math.Max(150, 500 - held * 15));
     }
 
     private void OnAlarmReleased(object? sender, PointerReleasedEventArgs e)
     {
         _alarmTimer?.Stop();
         _alarmTimer = null;
-        // 对齐到最近的 5 分钟
-        _alarmMinutes = Math.Round(_alarmMinutes / 5) * 5 % 720;
-        UpdateAlarm();
+        if (!_alarmBumpedDuringHold) Bump(5);   // 短按：只走一次 +5 分钟
         // 延迟恢复响铃检测（给用户 2 秒余量）
         Task.Delay(2000).ContinueWith(_ => _alarmAdjusting = false, TaskScheduler.Default);
     }
 
+    /// <summary>
+    /// 把黄针再往前拨 <paramref name="minutes"/> 分钟——表盘 144 格里挪一格或几格，
+    /// 然后立刻把"下一次几点响"用严格算法算死存住（见 <see cref="NextRing"/>）。
+    /// </summary>
+    private void Bump(double minutes)
+    {
+        _alarmMinutes = (_alarmMinutes + minutes) % 720;
+        _alarmFired = false;
+        _alarmFireAt = NextRing(DateTime.Now, _alarmMinutes);
+        UpdateAlarm();
+    }
+
+    /// <summary>
+    /// 黄针停的格子（0~719 分钟）本身只是个 12 小时制的钟面时刻 T——上午 0:00~11:55
+    /// 那一圈。把它换算成"下一次会响的具体时刻"要分三级判断，全部用严格小于：
+    /// 今天的 T 还没到就用它；过了就试 T+12（今天下午那一半）；那个也过了，
+    /// 就只能是明天的 T（T+24）。**故意不用"小于等于"**——如果 now 恰好落在
+    /// 黄针那一格上（拨的瞬间正好和时针重合），意思是"12 小时后"而不是"现在"，
+    /// 不然拨着拨着突然就响了（2026-07-30 用户明确要求）。
+    /// </summary>
+    private static DateTime NextRing(DateTime now, double alarmMinutes)
+    {
+        var t = now.Date.AddMinutes(alarmMinutes);   // 今天的 T（上午那一半）
+        var tPlus12 = t.AddHours(12);                 // 今天的 T+12（下午那一半）
+        if (now < t) return t;
+        if (now < tPlus12) return tPlus12;
+        return t.AddDays(1);                          // 两次都过了，等明天的 T
+    }
+
+    /// <summary>刷新黄针位置和悬浮提示——提示直接读 <see cref="_alarmFireAt"/>，跟响铃判据同一个值。</summary>
     private void UpdateAlarm()
     {
         var dial = F<DialControl>("Dial");
         dial.AlarmMinutes = _alarmMinutes;
-        // 一直显示时间 Tooltip
-        var time = DialControl.FormatAlarmTime(_alarmMinutes);
-        ToolTip.SetTip(dial, time);
-        ToolTip.SetIsOpen(dial, true);
+        if (_alarmFireAt is { } at)
+        {
+            ToolTip.SetTip(dial, at.ToString("HH:mm"));
+            ToolTip.SetIsOpen(dial, true);
+        }
     }
 
     /// <summary>齿轮：打开设置。两条声音，改一下存一下（见 <see cref="SettingsWindow"/>）。</summary>

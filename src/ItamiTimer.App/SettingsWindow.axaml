@@ -69,10 +69,17 @@
     </Border>
     <Border Classes="card">
       <StackPanel Spacing="12">
-        <Grid ColumnDefinitions="*,Auto">
-          <TextBlock Classes="title" Text="Alarm"/>
-          <ToggleSwitch x:Name="AlarmOn" Grid.Column="1" VerticalAlignment="Center"
-                        OnContent="On" OffContent="Off"/>
+        <Grid ColumnDefinitions="*,*">
+          <Grid Grid.Column="0" ColumnDefinitions="Auto,*">
+            <TextBlock Classes="title" Text="Shutdown"/>
+            <ToggleSwitch x:Name="ShutdownOn" Grid.Column="1" HorizontalAlignment="Right"
+                          VerticalAlignment="Center" OnContent="On" OffContent="Off"/>
+          </Grid>
+          <Grid Grid.Column="1" ColumnDefinitions="Auto,*" Margin="16,0,0,0">
+            <TextBlock Classes="title" Text="Alarm"/>
+            <ToggleSwitch x:Name="AlarmOn" Grid.Column="1" HorizontalAlignment="Right"
+                          VerticalAlignment="Center" OnContent="On" OffContent="Off"/>
+          </Grid>
         </Grid>
         <ComboBox x:Name="AlarmSound" HorizontalAlignment="Stretch" MaxDropDownHeight="320"/>
       </StackPanel>

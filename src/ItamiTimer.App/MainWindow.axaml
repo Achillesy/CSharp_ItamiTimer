@@ -114,11 +114,10 @@
       <app:DominoRow x:Name="Dominoes" Height="76"/>
       <!-- 右边距 26（DIP）让齿轮正落在**喇叭**的正下方，也正落在倒下那几块骨牌的
            上方 —— 看起来就像是它把骨牌推倒的（用户 2026-07-28 晚）。
-           数字是量出来的，不是算出来的：图钉那一档是 -4，两者相差一个喇叭宽 +
-           间距，但屏幕缩放会把 DIP 和物理像素岔开，所以按实测调到对齐为止。 -->
-      <Button x:Name="AlarmBtn" Classes="chrome"
-              HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-6,-4,0"
-              ToolTip.Tip="Alarm"/>
+           数字是量出来的，不是算出来的：屏幕缩放会把 DIP 和物理像素岔开，
+           所以按实测调到对齐为止。 -->
+      <!-- 原来这里还有个 AlarmBtn（2026-07-30 撤掉，见下方 XAML 之外的说明）：
+           闹钟的按压交互直接挪到钟面本身（DialControl）上了，不再单独占一个图标。 -->
       <Button x:Name="SettingsBtn" Classes="chrome"
               HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-6,30,0"
               ToolTip.Tip="Settings"/>

@@ -80,10 +80,6 @@ public class DialControl : Control
     public static readonly StyledProperty<double> AlarmMinutesProperty =
         AvaloniaProperty.Register<DialControl, double>(nameof(AlarmMinutes));
 
-    /// <summary>闹钟时间变更时回调，参数为总分钟数。</summary>
-    public Action<double>? OnAlarmChanged;
-
-
     public DialPalette Palette { get => GetValue(PaletteProperty); set => SetValue(PaletteProperty, value); }
     public IReadOnlyList<MinuteCell> Cells { get => GetValue(CellsProperty); set => SetValue(CellsProperty, value); }
     public DateTimeOffset? StartedAt { get => GetValue(StartedAtProperty); set => SetValue(StartedAtProperty, value); }
@@ -96,20 +92,6 @@ public class DialControl : Control
         => AffectsRender<DialControl>(PaletteProperty, CellsProperty, StartedAtProperty,
                                       RemainingMinutesProperty, RestFromProperty, RestMinutesProperty,
                                       AlarmMinutesProperty);
-
-    public static string FormatAlarmTime(double totalMinutes)
-    {
-        int h = (int)(totalMinutes / 60) % 12;
-        int m = (int)(totalMinutes % 60);
-        var now = DateTime.Now;
-        int cur12h = now.Hour % 12;
-        int curMin = now.Minute;
-        // 自动判断上午/下午
-        int displayH = (h < cur12h || (h == cur12h && m <= curMin)) ? h + 12 : h;
-        if (displayH == 0) displayH = 12;
-        if (displayH == 12 && h == 0) displayH = 0;  // 午夜 0:xx
-        return $"{displayH:D2}:{m:D2}";
-    }
 
     // 12 点为 0°，顺时针，分钟 × 6°（§8.2）
     private static Point At(Point c, double r, double deg)
