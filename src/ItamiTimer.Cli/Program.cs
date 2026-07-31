@@ -20,6 +20,7 @@ try
     {
         "start" => await StartAsync(),
         "replay" => await ReplayPastAsync(),
+        "bench" => Bench(),
         _ => Help(),
     };
 }
@@ -187,6 +188,8 @@ int Help()
           itami start  --minutes 25 --group <goal>       submit a task and run it to the end
           itami replay --since "2026-07-26 20:00" [--until ...] --minutes 25 --group <goal>
                                                         dry-run over real past history
+          itami bench  --minutes 25 [--pattern focused|mixed|slack]
+                                                        test the new judgment buffer with synthetic data
 
         <goal> is a group name from rules.json.
 
@@ -196,6 +199,104 @@ int Help()
 
         """);
     return 0;
+}
+
+// ---------------------------------------------------------------- bench
+
+/// <summary>
+/// 用合成数据干跑新判定模型（JudgmentBuffer + Judgment）。
+/// 不碰 AW，不写盘——纯验证 buffer 初始化和状态转换。
+/// </summary>
+int Bench()
+{
+    var minutes = int.Parse(opt.GetValueOrDefault("minutes", "25"));
+    var pattern = opt.GetValueOrDefault("pattern", "mixed");
+
+    Console.WriteLine($"\n══════════════════════════════════════════════");
+    Console.WriteLine($"  Judgment Buffer Bench — {minutes} min focus, pattern: {pattern}");
+    Console.WriteLine($"══════════════════════════════════════════════\n");
+
+    // 1. 初始化
+    var now = new DateTimeOffset(2026, 7, 31, 9, 1, 0, TimeSpan.FromHours(8));
+    var taskStart = TimeGrid.FloorToMinute(now); // 09:01:00
+    var buf = new JudgmentBuffer(taskStart, minutes);
+
+    Console.WriteLine($"Task start: {Renderer.Clock(taskStart)}");
+    Console.WriteLine($"WallClock:  {Renderer.Clock(buf.WallClock)}  (buffer[0])");
+    Console.WriteLine($"Buffer[0..180) = padding, [180..7380) = draw zone");
+    Console.WriteLine($"Focus: {minutes} min ({buf.FocusSeconds}s)\n");
+    Renderer.BufferSummary(buf);
+
+    // 2. 每分钟喂数据（上限: 目标分钟数 + 1h 的 slack + 归档预留）
+    var maxElapsed = Math.Max(7800, minutes * 60 + 3600);
+    var elapsed = 0;
+    var tick = 0;
+    while (elapsed < maxElapsed && !buf.IsFocusComplete)
+    {
+        tick++;
+        elapsed += 60;
+        var queryNow = taskStart.AddSeconds(elapsed);
+
+        // 合成 240 秒的分类数据
+        var queryStart = queryNow.AddSeconds(-240);
+        var classified = SyntheticClassify(queryStart, queryNow, taskStart, pattern, tick);
+        var bufferOffset = (int)(queryStart - buf.WallClock).TotalSeconds;
+        buf.Write(bufferOffset, classified);
+
+        // 检查归档
+        var archived = buf.TryArchive();
+        if (archived)
+        {
+            Console.WriteLine($"\n--- ARCHIVE at tick {tick} (elapsed {elapsed}s = {elapsed / 60}min) ---");
+            Console.WriteLine($"  during += {buf.DuringSeconds:F0}s, StartedAt → {Renderer.Clock(taskStart.AddSeconds(buf.ArchivedSeconds))}");
+        }
+
+        // 每 5 分钟打印一次状态
+        if (tick % 5 == 0 || archived || buf.IsFocusComplete)
+            Renderer.BufferSummary(buf);
+    }
+
+    // 3. 终局
+    Console.WriteLine($"\n══════════════════════════════════════════════");
+    Console.WriteLine($"  Done. Ticks: {tick}  Elapsed: {elapsed}s ({elapsed / 60}min)");
+    Console.WriteLine($"  During: {buf.DuringSeconds:F0}s ({buf.DuringSeconds / 3600:F2} hours)");
+    Console.WriteLine($"  Focus complete: {buf.IsFocusComplete}");
+    Console.WriteLine($"══════════════════════════════════════════════\n");
+
+    return 0;
+}
+
+/// <summary>
+/// 合成 240 秒的分类数据，模拟 AW 查询的返回结果。
+/// 三种模式：focused（全绿）、mixed（80% 专注穿插偷懒）、slack（大量偷懒）。
+/// </summary>
+static byte[] SyntheticClassify(DateTimeOffset qStart, DateTimeOffset qEnd, DateTimeOffset taskStart, string pattern, int tick)
+{
+    var n = (int)(qEnd - qStart).TotalSeconds;
+    var result = new byte[n];
+
+    for (var i = 0; i < n; i++)
+    {
+        var t = qStart.AddSeconds(i);
+        if (t < taskStart)
+        {
+            // 任务开始前：保持当前值（Init 或已覆盖）
+            result[i] = JudgmentBuffer.Init;
+            continue;
+        }
+
+        result[i] = pattern switch
+        {
+            "focused" => JudgmentBuffer.Focused,
+            "slack" => (i / 10) % 3 == 0 ? JudgmentBuffer.Focused : JudgmentBuffer.OffTask,
+            _ => // mixed: 80% focused, occasional off-task bursts
+                (i / 30) % 5 == 0 ? JudgmentBuffer.OffTask      // 每 30 秒偷懒一组
+                : (i / 60) % 7 == 3 ? JudgmentBuffer.Afk         // 偶尔 AFK
+                : JudgmentBuffer.Focused,
+        };
+    }
+
+    return result;
 }
 
 // ---------------------------------------------------------------- 杂项

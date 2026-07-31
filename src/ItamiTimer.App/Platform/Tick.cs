@@ -30,6 +30,7 @@ public static class Tick
     private const int SND_ASYNC = 0x0001;
     private const int SND_MEMORY = 0x0004;
     private const int SND_NODEFAULT = 0x0002;
+    private const int SND_NOSTOP = 0x0010; // 通道有人占着就跳过——不打断 Alarm/通知
 
     [DllImport("winmm.dll", EntryPoint = "PlaySoundW", CharSet = CharSet.Unicode)]
     private static extern bool PlaySoundMem(byte[] data, IntPtr mod, int flags);
@@ -67,7 +68,7 @@ public static class Tick
 
             if (OperatingSystem.IsWindows())
                 PlaySoundMem(tock ? _tock! : _tick!, IntPtr.Zero,
-                    SND_ASYNC | SND_MEMORY | SND_NODEFAULT);
+                    SND_ASYNC | SND_MEMORY | SND_NODEFAULT | SND_NOSTOP);
             else if (OperatingSystem.IsMacOS())
                 MacAudio.Play(MacPath(tock));
         }

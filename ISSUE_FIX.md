@@ -264,6 +264,82 @@ AW 连不上           → 状态 3（AW 脱机）
 
 ---
 
+## 12. 单实例限制
+
+**问题**：当前允许多个实例同时运行。两个实例各自查询 AW、各自计时，
+闹钟可能响两次、Shutdown 可能触发两次——行为不可预测。
+
+**方案**：启动时拿一个全局命名 Mutex，拿不到说明已有实例在跑，
+激活已有实例的窗口后退出。
+
+### 实现（跨平台，一行 P/Invoke 都不用）
+
+```csharp
+// Program.cs / App.axaml.cs 启动入口
+const string MutexName = "Global\\ItamiTimer_SingleInstance_v1";
+
+using var mutex = new Mutex(initiallyOwned: true, MutexName, out var createdNew);
+if (!createdNew)
+{
+    // 已有实例在跑 → 把它拉到前台
+    ActivateExistingWindow();
+    return 0;
+}
+
+// 正常启动
+BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+```
+
+### 激活已有实例
+
+**Windows**：`FindWindow` + `SetForegroundWindow`
+
+```csharp
+[DllImport("user32.dll")]
+static extern IntPtr FindWindow(string? className, string windowName);
+
+[DllImport("user32.dll")]
+static extern bool SetForegroundWindow(IntPtr hWnd);
+
+[DllImport("user32.dll")]
+static extern bool ShowWindow(IntPtr hWnd, int cmdShow);
+
+static void ActivateExistingWindow()
+{
+    var hWnd = FindWindow(null, "ItamiTimer");
+    if (hWnd == IntPtr.Zero) return;
+    ShowWindow(hWnd, 9);        // SW_RESTORE（从最小化恢复）
+    SetForegroundWindow(hWnd);  // 拉到前台
+}
+```
+
+**macOS**：用 `NSRunningApplication` 或 `osascript`。但 Avalonia 没有内置的
+macOS 窗口查找 API。简化处理——macOS 上检测到已有实例时，**直接退出并打印
+一条日志**，不做窗口激活。macOS 有 Dock 指示器，用户自己点一下就行。
+
+### 关键决策
+
+- **Mutex 名字不随版本变**：同一个程序，不管哪个版本，同一时间只跑一个。
+  用 `Global\` 前缀覆盖所有用户会话（Windows 服务场景用不到，但无害）。
+- **macOS 不做窗口激活**：`FindWindow` 是 Windows-only，macOS 侧的
+  `NSRunningApplication` 需要额外 P/Invoke 或引入 AppKit 绑定——代价大于收益。
+- **Mutex 在进程退出时自动释放**：`using` 块保证即使崩溃也由 OS 回收。
+- **不影响 CLI**：`itami bench` / `itami start` 不需要单实例限制——它们
+  不和 GUI 共享状态（CLI 不写 settings.json、不碰闹钟）。
+
+### 改动范围
+
+| 文件 | 改动 |
+|------|------|
+| `App.axaml.cs` 或 `Program.cs` | 启动入口加 Mutex 检查 + Windows 窗口激活 |
+| `Platform/` | 新增 `SingleInstance.cs` 收口平台差异 |
+
+### 难度
+
+**Tier 1**（简单，单文件，~40 行）。
+
+---
+
 ## 验证优先级
 
 1. **音频**：验证 `SND_NOSTOP` 在 Windows 上不中断其它声音，macOS 上双 `SystemSoundID` 叠加正常

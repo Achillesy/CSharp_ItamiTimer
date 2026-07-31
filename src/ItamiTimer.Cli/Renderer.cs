@@ -88,6 +88,80 @@ public static class Renderer
         _ => p.ToString(),
     };
 
+    // ---- 新判定模型（JudgmentBuffer）的终端渲染 ----
+
+    private static readonly (int R, int G, int B) GreenC = (0x2F, 0xA3, 0x6B);  // Focused / AwOffline
+    private static readonly (int R, int G, int B) RedC = (0xD6, 0x45, 0x3F);    // OffTask
+    private static readonly (int R, int G, int B) GrayC = (0x99, 0x99, 0x99);   // Gray (预计)
+    private const string Bold = "[1m";
+
+    /// <summary>buffer 状态码 → 终端色块。</summary>
+    private static string StatusChar(byte s) => s switch
+    {
+        JudgmentBuffer.Gray       => $"{Fg(GrayC)}█{Reset}",
+        JudgmentBuffer.Focused    => $"{Fg(GreenC)}█{Reset}",
+        JudgmentBuffer.AwOffline  => $"{Fg(GreenC)}▓{Reset}",
+        JudgmentBuffer.Afk        => " ",
+        JudgmentBuffer.OffTask    => $"{Fg(RedC)}█{Reset}",
+        _                         => $"{Dim}·{Reset}",  // Init
+    };
+
+    /// <summary>打印 buffer 摘要：前几格 + 绘制区概览 + 统计。</summary>
+    public static void BufferSummary(JudgmentBuffer buf)
+    {
+        var draw = buf.DrawSpan;
+        var focused = 0; var off = 0; var afk = 0; var gray = 0; var offline = 0; var init = 0;
+        for (var i = 0; i < draw.Length; i++)
+        {
+            switch (draw[i])
+            {
+                case JudgmentBuffer.Focused: focused++; break;
+                case JudgmentBuffer.AwOffline: offline++; break;
+                case JudgmentBuffer.OffTask: off++; break;
+                case JudgmentBuffer.Afk: afk++; break;
+                case JudgmentBuffer.Gray: gray++; break;
+                default: init++; break;
+            }
+        }
+        var total = focused + offline + off + afk + gray + init;
+        if (total == 0) { Console.WriteLine("  (buffer empty)\n"); return; }
+
+        // 60s/cell 压缩显示（只显示前 60 格 = 前 1 小时
+        var cells = Math.Min(60, draw.Length / 60);
+        var sb = new StringBuilder("  ");
+        for (var c = 0; c < cells; c++)
+        {
+            var f = 0; var o = 0; var a = 0; var g = 0; var ol = 0; var ii = 0;
+            for (var s = 0; s < 60; s++)
+            {
+                switch (draw[c * 60 + s])
+                {
+                    case JudgmentBuffer.Focused: f++; break;
+                    case JudgmentBuffer.AwOffline: ol++; break;
+                    case JudgmentBuffer.OffTask: o++; break;
+                    case JudgmentBuffer.Afk: a++; break;
+                    case JudgmentBuffer.Gray: g++; break;
+                    default: ii++; break;
+                }
+            }
+            var dom = f + ol; // 主导地位
+            if (dom >= 30)        sb.Append($"{Fg(GreenC)}█{Reset}");
+            else if (o >= 30)     sb.Append($"{Fg(RedC)}█{Reset}");
+            else if (a >= 30)     sb.Append(" ");
+            else if (g >= 30)     sb.Append($"{Fg(GrayC)}█{Reset}");
+            else                  sb.Append($"{Dim}·{Reset}");
+        }
+        Console.WriteLine(sb.ToString());
+
+        // 统计行
+        var pct = (double)(focused + offline) / total * 100;
+        Console.WriteLine($"  {Bold}{(focused + offline) / 60}min focused + {offline / 60}min AW-offline{Reset}  "
+                        + $"{Fg(RedC)}{off / 60}min slack{Reset}  "
+                        + $"afk {afk / 60}min  gray {gray / 60}min  init {init / 60}min  "
+                        + $"→ {pct:F0}% counted");
+        Console.WriteLine($"  during={buf.DuringSeconds:F0}s  focusGoal={buf.FocusSeconds}s  complete={buf.IsFocusComplete}\n");
+    }
+
     /// <summary>§7.1 的账单。因为一切都是重放算出来的，**这份报告不需要额外记账，是免费的**。</summary>
     public static string Bill(TaskRecord task, TaskState s)
     {
