@@ -38,19 +38,7 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _frame = new() { Interval = TimeSpan.FromMilliseconds(33) };
 
     private GroupRules? _rules;
-    private readonly List<CheckBox> _goalBoxes = [];
-    /// <summary>每个小目标的番茄数标签（和 _goalBoxes 一一对应）。</summary>
-    private readonly List<TextBlock> _tomatoLabels = [];
-    /// <summary>启动时定一次，整个会话不再变（§11.1 第 2 条，见 <see cref="AppMode"/>）。</summary>
-    private AppMode _mode = AppMode.Constrained;
-
-    /// <summary>
-    /// 模式裁决（<see cref="CheckAwAsync"/>）出结果了没。**出结果之前 Start 一律
-    /// 禁用**（用户 2026-07-30）：探活是异步的，裁决前 _mode 只是个默认值——
-    /// 不挡的话，那几毫秒里点 Start 会开出一个查不到 AW 的约束任务。
-    /// 禁用按钮让这条竞态从结构上消失，而不是赌手速。
-    /// </summary>
-    private bool _modeDecided;
+    private readonly List<RadioButton> _goalRadios = [];
     private readonly Settings _settings = Settings.Load();
 
     private TaskSession? _session;
@@ -68,16 +56,13 @@ public partial class MainWindow : Window
 
         InitializeComponent();
         ApplyTheme();
-        Icon = TomatoIcon.Make();   // 空闲时是番茄；任务进行中换成进度色环（§8.3.2）
+        Icon = RingIcon.Make(0, 0);   // 空闲时灰环；任务进行中换成进度色环
 
         LoadRules();
         RefreshStartButton();
         var gear = F<Button>("SettingsBtn");
         gear.Content = ChromeIcons.Gear();
         gear.Click += OnSettings;
-        // 闹钟没有自己的图标——在钟面上滚滚轮（2026-07-30）：前滚逆时针、后滚顺时针。
-        // 左右键点击已取消，把点击留给以后的功能扩展。
-        // 上次会话的响铃时间点恢复进来：黄针位置由它推导，过期的只剩位置不再响。
         var dial = F<DialControl>("Dial");
         dial.PointerWheelChanged += OnAlarmWheel;
         _alarm.Restore(_settings.AlarmFireAt, DateTime.Now);
@@ -90,8 +75,6 @@ public partial class MainWindow : Window
         _frame.Start();
         Closing += OnClosing;
         Closed += (_, _) => SaveAlarmOnExit();
-
-        _ = CheckAwAsync();
     }
 
     private void InitializeComponent() => AvaloniaXamlLoader.Load(this);
@@ -176,39 +159,6 @@ public partial class MainWindow : Window
         WindowPin.Set(this, _settings.Pinned);
     }
 
-    /// <summary>
-    /// §6.2：AW 访问不了就直接说无法工作。这里的"说"不是弹一句话，而是**把分割线
-    /// 以下整块变灰**——用户一眼看出这个程序此刻只能当钟用，不会以为它在计时。
-    /// </summary>
-    private async Task CheckAwAsync()
-    {
-        try
-        {
-            using var aw = new AwClient(_settings.AwBaseUrl);
-            await aw.ProbeAsync();
-            await aw.FindBucketIdAsync(AwClient.WindowBucketType);
-            await aw.FindBucketIdAsync(AwClient.AfkBucketType);   // 缺 afk 同样不算就绪（§6.1.1）
-            Log.Info("ActivityWatch ready; both buckets present.");
-        }
-        catch (Exception e)
-        {
-            // §11.1：连不上不是"停摆"，是**退化成纯番茄钟**。界面不解释，原因进日志。
-            _mode = AppMode.Pomodoro;
-            Log.Error("Cannot reach ActivityWatch; falling back to plain pomodoro mode", e);
-        }
-
-        // rules.json 读不了同样退化（§11.1 第 4 条）。原来的行为是把开始按钮永久
-        // 灰掉、程序基本不可用 —— 那比退化成番茄钟糟得多。
-        if (_rules is null)
-        {
-            _mode = AppMode.Pomodoro;
-            Log.Warn("rules.json unavailable; falling back to plain pomodoro mode");
-        }
-
-        ApplyMode();
-        _ = RefreshTomatoesAsync();
-    }
-
     private void LoadRules()
     {
         try
@@ -216,26 +166,16 @@ public partial class MainWindow : Window
             _rules = GroupRules.Load(AppData.RulesPath());
             foreach (var name in _rules.SelectableGroups)
             {
-                var box = new CheckBox { Content = name };
-                box.IsCheckedChanged += OnGoalToggled;
-                _goalBoxes.Add(box);
-                var label = new TextBlock
-                {
-                    Text = "",
-                    FontSize = 14,
-                    VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
-                    Margin = new Avalonia.Thickness(6, 0, 0, 0),
-                };
-                _tomatoLabels.Add(label);
+                var radio = new RadioButton { Content = name, GroupName = "Goals" };
+                radio.IsCheckedChanged += OnGoalToggled;
+                _goalRadios.Add(radio);
             }
             RefreshGoalItems();
-            if (_goalBoxes.Count == 1) _goalBoxes[0].IsChecked = true;
+            if (_goalRadios.Count == 1) _goalRadios[0].IsChecked = true;
             Log.Info($"rules.json loaded. Goals: {string.Join(", ", _rules.SelectableGroups)}");
         }
         catch (Exception e)
         {
-            // 读不了不再是"不让开始"，而是退化成纯番茄钟（§11.1 第 4 条）——
-            // 由 CheckAwAsync 统一裁决，这里只负责把 _rules 置空并记账。
             _rules = null;
             Log.Error("Cannot read rules.json", e);
         }
@@ -243,46 +183,16 @@ public partial class MainWindow : Window
 
     private void OnGoalToggled(object? sender, RoutedEventArgs e)
     {
-        // 任务进行中补勾一个小目标 → 追溯整段历史生效（§5.4）
-        if (_session is { Finished: false }) _session.SetGroups(Picked());
         RefreshStartButton();
     }
 
-    private List<string> Picked()
-        => _goalBoxes.Where(b => b.IsChecked == true).Select(b => (string)b.Content!).ToList();
+    private string? Picked()
+        => _goalRadios.FirstOrDefault(r => r.IsChecked == true)?.Content?.ToString();
 
-    /// <summary>
-    /// 把界面调成本次会话的模式（§11.1 第 3 条）。启动时调用一次，此后不再变。
-    ///
-    /// 番茄钟模式下**整个隐藏**小目标列表，不是变灰 —— 它此时没有意义，而且
-    /// "列表整个消失"正是让用户看出自己没在被监管的那个信号（§11.1 的判据一节：
-    /// 点击「开始」才表示他希望被监管）。
-    ///
-    /// 也**不执行** §6.2 那套"分割线以下整块变灰" —— 那是给"AW 本该在但连不上"
-    /// 用的，而这里根本没打算用 AW。
-    /// </summary>
-    private void ApplyMode()
-    {
-        _modeDecided = true;   // 从这一刻起 Start 才可能亮起来
-        F<ItemsControl>("Goals").IsVisible = _mode == AppMode.Constrained;
-        F<StackPanel>("Controls").IsEnabled = true;
-        Log.Info($"Mode: {_mode}");
-        RefreshStartButton();
-    }
-
-    /// <summary>把 _goalBoxes 和 _tomatoLabels 拼成水平 StackPanel 喂给 ItemsControl。</summary>
+    /// <summary>把 _goalRadios 喂给 ItemsControl。</summary>
     private void RefreshGoalItems()
     {
-        var items = new List<StackPanel>();
-        for (var i = 0; i < _goalBoxes.Count; i++)
-        {
-            items.Add(new StackPanel
-            {
-                Orientation = Avalonia.Layout.Orientation.Horizontal,
-                Children = { _goalBoxes[i], _tomatoLabels[i] },
-            });
-        }
-        F<ItemsControl>("Goals").ItemsSource = items;
+        F<ItemsControl>("Goals").ItemsSource = _goalRadios;
     }
 
     private void RefreshStartButton()
@@ -299,10 +209,7 @@ public partial class MainWindow : Window
         }
         btn.Content = "Start";
         btn.Classes.Set("danger", false);
-        // 模式裁决出结果之前一律禁用（见 _modeDecided）；之后按模式判：
-        // 番茄钟模式下没有小目标可勾，自然也不能拿"勾了没有"当启用条件（§11.1 第 3 条）。
-        btn.IsEnabled = _modeDecided
-            && (_mode == AppMode.Pomodoro || (_rules is not null && Picked().Count > 0));
+        btn.IsEnabled = _rules is not null && Picked() is not null;
     }
 
     // ---------------------------------------------------------------- 任务
@@ -317,10 +224,9 @@ public partial class MainWindow : Window
             else { _ = AskAbandonAsync(); return; }
         }
 
-        // 番茄钟模式：没有小目标可勾，Groups 就是空的；约束模式仍然要求至少勾一个。
-        var pomodoro = _mode == AppMode.Pomodoro;
-        var picked = pomodoro ? [] : Picked();
-        if (!pomodoro && (_rules is null || picked.Count == 0)) return;
+        // Radio 单选，Start 后锁定不可改
+        var picked = Picked();
+        if (_rules is null || picked is null) return;
 
         // §14.1（2026-07-27 改）：**截断**到当前这个整分钟，不是进位。
         // 23:13:10 点的开始 → 23:13:00 起算。代价是点击前最多 59 秒也算进来，
@@ -329,16 +235,14 @@ public partial class MainWindow : Window
         {
             StartedAt = TimeGrid.FloorToMinute(DateTimeOffset.Now),
             FocusMinutes = (int)F<Slider>("Minutes").Value,
-            Groups = picked,
+            Group = picked,
         };
 
         // 点击 Start 时补充检查今天星期几，更新骨牌数目。
         // 这样跨过午夜点击时，骨牌会反映新的日期；检查密度低，不会太明显。
         F<DominoRow>("Dominoes").Fallen = DominoRow.FallenForToday(DateTime.Now);
 
-        // 番茄钟模式下 rules 可能压根没读出来（§11.1 第 4 条），给一份空的即可 ——
-        // 合成事件靠自身豁免命中 Neutral，不经过任何用户规则。
-        _session = new TaskSession(task, _rules ?? GroupRules.Empty, _mode, _settings.AwBaseUrl);
+        _session = new TaskSession(task, _rules!, _settings.AwBaseUrl);
         _session.Updated += OnSessionUpdated;
         _session.Interrupted += OnInterrupted;
 
@@ -411,58 +315,11 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>从 AW 查今天窗口事件，按组估算番茄数（OnTask 时长 ÷25 向上取整），更新标签。</summary>
-    private async Task RefreshTomatoesAsync()
-    {
-        if (_mode == AppMode.Pomodoro || _rules is null) return;
-
-        try
-        {
-            using var aw = new AwClient(_settings.AwBaseUrl);
-            var bucketId = await aw.FindBucketIdAsync(AwClient.WindowBucketType);
-            var todayStart = DateTimeOffset.Now.Date;
-            var now = DateTimeOffset.Now;
-            var events = await aw.FetchEventsAsync(bucketId, todayStart, now);
-
-            var tomatoes = _rules.TodayTomatoes(events, todayStart, now);
-            for (var i = 0; i < _goalBoxes.Count; i++)
-            {
-                var name = (string)_goalBoxes[i].Content!;
-                var count = tomatoes.GetValueOrDefault(name, 0);
-                _tomatoLabels[i].Text = count > 0 ? string.Concat(System.Linq.Enumerable.Repeat("🍅", count)) : "";
-            }
-        }
-        catch (Exception ex)
-        {
-            Log.Error("Failed to refresh tomato counts", ex);
-        }
-    }
-
-    /// <summary>
-    /// 把本轮各组的 OnTask 时长累加进 rules.json 的 accumulatedMinutes。
-    /// 任务终结的**每一条**路径都要走到这里——包括休息中直接关窗口那条
-    /// （它不弹确认框，以前正好漏掉了这一步，那一轮就白学了）。
-    /// </summary>
-    private void AccumulateToRules()
-    {
-        if (_session is not { State: { } st } || _rules is null) return;
-        try
-        {
-            GroupRules.Accumulate(AppData.RulesPath(), st.Intervals);
-            Log.Info("Accumulated minutes to rules.json");
-        }
-        catch (Exception ex) { Log.Error("Failed to accumulate minutes to rules.json", ex); }
-    }
-
-    /// <summary>任务终结：回到空盘。**色环 = 当前任务的投影，没有任务就没有色环**（§8.4.5a）。</summary>
+    /// <summary>任务终结：回到空盘。</summary>
     private void EndSession()
     {
-        AccumulateToRules();
         _session?.Dispose();
         _session = null;
-
-        // 任务结束后刷新今日番茄计数
-        _ = RefreshTomatoesAsync();
 
         var dial = F<DialControl>("Dial");
         dial.Cells = [];
@@ -471,7 +328,7 @@ public partial class MainWindow : Window
         dial.RestFrom = null;
         dial.InvalidateVisual();
 
-        Icon = TomatoIcon.Make();
+        Icon = RingIcon.Make(0, 0);
         RefreshStartButton();
     }
 
@@ -491,13 +348,7 @@ public partial class MainWindow : Window
     {
         if (_closeApproved) return;
 
-        // 休息中直接退出：专注已达成、不用确认（§9），但**累计时长必须先落账**——
-        // 这条路径不经过 EndSession，以前正好把 Accumulate 漏掉了。
-        if (_session is { Finished: false, InRest: true })
-        {
-            AccumulateToRules();
-            return;
-        }
+        if (_session is { Finished: false, InRest: true }) return;
         if (_session is not { Finished: false }) return;
 
         e.Cancel = true;
@@ -505,7 +356,6 @@ public partial class MainWindow : Window
         if (await Confirm.AskAsync(this, "The task isn't finished. Quit anyway?"))
         {
             _session?.Abandon();
-            AccumulateToRules();
             _closeApproved = true;
             Close();
         }

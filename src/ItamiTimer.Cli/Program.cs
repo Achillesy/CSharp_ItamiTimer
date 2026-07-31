@@ -48,35 +48,31 @@ catch (Exception e)
 async Task<int> StartAsync()
 {
     var minutes = int.Parse(opt.GetValueOrDefault("minutes", "25"));
-    var groups = opt.GetValueOrDefault("group")?.Split(',', StringSplitOptions.RemoveEmptyEntries)
-                 ?? throw new ArgumentException("A goal is required: --group <name from rules.json>");
+    var group = opt.GetValueOrDefault("group")
+                ?? throw new ArgumentException("A goal is required: --group <name from rules.json>");
 
     var rules = LoadRules();
-    foreach (var g in groups)
-        if (!rules.SelectableGroups.Contains(g))
-            throw new ArgumentException($"No enabled goal \"{g}\" in rules.json. Available: {string.Join(", ", rules.SelectableGroups)}");
+    if (!rules.SelectableGroups.Contains(group))
+        throw new ArgumentException($"No enabled goal \"{group}\" in rules.json. Available: {string.Join(", ", rules.SelectableGroups)}");
 
-    // §6.2：提交任务时 AW 不可达 → 拒绝提交。不允许开始一个从一开始就没法核算的任务。
     using var aw = new AwClient();
-    var host = await aw.ProbeAsync();
     var winId = await aw.FindBucketIdAsync(AwClient.WindowBucketType);
-    var afkId = await aw.FindBucketIdAsync(AwClient.AfkBucketType);   // 缺 afk 同样拒绝，不降级（§6.1.1）
+    var afkId = await aw.FindBucketIdAsync(AwClient.AfkBucketType);
 
-    // §14.1（2026-07-27 改）：**截断**到当前这个整分钟，不是进位。
+    // §14.1：截断到当前整分钟
     var task = new TaskRecord
     {
         StartedAt = TimeGrid.FloorToMinute(DateTimeOffset.Now),
         FocusMinutes = minutes,
-        Groups = groups,
+        Group = group,
     };
 
-    Console.WriteLine($"\nAW: {host}   task submitted (in memory only — quitting abandons it)");
-    Console.WriteLine($"Goals: {string.Join(", ", groups)}");
+    Console.WriteLine($"\nGoal: {group}");
     Console.WriteLine($"Focus {minutes} min, then a {task.RestMinutes} min break");
     Console.WriteLine($"Started at {Renderer.Clock(task.StartedAt)} (floored to the minute)\n");
     Console.WriteLine(Renderer.Legend());
     Console.WriteLine($"Tick every {TickSeconds}s");
-    Console.WriteLine("Ctrl+C = abandon the task (you get the tally first)\n");
+    Console.WriteLine("Ctrl+C = abandon the task\n");
 
     // Ctrl+C 对应 GUI 的"点关闭"：§9 要求退出前把账摆出来，不能默默丢掉。
     TaskState? last = null;
@@ -151,8 +147,8 @@ int Rest(TaskRecord task, TaskState state, DateTimeOffset completedAt)
 async Task<int> ReplayPastAsync()
 {
     var minutes = int.Parse(opt.GetValueOrDefault("minutes", "25"));
-    var groups = opt.GetValueOrDefault("group")?.Split(',', StringSplitOptions.RemoveEmptyEntries)
-                 ?? throw new ArgumentException("A goal is required: --group <name from rules.json>");
+    var group = opt.GetValueOrDefault("group")
+                ?? throw new ArgumentException("A goal is required: --group <name from rules.json>");
     var since = DateTimeOffset.Parse(opt.GetValueOrDefault("since")
                  ?? throw new ArgumentException("A start time is required: --since \"2026-07-26 20:00\""));
     var until = opt.TryGetValue("until", out var u) ? DateTimeOffset.Parse(u) : since.AddHours(3);
@@ -166,11 +162,11 @@ async Task<int> ReplayPastAsync()
     {
         StartedAt = TimeGrid.CeilToMinute(since),
         FocusMinutes = minutes,
-        Groups = groups,
+        Group = group,
     };
     var state = Replay.Run(task, rules, win, afk, until);
 
-    Console.WriteLine($"\nDry run: {Renderer.Clock(task.StartedAt, "MM-dd HH:mm")} → {Renderer.Clock(until, "HH:mm")}   goals: {string.Join(", ", groups)}");
+    Console.WriteLine($"\nDry run: {Renderer.Clock(task.StartedAt, "MM-dd HH:mm")} → {Renderer.Clock(until, "HH:mm")}   goal: {group}");
     Console.WriteLine($"{win.Count} window events, {afk.Count} afk events\n");
     Console.WriteLine(Renderer.Legend());
     Console.WriteLine(Renderer.Cells(Replay.ToMinuteCells(task, state)));
@@ -185,13 +181,9 @@ int Help()
 
         ItamiTimer (一袋米要扛几楼) — command-line layer
 
-          itami start  --minutes 25 --group <goal>       submit a task and run it to the end
+          itami start  --minutes 25 --group <goal>
           itami replay --since "2026-07-26 20:00" [--until ...] --minutes 25 --group <goal>
-                                                        dry-run over real past history
           itami bench  --minutes 25 [--pattern focused|mixed|slack]
-                                                        test the new judgment buffer with synthetic data
-
-        <goal> is a group name from rules.json.
 
         A task lives only in this process and is never written to disk: quitting itami
         abandons the current task (DESIGN.md §2).

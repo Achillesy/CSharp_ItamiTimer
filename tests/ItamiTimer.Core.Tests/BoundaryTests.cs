@@ -22,7 +22,7 @@ public class BoundaryTests
     {
         StartedAt = T0,
         FocusMinutes = focusMinutes,
-        Groups = ["学习经济学"],
+        Group = "学习经济学",
     };
 
     private static AwEvent Win(double fromMin, double toMin, string app, string title)
@@ -176,32 +176,6 @@ public class BoundaryTests
         Assert.Equal(1.0, last.Purity, 2);
     }
 
-    // ---------------------------------------------------------------- TodayTomatoes 的裁剪与取整
-
-    [Fact]
-    public void 番茄数向上取整_一秒也算一个()
-    {
-        var events = new List<AwEvent> { Win(0, 0.1, "读书.exe", "经济学") };
-        var result = Rules.TodayTomatoes(events, T0, At(1));
-        Assert.Equal(1, result["学习经济学"]);
-    }
-
-    [Fact]
-    public void 跨过今日零点的事件只算今日部分()
-    {
-        // 事件从 T0 前 30 分钟一直到 T0 后 20 分钟；todayStart = T0 → 只算 20 分钟 → 1 个番茄
-        var ev = new AwEvent(At(-30), 50 * 60, "读书.exe", "经济学", null);
-        var result = Rules.TodayTomatoes([ev], T0, At(20));
-        Assert.Equal(1, result["学习经济学"]);
-    }
-
-    [Fact]
-    public void 只有OnTask算番茄_中性时间不算()
-    {
-        var events = new List<AwEvent> { Win(0, 30, "explorer.exe", "") };
-        var result = Rules.TodayTomatoes(events, T0, At(30));
-        Assert.Empty(result);
-    }
 
     // ---------------------------------------------------------------- Boundaries 的 T6 边界注入
 

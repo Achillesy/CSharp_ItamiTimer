@@ -8,7 +8,7 @@ public class TaskRecordTests
     {
         StartedAt = new DateTimeOffset(2026, 7, 27, 10, 9, 0, TimeSpan.FromHours(8)),
         FocusMinutes = minutes,
-        Groups = ["学习经济学"],
+        Group = "学习经济学",
     };
 
     /// <summary>
@@ -76,11 +76,10 @@ public class TaskRecordTests
     }
 
     [Fact]
-    public void 新任务默认是已提交且没有变更记录()
+    public void 新任务默认是已提交()
     {
         var task = WithFocus(25);
         Assert.Equal(RecordStatus.Committed, task.Status);
-        Assert.Empty(task.GroupChanges);
         Assert.Null(task.AbandonedAt);
     }
 }

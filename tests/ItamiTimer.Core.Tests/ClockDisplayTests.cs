@@ -31,7 +31,7 @@ public class ClockDisplayTests
         {
             StartedAt = utcStart,
             FocusMinutes = 5,
-            Groups = ["学习经济学"],
+            Group = "学习经济学",
         };
         List<AwEvent> win = [new(utcStart, 1200, "SumatraPDF.exe", "曼昆经济学.pdf", null)];
         List<AwEvent> afk = [new(utcStart, 1200, null, null, "not-afk")];

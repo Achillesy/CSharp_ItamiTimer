@@ -15,7 +15,7 @@ namespace ItamiTimer.Core;
 /// </summary>
 /// <param name="Index">从 0 开始，第 i 格覆盖 [StartedAt + i 分钟, +1 分钟)。</param>
 /// <param name="Start">这一格的起始时刻，天然落在整分钟上——所以「分针就是写入头」（§8.2.2）。</param>
-/// <param name="CountedSeconds">OnTask + Neutral，即计入累计专注时长的部分。</param>
+/// <param name="CountedSeconds">OnTask，即计入累计专注时长的部分。</param>
 public readonly record struct MinuteCell(
     int Index,
     DateTimeOffset Start,

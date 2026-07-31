@@ -13,8 +13,7 @@ public class ReplayTests
 
     private static readonly GroupRules Rules = GroupRules.Parse("""
         {
-          "groups": { "学习经济学": { "rules": [ { "title": "经济学" } ] } },
-          "ignore": [ "^explorer\\.exe$" ]
+          "groups": { "学习经济学": { "rules": [ { "title": "经济学" } ] } }
         }
         """);
 
@@ -22,7 +21,7 @@ public class ReplayTests
     {
         StartedAt = T0,
         FocusMinutes = focusMinutes,
-        Groups = ["学习经济学"],
+        Group = "学习经济学",
     };
 
     private static AwEvent Win(double fromMin, double toMin, string app, string title)
@@ -99,12 +98,11 @@ public class ReplayTests
     /// （计入），但 afk 同时说 afk —— 必须判 Absent。搞错就是"锁屏一小时专注时长照涨"。
     /// </summary>
     [Fact]
-    public void 锁屏不白涨时长_Absent压过Neutral()
+    public void 锁屏不白涨时长_Absent优先()
     {
         var rules = GroupRules.Parse("""
             {
-              "groups": { "学习经济学": { "rules": [ { "title": "经济学" } ] } },
-              "ignore": [ "^LockApp\\.exe$" ]
+              "groups": { "学习经济学": { "rules": [ { "title": "经济学" } ] } }
             }
             """);
         var s = Replay.Run(Task(), rules,
@@ -410,13 +408,10 @@ public class ReplayTests
             }
             """);
 
-        var before = Replay.Run(Task() with { Groups = ["学习经济学"] },
-            rules, win, Present(10), At(10));
-        var after = Replay.Run(Task() with { Groups = ["学习经济学", "学习Blender"] },
+        var state = Replay.Run(Task() with { Group = "学习经济学" },
             rules, win, Present(10), At(10));
 
-        Assert.Equal(5 * 60, before.FocusedSeconds, 1);    // Blender 那 5 分钟算偷懒
-        Assert.Equal(10 * 60, after.FocusedSeconds, 1);    // 补勾之后追溯全绿
-        Assert.Empty(after.Violations);
+        Assert.Equal(5 * 60, state.FocusedSeconds, 1);    // 经济学 5 分钟算专注
+        Assert.Null(state.FocusCompletedAt);               // 10 分钟里只中了 5 分钟，未达成
     }
 }

@@ -70,7 +70,7 @@ public sealed record TaskState
     /// <summary>切好并分类的全部区间，按时间排序、互不重叠。<see cref="MinuteCell"/> 由它投影而来。</summary>
     public required IReadOnlyList<ClassifiedInterval> Intervals { get; init; }
 
-    /// <summary>累计专注时长 = Σ(OnTask ∪ Neutral) 的秒数（§7 第 4 步）。</summary>
+    /// <summary>累计专注时长 = Σ OnTask 的秒数。</summary>
     public required double FocusedSeconds { get; init; }
 
     /// <summary>

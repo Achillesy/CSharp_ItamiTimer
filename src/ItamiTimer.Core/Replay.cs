@@ -193,7 +193,7 @@ public static class Replay
             }
             else
             {
-                kind = rules.Classify(win.Value.App ?? "", win.Value.Title ?? "", task.Groups, out groupName);
+                kind = rules.Classify(win.Value.App ?? "", win.Value.Title ?? "", task.Group, out groupName);
             }
 
             result.Add(new ClassifiedInterval(a, b, kind, win?.App, win?.Title, groupName));
@@ -202,7 +202,7 @@ public static class Replay
     }
 
     private static bool Counts(IntervalKind k)
-        => k is IntervalKind.OnTask or IntervalKind.Neutral;
+        => k is IntervalKind.OnTask;
 
     /// <summary>§7 全部八步。纯函数。</summary>
     public static TaskState Run(
@@ -307,7 +307,7 @@ public static class Replay
 
             return intervals[i].Kind switch
             {
-                IntervalKind.OnTask or IntervalKind.Neutral => TaskPhase.Focusing,
+                IntervalKind.OnTask => TaskPhase.Focusing,
                 IntervalKind.OffTask => TaskPhase.Slacking,
                 IntervalKind.Absent => TaskPhase.Away,
                 _ => TaskPhase.NoData,

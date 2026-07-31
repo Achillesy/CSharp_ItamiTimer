@@ -22,7 +22,7 @@ public class PhaseTests
 
     private static TaskRecord Task() => new()
     {
-        StartedAt = T0, FocusMinutes = 25, Groups = ["学习经济学"],
+        StartedAt = T0, FocusMinutes = 25, Group = "学习经济学",
     };
 
     private static AwEvent Win(double a, double b, string app, string title)

@@ -15,7 +15,7 @@ public class ProjectedEndTests
     {
         StartedAt = T0,
         FocusMinutes = focus,
-        Groups = [],
+        Group = null,
     };
 
     private static TaskState State(double nowMinutes, double focusedMinutes,

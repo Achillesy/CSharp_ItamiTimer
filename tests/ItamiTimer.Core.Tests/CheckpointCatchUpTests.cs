@@ -27,7 +27,7 @@ public class CheckpointCatchUpTests
     {
         StartedAt = T0,
         FocusMinutes = 5,
-        Groups = ["学习经济学"],
+        Group = "学习经济学",
     };
 
     private static AwEvent Win(double a, double b, string app, string title)

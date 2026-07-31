@@ -73,7 +73,7 @@ public static class Renderer
     }
 
     public static string Legend()
-        => $"{Fg(Focus)}█{Reset} counted   {Fg(Amber)}█{Reset} partly off-task   {Fg(Slack)}█{Reset} mostly off-task   "
+        => $"{Fg(Focus)}█{Reset} on-task   {Fg(Amber)}█{Reset} partly off-task   {Fg(Slack)}█{Reset} mostly off-task   "
          + $"{Fg(AbsentC)}▒{Reset} away   {Dim}░{Reset} no AW data";
 
     public static string PhaseText(TaskPhase p) => p switch
@@ -167,10 +167,9 @@ public static class Renderer
     {
         var sb = new StringBuilder();
         var elapsed = (s.FocusCompletedAt ?? s.Now) - task.StartedAt;
-        sb.AppendLine($"Task: {string.Join(", ", task.Groups)}   {PhaseText(s.Phase)}");
+        sb.AppendLine($"Task: {task.Group ?? "(none)"}   {PhaseText(s.Phase)}");
         sb.AppendLine($"Committed to {task.FocusMinutes} min of focus; {elapsed.TotalMinutes:F1} min of wall-clock spent");
 
-        // 最重要的一个数字：已经攒了多少。没有它，用户看不出还差多远。
         var banked = s.FocusedSeconds / 60;
         if (s.FocusCompletedAt is null)
             sb.AppendLine($"**Focused {banked:F1} / {task.FocusMinutes} min — {task.FocusMinutes - banked:F1} min to go**");
@@ -189,8 +188,6 @@ public static class Renderer
 
         if (s.AbsentSeconds > 0) sb.AppendLine($"  Away              {s.AbsentSeconds / 60:F1} min");
         if (s.GapSeconds > 0) sb.AppendLine($"  No AW data        {s.GapSeconds / 60:F1} min (not counted)");
-        foreach (var ch in task.GroupChanges)
-            sb.AppendLine($"  Goals added later {Clock(ch.At, "HH:mm")} → {string.Join(", ", ch.Groups)}");
         return sb.ToString();
     }
 }
