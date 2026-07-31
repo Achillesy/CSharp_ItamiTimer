@@ -1,27 +1,51 @@
 using System.Diagnostics;
+using System.Text.Json;
 
 namespace ItamiTimer.App;
 
 /// <summary>
-/// 到点关机。闹钟命中时调用系统自带的关机命令——跟 <see cref="Sound"/> 同一条纪律：
-/// 只用系统自带的东西，不自己写倒计时提示、不弹确认框、出了错就吞掉写日志。
+/// 闹钟命中时执行 rules.json 里预设的命令（ISSUE_FIX #8）。
+/// 不再硬编码关机——读 <c>executeCommand</c> 字段，自动选当前 OS 的命令。
 /// </summary>
-public static class Shutdown
+public static class Command
 {
-    public static void Now()
+    private static readonly JsonSerializerOptions Opts = new() { PropertyNameCaseInsensitive = true };
+
+    /// <summary>执行 rules.json 里的 executeCommand.{os}。</summary>
+    public static void Execute()
     {
         try
         {
-            if (OperatingSystem.IsWindows())
-                Process.Start(new ProcessStartInfo("shutdown", "/s /t 0") { UseShellExecute = false });
-            else if (OperatingSystem.IsMacOS())
-                Process.Start(new ProcessStartInfo(
-                    "osascript", "-e \"tell application \\\"System Events\\\" to shut down\"")
-                { UseShellExecute = false });
+            var cmd = LoadForCurrentOs();
+            if (string.IsNullOrWhiteSpace(cmd)) return;
+            Process.Start(new ProcessStartInfo(
+                OperatingSystem.IsWindows() ? "cmd.exe" : "/bin/sh",
+                OperatingSystem.IsWindows() ? $"/c {cmd}" : $"-c \"{cmd}\"")
+            { UseShellExecute = false });
         }
         catch (Exception e)
         {
-            Log.Error("Failed to invoke shutdown command", e);
+            Log.Error("Failed to execute command from rules.json", e);
+        }
+    }
+
+    private static string? LoadForCurrentOs()
+    {
+        try
+        {
+            var path = AppData.RulesPath();
+            if (!File.Exists(path)) { Log.Warn("rules.json not found; no command to execute"); return null; }
+
+            using var doc = JsonDocument.Parse(File.ReadAllText(path));
+            if (!doc.RootElement.TryGetProperty("executeCommand", out var cmd)) return null;
+
+            var key = OperatingSystem.IsWindows() ? "windows" : "macos";
+            return cmd.TryGetProperty(key, out var v) ? v.GetString() : null;
+        }
+        catch (Exception e)
+        {
+            Log.Error("Failed to read executeCommand from rules.json", e);
+            return null;
         }
     }
 }

@@ -148,6 +148,56 @@ public class JudgmentBuffer
     /// <summary>专注是否已达成：原始目标 ≤ during(已归档) + 当前 buffer 中的专注秒数。</summary>
     public bool IsFocusComplete => (int)DuringSeconds + CountFocused() >= FocusTargetSeconds;
 
+    /// <summary>任务开始时刻 = WallClock + PaddingSeconds。</summary>
+    public DateTimeOffset TaskStart => WallClock.AddSeconds(PaddingSeconds);
+
+    /// <summary>
+    /// 把 buffer 投影成 MinuteCell 列表（60 秒/格），只吐完整的格子。
+    /// 和旧 <see cref="Replay.ToMinuteCells"/> 同签名，渲染层零改动。
+    /// </summary>
+    public List<MinuteCell> ToMinuteCells()
+    {
+        var cells = new List<MinuteCell>();
+        for (var i = 0; i < DrawSeconds / 60; i++)
+        {
+            var cellStart = TaskStart.AddMinutes(i);
+            var bufStart = PaddingSeconds + i * 60;
+            if (bufStart + 60 > PaddingSeconds + ElapsedSeconds) break; // 未满一分钟
+
+            int counted = 0, off = 0, absent = 0, gap = 0;
+            for (var s = 0; s < 60; s++)
+            {
+                switch (_buf[bufStart + s])
+                {
+                    case Focused:
+                    case AwOffline:
+                        counted++; break;
+                    case OffTask: off++; break;
+                    case Afk: absent++; break;
+                    default: gap++; break; // Init 或 Gray
+                }
+            }
+            cells.Add(new MinuteCell(i, cellStart, counted, off, absent, gap));
+        }
+        return cells;
+    }
+
+    /// <summary>
+    /// 专注达成的时刻（整分钟边界）。null = 尚未达成。
+    /// </summary>
+    public DateTimeOffset? FocusCompletedAt()
+    {
+        var cells = ToMinuteCells();
+        double banked = 0;
+        foreach (var c in cells)
+        {
+            banked += c.CountedSeconds;
+            if ((int)DuringSeconds + (int)banked >= FocusTargetSeconds)
+                return c.Start.AddMinutes(1); // 整分钟边界：该分钟结束时达成
+        }
+        return null;
+    }
+
     // 方便测试：直接访问内部数组的只读视图
     public ReadOnlySpan<byte> Raw => _buf;
     public Span<byte> DrawSpan => _buf.AsSpan(PaddingSeconds, DrawSeconds);

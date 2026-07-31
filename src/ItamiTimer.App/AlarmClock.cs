@@ -14,8 +14,8 @@ namespace ItamiTimer.App;
 /// </summary>
 public sealed class AlarmClock
 {
-    /// <summary>一格 5 分钟，表盘一圈 720 分钟（12 小时制），共 144 个停靠位。</summary>
-    public const double SlotMinutes = 5;
+    /// <summary>一格 1 分钟，表盘一圈 720 分钟（12 小时制），共 720 个停靠位。</summary>
+    public const double SlotMinutes = 1;
     public const double FaceMinutes = 720;
 
     /// <summary>
@@ -58,14 +58,23 @@ public sealed class AlarmClock
     public void MarkFired() => _fired = true;
 
     /// <summary>
-    /// 从上次会话恢复（2026-07-30）：只需要那一个时间点。黄针位置自动从它推导
-    /// 出来（每次打开都复位到 12 点会像闹钟被清了一样怪异）；时间点没过就有效、
-    /// 过了就当已响——关着程序时错过的闹钟不补响。
+    /// 从上次会话恢复（ISSUE_FIX #2.6）：加载时间点只为显示黄针，**不激活闹钟**。
+    /// 关着程序时错过的闹钟不补响。
     /// </summary>
     public void Restore(DateTime? fireAt, DateTime now)
     {
         FireAt = fireAt;
-        _fired = fireAt is not { } at || at <= now;
+        _fired = true; // 启动时一律不激活，等用户滚轮或开 Execute 才激活
+    }
+
+    /// <summary>
+    /// 激活闹钟（用户滚轮拨针 / 开启 Execute 时调用）。
+    /// 只有目标时刻在将来才激活——已过期的不补响。
+    /// </summary>
+    public void Activate(DateTime now)
+    {
+        if (FireAt is { } at && at > now)
+            _fired = false;
     }
 
     /// <summary>

@@ -135,13 +135,19 @@
            （2026-07-27~28 期间这里临时是 2~10 分钟，为了不用每次真坐 25 分钟
            才看到达成那一刻；核心循环跑通后已经改回来了。） -->
       <Slider x:Name="Minutes" Margin="2,4,2,0"
-              Minimum="10" Maximum="50" TickFrequency="5"
+              Minimum="3" Maximum="10" TickFrequency="1"
               IsSnapToTickEnabled="True" TickPlacement="BottomRight" Value="25"/>
 
       <!-- 小目标列表。rules.json 有几个就排几行，窗口高度跟着变。
            任务进行中仍然可点：补勾一个小目标是【追溯生效】的（§5.4）。
            番茄钟模式下整个隐藏（§11.1 第 3 条）。 -->
-      <ItemsControl x:Name="Goals"/>
+      <ItemsControl x:Name="Goals">
+        <ItemsControl.Styles>
+          <Style Selector="ItemsControl#Goals ContentPresenter">
+            <Setter Property="HorizontalAlignment" Value="Stretch"/>
+          </Style>
+        </ItemsControl.Styles>
+      </ItemsControl>
 
     </StackPanel>
   </StackPanel>

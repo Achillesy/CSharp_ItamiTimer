@@ -43,17 +43,34 @@ public partial class SettingsWindow : Window
             () => settings.IdleEnabled, v => settings.IdleEnabled = v,
             () => settings.IdleSound, v => settings.IdleSound = v);
 
-        // 闹钟卡：开关不禁用下拉框（关着也能挑、能试听），旁边多一个关机开关。
-        WireSoundCard("AlarmOn", "AlarmSound", names,
-            () => settings.AlarmEnabled, v => settings.AlarmEnabled = v,
-            () => settings.AlarmSound, v => settings.AlarmSound = v,
-            comboFollowsToggle: false);
-
-        var shutdownOn = this.FindControl<ToggleSwitch>("ShutdownOn")!;
-        shutdownOn.IsChecked = settings.ShutdownEnabled;
-        shutdownOn.IsCheckedChanged += (_, _) =>
+        // Command 卡：Execute on → 执行命令、音色变灰。Execute off → 响铃、可选音色。
         {
-            settings.ShutdownEnabled = shutdownOn.IsChecked == true;
+            var toggle = this.FindControl<ToggleSwitch>("ExecuteOn")!;
+            var combo = this.FindControl<ComboBox>("CommandSound")!;
+            combo.ItemsSource = names;
+            toggle.IsChecked = settings.CommandEnabled;
+            combo.SelectedItem = settings.CommandSound;
+            combo.IsEnabled = !settings.CommandEnabled; // 互斥：开 Execute 则禁用音色
+
+            toggle.IsCheckedChanged += (_, _) =>
+            {
+                settings.CommandEnabled = toggle.IsChecked == true;
+                combo.IsEnabled = !settings.CommandEnabled;
+                Persist();
+            };
+            combo.SelectionChanged += (_, _) =>
+            {
+                settings.CommandSound = combo.SelectedItem as string;
+                if (!_loading) Sound.Play(settings.CommandSound);
+                Persist();
+            };
+        }
+
+        var forceOn = this.FindControl<ToggleSwitch>("ForceOn")!;
+        forceOn.IsChecked = settings.ForceTicking;
+        forceOn.IsCheckedChanged += (_, _) =>
+        {
+            settings.ForceTicking = forceOn.IsChecked == true;
             Persist();
         };
 

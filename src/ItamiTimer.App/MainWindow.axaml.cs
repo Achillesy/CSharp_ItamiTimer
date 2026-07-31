@@ -39,6 +39,7 @@ public partial class MainWindow : Window
 
     private GroupRules? _rules;
     private readonly List<RadioButton> _goalRadios = [];
+    private readonly List<TextBlock> _duringLabels = [];
     private readonly Settings _settings = Settings.Load();
 
     private TaskSession? _session;
@@ -112,7 +113,11 @@ public partial class MainWindow : Window
         var sec = DateTime.Now.Second;
         if (sec == _tickedSecond) return;
         _tickedSecond = sec;
-        if (_settings.TickEnabled) Tick.Play(sec, _settings.TickVolume);
+        // #5: Force on → 强制滴答，但学习+休息期间静音
+        var ticking = _settings.ForceTicking
+            ? _session is not { Finished: false }   // 无任务或任务已结束 → 滴答
+            : _settings.TickEnabled;
+        if (ticking) Tick.Play(sec, _settings.TickVolume);
 
         // 闹钟检测：到了拨黄针那一刻算死的目标时刻 → 响一次（调整中不触发）。
         // 检查节拍是**每秒一次**（上面那道秒边界的闸门），最多晚 1 秒。
@@ -120,8 +125,8 @@ public partial class MainWindow : Window
         {
             _alarm.MarkFired();   // 一次性——响过就撤，不是每天重复的闹钟。
                                   // 内存里清掉就够了，退出时 SaveAlarmOnExit 自会写成 null。
-            if (_settings.AlarmEnabled) Sound.Play(_settings.AlarmSound);
-            if (_settings.ShutdownEnabled) Shutdown.Now();
+            if (_settings.CommandEnabled) Command.Execute();
+            else Sound.Play(_settings.CommandSound);
         }
     }
 
@@ -150,12 +155,14 @@ public partial class MainWindow : Window
         var mute = F<Button>("MuteBtn");
         var pin = F<Button>("PinBtn");
 
+        // #5: Force on → Ticking 图标隐藏，用户不可手动关
+        mute.IsVisible = !_settings.ForceTicking;
         mute.Content = ChromeIcons.Speaker(_settings.TickEnabled);
         mute.Classes.Set("on", _settings.TickEnabled);
         pin.Content = ChromeIcons.Pin(_settings.Pinned);
         pin.Classes.Set("on", _settings.Pinned);
 
-        if (!_settings.TickEnabled) Tick.Stop();   // 掐断正在响的那一声，别等它自己完
+        if (!_settings.TickEnabled) Tick.Stop();
         WindowPin.Set(this, _settings.Pinned);
     }
 
@@ -169,9 +176,20 @@ public partial class MainWindow : Window
                 var radio = new RadioButton { Content = name, GroupName = "Goals" };
                 radio.IsCheckedChanged += OnGoalToggled;
                 _goalRadios.Add(radio);
+                _duringLabels.Add(new TextBlock
+                {
+                    FontSize = 14,
+                    VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
+                    Opacity = 0.6,
+                    [DockPanel.DockProperty] = Avalonia.Controls.Dock.Right,
+                });
             }
             RefreshGoalItems();
-            if (_goalRadios.Count == 1) _goalRadios[0].IsChecked = true;
+            // 恢复上次选中的 goal，找不到就选第一个
+            var saved = _goalRadios.FirstOrDefault(r =>
+                r.Content?.ToString() == _settings.SelectedGroup);
+            if (saved is not null) saved.IsChecked = true;
+            else if (_goalRadios.Count > 0) _goalRadios[0].IsChecked = true;
             Log.Info($"rules.json loaded. Goals: {string.Join(", ", _rules.SelectableGroups)}");
         }
         catch (Exception e)
@@ -183,16 +201,47 @@ public partial class MainWindow : Window
 
     private void OnGoalToggled(object? sender, RoutedEventArgs e)
     {
+        var picked = Picked();
+        if (picked is not null)
+        {
+            _settings.SelectedGroup = picked;
+            _settings.Save();
+        }
         RefreshStartButton();
     }
 
     private string? Picked()
         => _goalRadios.FirstOrDefault(r => r.IsChecked == true)?.Content?.ToString();
 
-    /// <summary>把 _goalRadios 喂给 ItemsControl。</summary>
+    /// <summary>把 _goalRadios + 累计时间 喂给 ItemsControl。</summary>
     private void RefreshGoalItems()
     {
-        F<ItemsControl>("Goals").ItemsSource = _goalRadios;
+        // 先更新标签文字
+        for (var i = 0; i < _goalRadios.Count && i < _duringLabels.Count; i++)
+        {
+            var name = (string)_goalRadios[i].Content!;
+            var secs = _settings.DuringByGroup.GetValueOrDefault(name, 0);
+            _duringLabels[i].Text = (secs / 3600.0).ToString("F2");
+        }
+
+        // 重建布局——先把 Radio 从旧父移除，否则 Avalonia 报 "already has a visual parent"
+        var items = new List<DockPanel>();
+        for (var i = 0; i < _goalRadios.Count; i++)
+        {
+            if (_goalRadios[i].Parent is Panel oldP) oldP.Children.Remove(_goalRadios[i]);
+            DockPanel.SetDock(_goalRadios[i], Avalonia.Controls.Dock.Left);
+            items.Add(new DockPanel
+            {
+                LastChildFill = true,
+                Children =
+                {
+                    _goalRadios[i],
+                    _duringLabels[i],
+                    new TextBlock(),
+                },
+            });
+        }
+        F<ItemsControl>("Goals").ItemsSource = items;
     }
 
     private void RefreshStartButton()
@@ -210,6 +259,7 @@ public partial class MainWindow : Window
         btn.Content = "Start";
         btn.Classes.Set("danger", false);
         btn.IsEnabled = _rules is not null && Picked() is not null;
+        btn.InvalidateVisual();
     }
 
     // ---------------------------------------------------------------- 任务
@@ -245,6 +295,7 @@ public partial class MainWindow : Window
         _session = new TaskSession(task, _rules!, _settings.AwBaseUrl);
         _session.Updated += OnSessionUpdated;
         _session.Interrupted += OnInterrupted;
+        foreach (var r in _goalRadios) r.IsEnabled = false;   // Start 后锁定选择
 
         // 点下按钮的那一刻盘面就要有东西：整段灰弧立刻摆上去，不等第一次 AW 回来
         var dial = F<DialControl>("Dial");
@@ -272,13 +323,10 @@ public partial class MainWindow : Window
         dial.InvalidateVisual();
 
         // §8.3.2：任务栏图标是【聚合投影】——角度 = 完成度，颜色 = 整体纯度。
-        // 16px 上一圈只有约 41px 弧长，逐分钟色块物理上画不出来。
-        if (s.State is { } st)
-        {
-            var progress = Math.Clamp(st.FocusedSeconds / (s.Task.FocusMinutes * 60.0), 0, 1);
-            var elapsed = Math.Max(1, (st.Now - s.Task.StartedAt).TotalSeconds);
-            Icon = RingIcon.Make(progress, Math.Clamp(1 - st.FocusedSeconds / elapsed, 0, 1));
-        }
+        var focused = s.FocusedSeconds();
+        var progress = Math.Clamp(focused / (s.Task.FocusMinutes * 60.0), 0, 1);
+        var elapsed = Math.Max(1, (DateTimeOffset.Now - s.Task.StartedAt).TotalSeconds);
+        Icon = RingIcon.Make(progress, Math.Clamp(1 - focused / elapsed, 0, 1));
 
     }
 
@@ -318,8 +366,23 @@ public partial class MainWindow : Window
     /// <summary>任务终结：回到空盘。</summary>
     private void EndSession()
     {
-        _session?.Dispose();
+        // #9：during 落盘
+        if (_session is { } s && s.Task.Group is { } g)
+        {
+            _settings.DuringByGroup[g] = s.FocusedSeconds();
+            _settings.Save();
+        }
+
+        var old = _session;
         _session = null;
+        try { old?.Dispose(); } catch { /* 关不掉就算了，状态已经清空 */ }
+
+        foreach (var r in _goalRadios) r.IsEnabled = true;
+        // 恢复之前选中的 radio，确保 Picked() 不为 null
+        var saved = _goalRadios.FirstOrDefault(r =>
+            r.Content?.ToString() == _settings.SelectedGroup);
+        if (saved is not null) saved.IsChecked = true;
+        else if (_goalRadios.Count > 0) _goalRadios[0].IsChecked = true;
 
         var dial = F<DialControl>("Dial");
         dial.Cells = [];
@@ -329,6 +392,7 @@ public partial class MainWindow : Window
         dial.InvalidateVisual();
 
         Icon = RingIcon.Make(0, 0);
+        RefreshGoalItems();
         RefreshStartButton();
     }
 
@@ -367,11 +431,20 @@ public partial class MainWindow : Window
     ///
     /// 不摆账单 —— 界面**任何时候**都不给账单（用户 2026-07-27），达成时也不给。
     /// </summary>
+    private bool _abandoning;
+
     private async Task AskAbandonAsync()
     {
-        if (!await Confirm.AskAsync(this, "The task isn't finished. Give up?")) return;
-        _session?.Abandon();
-        EndSession();
+        if (_abandoning) return;
+        _abandoning = true;
+        try
+        {
+            if (!await Confirm.AskAsync(this, "The task isn't finished. Give up?")) return;
+            var session = _session;          // 拿稳引用，防中途被清
+            session?.Abandon();
+            EndSession();
+        }
+        finally { _abandoning = false; }
     }
 
     // ================================================================
@@ -388,16 +461,21 @@ public partial class MainWindow : Window
         _settings.Save();
     }
 
-    /// <summary>滚轮拨针：前滚（远离自己）逆时针，后滚顺时针。一格滚一档，快滚按刻度数走。</summary>
+    /// <summary>滚轮拨针：前滚（远离自己）逆时针，后滚顺时针。1 分钟/格，连续快滚加速。</summary>
     private void OnAlarmWheel(object? sender, PointerWheelEventArgs e)
     {
         if (e.Delta.Y == 0) return;
-        var notches = Math.Max(1, (int)Math.Abs(e.Delta.Y));
-        var direction = e.Delta.Y > 0 ? -1 : +1;   // 前滚 Delta.Y > 0 → 逆时针
-        Bump(direction * notches * AlarmClock.SlotMinutes);
+        var notches = Math.Max(1, Math.Abs(e.Delta.Y) / 120);  // 120 = 一个滚轮刻度
+        var direction = e.Delta.Y > 0 ? -1 : +1;
+        var multiplier = notches switch
+        {
+            <= 2 => 1,
+            <= 5 => 2,
+            <= 10 => 3,
+            _ => 5,
+        };
+        Bump(direction * notches * multiplier * AlarmClock.SlotMinutes);
         _alarmQuietUntil = DateTime.Now.AddSeconds(2);
-        // 这里【不落盘】（用户 2026-07-30）：运行期黄针随便变、变多少次都无所谓，
-        // 唯一的落盘时机是退出（见 SaveAlarmOnExit）。
         e.Handled = true;
     }
 
@@ -417,7 +495,14 @@ public partial class MainWindow : Window
     /// <summary>齿轮：打开设置。两条声音，改一下存一下（见 <see cref="SettingsWindow"/>）。</summary>
     private async void OnSettings(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
-        try { await new SettingsWindow(_settings).ShowDialog(this); }
+        try
+        {
+            await new SettingsWindow(_settings).ShowDialog(this);
+            // #2.6：开启 Execute 时激活闹钟
+            if (_settings.CommandEnabled)
+                _alarm.Activate(DateTime.Now);
+            ApplyChrome();  // #5：Force Ticking 可能变了，刷新喇叭图标
+        }
         catch (Exception ex) { Log.Error("Failed to open the settings window", ex); }
     }
 }

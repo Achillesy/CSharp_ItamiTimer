@@ -28,11 +28,11 @@ public sealed class TaskSession : IDisposable
     private readonly GroupRules _rules;
     private readonly AwClient _aw;
     private readonly DispatcherTimer _tick = new();
+    private readonly JudgmentBuffer _buffer;
     private string? _winBucket, _afkBucket;
     private bool _busy;
 
     public TaskRecord Task { get; private set; }
-    public TaskState? State { get; private set; }
     public IReadOnlyList<MinuteCell> Cells { get; private set; } = [];
 
     public DateTimeOffset? RestFrom { get; private set; }
@@ -41,24 +41,32 @@ public sealed class TaskSession : IDisposable
     {
         get
         {
-            if (State is not { } st) return Task.FocusMinutes;
-            if (st.FocusCompletedAt is not null) return 0;
+            if (_buffer.IsFocusComplete) return 0;
+            var focused = (int)_buffer.DuringSeconds + _buffer.CountFocused();
+            var shouldSeconds = (DateTimeOffset.Now - Task.StartedAt).TotalSeconds;
+            var shortfall = Math.Max(0, shouldSeconds - focused);
+            var makeUpMinutes = Math.Ceiling(shortfall / 60.0);
+            var projected = Task.StartedAt.AddMinutes(Task.FocusMinutes + makeUpMinutes);
             var head = Task.StartedAt.AddMinutes(Cells.Count);
-            return Math.Max(0, (Replay.ProjectedEnd(Task, st) - head).TotalMinutes);
+            return Math.Max(0, (projected - head).TotalMinutes);
         }
     }
 
-    public bool InRest => State?.FocusCompletedAt is not null;
+    public bool InRest => _buffer.IsFocusComplete && _focusDoneAt is not null;
     public bool Finished { get; private set; }
+    public double FocusedSeconds() => _buffer.DuringSeconds + _buffer.CountFocused();
 
     public event Action? Updated;
     public event Action<Interrupt>? Interrupted;
+
+    private DateTimeOffset? _focusDoneAt;
 
     public TaskSession(TaskRecord task, GroupRules rules, string awBaseUrl = "http://127.0.0.1:5600")
     {
         Task = task;
         _rules = rules;
         _aw = new AwClient(awBaseUrl);
+        _buffer = new JudgmentBuffer(task.StartedAt, task.FocusMinutes);
         _lastAwMinute = task.StartedAt;
         _tick.Interval = TimeSpan.FromSeconds(1);
         _tick.Tick += OnTick;
@@ -76,7 +84,7 @@ public sealed class TaskSession : IDisposable
         var now = DateTimeOffset.Now;
 
         // ---- 休息阶段：纯本地计时
-        if (State?.FocusCompletedAt is { } done)
+        if (_focusDoneAt is { } done)
         {
             var rest = TimeSpan.FromMinutes(Task.RestMinutes);
             RestFrom = done;
@@ -103,7 +111,7 @@ public sealed class TaskSession : IDisposable
         if (idleNudge)
             Log.Info($"No input for {idle:F0}s, nudging (in another {AwAfkTimeoutSeconds - idle:F0}s this time is written off)");
 
-        // 2) 查 AW、重放
+        // 2) 查 AW、更新 buffer（4 分钟窗口）
         var focusDone = false;
 
         _busy = true;
@@ -111,25 +119,29 @@ public sealed class TaskSession : IDisposable
         {
             _winBucket ??= await _aw.FindBucketIdAsync(AwClient.WindowBucketType);
             _afkBucket ??= await _aw.FindBucketIdAsync(AwClient.AfkBucketType);
-            var win = await _aw.FetchEventsAsync(_winBucket, Task.StartedAt, now);
-            var afk = await _aw.FetchEventsAsync(_afkBucket, Task.StartedAt, now);
+            var queryStart = now.AddMinutes(-4);
+            var win = await _aw.FetchEventsAsync(_winBucket, queryStart, now);
+            var afk = await _aw.FetchEventsAsync(_afkBucket, queryStart, now);
 
-            State = Replay.Run(Task, _rules, win, afk, now);
-            var cells = Replay.ToMinuteCells(Task, State);
+            var classified = Judgment.ClassifySeconds(win, afk, _rules, Task.Group, queryStart, now);
+            var bufferOffset = (int)(queryStart - _buffer.WallClock).TotalSeconds;
+            _buffer.Write(bufferOffset, classified);
+            _buffer.TryArchive();
 
-            Cells = State.FocusCompletedAt is null ? cells : [];
+            var cells = _buffer.ToMinuteCells();
+            Cells = cells; // #11：专注完成后不消失，圆弧保留在休息扇形下层
             Updated?.Invoke();
 
-            Log.Info($"{State.FocusedSeconds / 60,5:F1}/{Task.FocusMinutes} min  " +
-                     $"{State.Phase}  cells {cells.Count}  " +
-                     $"off-task {State.Violations.Count}x {State.OffTaskSecondsByApp.Values.Sum() / 60:F1}min  " +
-                     $"away {State.AbsentSeconds / 60:F1}min  no-data {State.GapSeconds / 60:F1}min");
+            var focused = (int)_buffer.DuringSeconds + _buffer.CountFocused();
+            Log.Info($"{focused / 60,5:F1}/{Task.FocusMinutes} min  " +
+                     $"cells {cells.Count}  during {_buffer.DuringSeconds:F0}s");
 
-            if (State.FocusCompletedAt is not null)
+            if (_buffer.IsFocusComplete && _focusDoneAt is null)
             {
+                _focusDoneAt = _buffer.FocusCompletedAt();
                 focusDone = true;
-                Log.Info($"Focus completed at {State.FocusCompletedAt.Value.ToLocalTime():HH:mm:ss}, " +
-                         $"wall-clock {(State.FocusCompletedAt.Value - Task.StartedAt).TotalMinutes:F1} min");
+                Log.Info($"Focus completed at {_focusDoneAt?.ToLocalTime():HH:mm:ss}, " +
+                         $"wall-clock {(_focusDoneAt?.Subtract(Task.StartedAt))?.TotalMinutes ?? 0:F1} min");
             }
             else if (cells.Count > 0 && cells.Count != _lastCellCount)
             {
@@ -155,7 +167,8 @@ public sealed class TaskSession : IDisposable
         Finished = true;
         _tick.Stop();
         Task = Task with { Status = RecordStatus.Abandoned, AbandonedAt = DateTimeOffset.Now };
-        Log.Info($"Task abandoned. Focused {(State?.FocusedSeconds ?? 0) / 60:F1}/{Task.FocusMinutes} min");
+        var focused = (int)_buffer.DuringSeconds + _buffer.CountFocused();
+        Log.Info($"Task abandoned. Focused {focused / 60:F1}/{Task.FocusMinutes} min  during={_buffer.DuringSeconds:F0}s");
     }
 
     public void Dispose()

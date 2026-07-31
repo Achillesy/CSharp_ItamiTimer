@@ -25,14 +25,14 @@ public sealed class Settings
     [JsonPropertyName("restDoneSound")] public string? RestDoneSound { get; set; }
     [JsonPropertyName("idleEnabled")] public bool IdleEnabled { get; set; } = true;
     [JsonPropertyName("idleSound")] public string? IdleSound { get; set; }
-    [JsonPropertyName("alarmEnabled")] public bool AlarmEnabled { get; set; } = true;
-    [JsonPropertyName("alarmSound")] public string? AlarmSound { get; set; }
+    /// <summary>闹钟响时的提示音。</summary>
+    [JsonPropertyName("commandSound")] public string? CommandSound { get; set; }
 
     /// <summary>
-    /// 到点关机。闹钟命中时除了（或代替）响铃，直接调用系统自带的关机命令
-    /// （<see cref="Shutdown"/>）。默认关闭——这不是一个该悄悄生效的开关。
+    /// 闹钟命中时执行 rules.json 里预设的命令。
+    /// 不跨会话——每次启动在 Load() 里强制复位。
     /// </summary>
-    [JsonPropertyName("shutdownEnabled")] public bool ShutdownEnabled { get; set; }
+    [JsonPropertyName("commandEnabled")] public bool CommandEnabled { get; set; }
 
     /// <summary>
     /// 闹钟唯一要持久化的东西：最后一次拨针算出的响铃时间点（退出时写，见
@@ -48,6 +48,15 @@ public sealed class Settings
     /// 设置窗口只管它的音量。
     /// </summary>
     [JsonPropertyName("tickEnabled")] public bool TickEnabled { get; set; }
+
+    /// <summary>强制滴答：开则主界面 Ticking 图标隐藏、不可手动关闭。</summary>
+    /// <summary>上次选中的小目标名。启动时恢复选择。</summary>
+    [JsonPropertyName("selectedGroup")] public string? SelectedGroup { get; set; }
+
+    /// <summary>每个 goal 的累计专注秒数（during）。跨任务持久化。</summary>
+    [JsonPropertyName("duringByGroup")] public Dictionary<string, double> DuringByGroup { get; set; } = [];
+
+    [JsonPropertyName("forceTicking")] public bool ForceTicking { get; set; }
 
     /// <summary>滴答音量 0~100。音色是合成的，没有可选项（<see cref="Tick"/>）。</summary>
     [JsonPropertyName("tickVolume")] public int TickVolume { get; set; } = 35;
@@ -87,7 +96,7 @@ public sealed class Settings
         // 到点关机**不跨会话**（用户 2026-07-30）：每次启动强制复位。重启后未过期的
         // 闹钟会继续响，但绝不再执行关机——想关机就得本次会话里重新打开开关。
         // 放在 Load 里而不是退出时清除：崩溃退出也一样被覆盖到（fail-safe）。
-        s.ShutdownEnabled = false;
+        s.CommandEnabled = false;
 
         // 第一次运行（或文件里没写）时挑一个装机自带的音色。挑不到就是 null = 不出声。
         //
@@ -102,7 +111,7 @@ public sealed class Settings
             // 闹钟要响亮：Sosumi 是 14 个系统音里最"闹钟"的一个。
             // ⚠️ 别抄 Windows 分支的名字——Alarm01/Alarm02 在 macOS 上不存在，
             // PreferredOrFirst 会静默退回字母序第一个（Basso，一声闷响）。
-            s.AlarmSound ??= Sound.PreferredOrFirst("Sosumi", "Glass", "Ping");
+            s.CommandSound ??= Sound.PreferredOrFirst("Sosumi", "Glass", "Ping");
         }
         else
         {
@@ -114,7 +123,7 @@ public sealed class Settings
             s.IdleSound ??= Sound.PreferredOrFirst(
                 "Windows Message Nudge", "Windows Balloon", "Windows Background", "ding");
             // 之前这里漏了 AlarmSound 的默认值，第一次运行永远是 null = 不出声
-            s.AlarmSound ??= Sound.PreferredOrFirst("Alarm02", "Alarm01", "Ring01");
+            s.CommandSound ??= Sound.PreferredOrFirst("Alarm02", "Alarm01", "Ring01");
         }
         return s;
     }

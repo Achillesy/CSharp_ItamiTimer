@@ -146,22 +146,27 @@ public class AlarmClockTests
     // ---- Restore：只存一个时间点，黄针位置是它对 12 小时取余的推导值（2026-07-30）----
 
     [Fact]
-    public void 恢复未过期的闹钟_黄针位置由时间点推导_重启后照样响那一次()
+    public void 恢复后不激活_黄针可见但闹钟不响_直到激活()
     {
         var a = new AlarmClock();
         a.Restore(At(21, 05), At(20, 00));
         Assert.Equal((21 % 12) * 60 + 5, a.Position);   // 21:05 → 表盘 9:05 的位置
         Assert.Equal(At(21, 05), a.FireAt);
+        Assert.False(a.ShouldFire(At(21, 04, 59)));     // 未激活，不响
+        Assert.False(a.ShouldFire(At(21, 05)));
+        a.Activate(At(20, 00));
         Assert.False(a.ShouldFire(At(21, 04, 59)));
-        Assert.True(a.ShouldFire(At(21, 05)));
+        Assert.True(a.ShouldFire(At(21, 05)));           // 激活后才响
     }
 
     [Fact]
-    public void 过期的时间点不补响_黄针只剩位置这个残影()
+    public void 过期的时间点不补响_激活也无用()
     {
         var a = new AlarmClock();
         a.Restore(At(9, 05), At(20, 00));   // 存的响铃时刻已过
         Assert.Equal(9 * 60 + 5, a.Position);
+        Assert.False(a.ShouldFire(At(23, 59)));
+        a.Activate(At(20, 00));              // 过期时刻，激活无效
         Assert.False(a.ShouldFire(At(23, 59)));
     }
 
