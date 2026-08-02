@@ -22,11 +22,22 @@
 #
 # Usage:  ./pack-macos.sh            installs to ~/Applications/ItamiTimer.app
 #         ./pack-macos.sh <dir>      installs to the given directory
+#         ./pack-macos.sh --dmg     also builds dist/ItamiTimer-<version>-macOS-arm64.dmg,
+#                                    for handing to other people (not notarized, see the
+#                                    Read Me it carries -- Apple Silicon only, framework-
+#                                    dependent: the .NET 10 Runtime must already be installed)
 set -euo pipefail
 
 cd "$(dirname "$0")"
 
-DEST_DIR="${1:-$HOME/Applications}"
+DMG=0
+DEST_DIR="$HOME/Applications"
+for arg in "$@"; do
+    case "$arg" in
+        --dmg) DMG=1 ;;
+        *) DEST_DIR="$arg" ;;
+    esac
+done
 APP="$DEST_DIR/ItamiTimer.app"
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
@@ -117,3 +128,33 @@ codesign --force --deep --sign - "$APP" 2>/dev/null || echo "   (signing failed;
 echo
 echo "Installed: $APP"
 echo "Run:       open -a \"$APP\""
+
+if [ "$DMG" = "1" ]; then
+    echo
+    echo "==> building .dmg"
+    DMG_STAGE="$(mktemp -d)"
+    trap 'rm -rf "$STAGE" "$DMG_STAGE"' EXIT
+    cp -R "$APP" "$DMG_STAGE/"
+    ln -s /Applications "$DMG_STAGE/Applications"
+
+    # The only thing an end user needs to know that Finder can't tell them itself:
+    # this build isn't notarized, and it's framework-dependent (needs the .NET 10
+    # Runtime already on the machine). Both are one-time, first-run problems.
+    cat > "$DMG_STAGE/Read Me.txt" <<NOTE
+ItamiTimer $VERSION for macOS (Apple Silicon)
+
+Requires the .NET 10 Runtime (not the SDK):
+https://dotnet.microsoft.com/download/dotnet/10.0
+
+This build isn't notarized by Apple. The first time you open it, Gatekeeper
+will say it's from an unidentified developer -- right-click (or Control-click)
+ItamiTimer.app and choose "Open", then confirm once. After that it opens
+normally, including by double-click.
+NOTE
+
+    mkdir -p dist
+    DMG_PATH="dist/ItamiTimer-$VERSION-macOS-arm64.dmg"
+    rm -f "$DMG_PATH"
+    hdiutil create -volname "ItamiTimer" -srcfolder "$DMG_STAGE" -ov -format UDZO -quiet "$DMG_PATH"
+    echo "Release image: $DMG_PATH"
+fi

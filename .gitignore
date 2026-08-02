@@ -7,6 +7,9 @@
 ##
 ## Get latest from https://github.com/github/gitignore/blob/main/Dotnet.gitignore
 
+# Release artifacts (pack-macos.sh --dmg, and whatever the Windows installer produces)
+dist/
+
 # Build results
 [Dd]ebug/
 [Dd]ebugPublic/
