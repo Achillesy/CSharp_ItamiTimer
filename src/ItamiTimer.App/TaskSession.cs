@@ -153,17 +153,31 @@ public sealed class TaskSession : IDisposable
         _busy = true;
         try
         {
-            _winBucket ??= await _aw.FindBucketIdAsync(AwClient.WindowBucketType);
-            _afkBucket ??= await _aw.FindBucketIdAsync(AwClient.AfkBucketType);
             // 查询区间锚在整分钟上，绝不掺 now 的亚秒零头（DESIGN §4.2 / DECISIONS H9）
             var queryEnd = minute;
             var queryStart = queryEnd.AddSeconds(-JudgmentBuffer.QueryWindowSeconds);
-            var win = await _aw.FetchEventsAsync(_winBucket, queryStart, queryEnd);
-            var afk = await _aw.FetchEventsAsync(_afkBucket, queryStart, queryEnd);
 
-            // AW 连不上不会走到这里（上面已经抛了）—— 那条路在 catch 里，
-            // 事件列表为空即可，判定模型自己会把这一分钟填成 AwOffline。
-            //
+            List<AwEvent> win, afk;
+            try
+            {
+                _winBucket ??= await _aw.FindBucketIdAsync(AwClient.WindowBucketType);
+                _afkBucket ??= await _aw.FindBucketIdAsync(AwClient.AfkBucketType);
+                win = await _aw.FetchEventsAsync(_winBucket, queryStart, queryEnd);
+                afk = await _aw.FetchEventsAsync(_afkBucket, queryStart, queryEnd);
+            }
+            catch (AwUnavailableException ex)
+            {
+                // §3.1 知情 fail-open：「整拍连不上」和「连上了但这一秒没记录」是同一件事
+                // （DESIGN §4.3），喂空事件列表，判定模型自己会把这一分钟填成 AwOffline。
+                //
+                // **不是跳过这一拍**——跳过会让 ElapsedSeconds 不前进、承诺弧和休息扇形
+                // 投影全冻住，那是"暂停"，不是 fail-open，跟设计意图不符（2026-08-02
+                // 实机测试时用户关掉 AW 服务器发现的：盘面冻在灰色，不是该有的绿色）。
+                Log.Warn($"ActivityWatch unreachable this tick, treating as no data (fail-open): {ex.Message}");
+                win = [];
+                afk = [];
+            }
+
             // 这里只做诊断日志，不改判定：watcher 悄悄死掉时 AwOffline 计入专注，
             // §3.1 的知情 fail-open，代价用户 2026-08-02 明确接受——出问题让用户自己查日志。
             if (!HasRecentEvent(win, queryEnd))
