@@ -34,7 +34,7 @@ trap 'rm -rf "$STAGE"' EXIT
 # libSkiaSharp.pdb 就 244MB。
 RID="osx-$(uname -m | sed 's/^x86_64$/x64/; s/^arm64$/arm64/')"
 
-echo "==> publish（$RID，框架依赖）"
+echo "==> publish（${RID}，框架依赖）"
 dotnet publish src/ItamiTimer.App -c Release -r "$RID" --self-contained false \
     -o "$STAGE/publish" --nologo -v quiet
 
@@ -68,7 +68,7 @@ else
 fi
 LS_ENV=""
 if [ "$DOTNET_DIR" != "/usr/local/share/dotnet" ] && [ -d "$DOTNET_DIR" ]; then
-    echo "==> .NET 不在默认位置（$DOTNET_DIR），写进 LSEnvironment"
+    echo "==> .NET 不在默认位置（${DOTNET_DIR}），写进 LSEnvironment"
     LS_ENV="    <key>LSEnvironment</key>
     <dict>
         <key>DOTNET_ROOT</key><string>$DOTNET_DIR</string>

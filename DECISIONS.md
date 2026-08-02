@@ -107,6 +107,7 @@
 | F8 | `HttpClient` **`UseProxy = false`** | 系统代理吞 localhost，表现成莫名连不上 |
 | F9 | `AwEvent.End` 用 **`AddTicks`** 不用 `AddSeconds(double)` | 后者按毫秒取整，微秒精度的事件碎成亚毫秒区间，偷懒 8 次膨胀成 54 次 |
 | F10 | AW 时间戳**在 `AwClient` 边界上 `ToLocalTime()`** | 「同一个量两种表示，要在边界上归一，不要指望每个使用点各自记得转」——时区 bug 犯过两次 |
+| F11 | `pack-macos.sh` 里 **`$VAR` 紧跟中文标点一律加花括号写成 `${VAR}`**（2026-08-02） | macOS 自带的 bash 是停在 3.2 的老版本（GPLv3 之后苹果不再升级）。`set -u` 下 `$RID，` 这种写法，标点的字节会被误算进变量名，报 `RID: unbound variable`——报错信息就在眼前，但指向的原因是假的（变量明明赋过值）。属于 G 节那一族「编译/运行不报真正的错，只报一个看着像但方向错的错」 |
 
 ## G. 方法论教训（不针对具体功能）
 
