@@ -5,16 +5,20 @@ using ItamiTimer;
 namespace ItamiTimer.App;
 
 /// <summary>
-/// 一次任务的运行时：每整分钟驱动 <see cref="JudgmentBuffer"/> 走一拍（DESIGN.md §4.2），
-/// 把投影出来的格子交给界面，并在三件事上响一声。
+/// The runtime for one task: drives <see cref="JudgmentBuffer"/> through one tick every
+/// whole minute, hands the projected cells to the UI, and beeps on three
+/// events.
 ///
-/// **永远走约束模式**——退化成纯番茄钟那条路 2026-07-31 整个删掉了（DECISIONS B3）：
-/// AW 不可用由判定模型自己吸收（§3.1），界面不随 AW 在不在而变形。
+/// **Always runs in constrained mode** -- the fallback to plain-pomodoro was deleted
+/// entirely on 2026-07-31 (DECISIONS B3): ActivityWatch being unavailable is absorbed by
+/// the judgment model itself (§3.1), the UI never changes shape depending on whether
+/// ActivityWatch is up.
 /// </summary>
 public sealed class TaskSession : IDisposable
 {
     /// <summary>
-    /// 三件值得响一声的事。每一件都能在设置里单独关掉（§8.3.1）。
+    /// The three events worth a beep. Each can be individually turned off in Settings
+    /// (§8.3.1).
     /// </summary>
     public enum Interrupt
     {
@@ -28,9 +32,11 @@ public sealed class TaskSession : IDisposable
     private const int AwAfkTimeoutSeconds = 180;
 
     /// <summary>
-    /// 诊断阈值，不参与判定（DESIGN §16.5）：某个 bucket 心跳只要活着就会持续推进，
-    /// 一拍里连一条贴近 <c>now</c> 的事件都没有，多半是 watcher 死了（也可能是机器刚睡醒——
-    /// 两者在这个信号下看着一样，不去猜，只记日志，用户自己去查）。
+    /// A diagnostic threshold, not part of judgment (DESIGN §16.5): as long as a bucket's
+    /// watcher is alive its heartbeat keeps advancing, so if a tick has not one event
+    /// close to <c>now</c>, the watcher is probably dead (or the machine just woke up --
+    /// the two look identical under this signal, so no guessing, just log it and let the
+    /// user check).
     /// </summary>
     private const int AwStaleSeconds = 60;
 
@@ -45,9 +51,12 @@ public sealed class TaskSession : IDisposable
     public IReadOnlyList<MinuteCell> Cells { get; private set; } = [];
 
     /// <summary>
-    /// 休息扇形的起点。**专注达成之前是投影值**（= 承诺弧末端对应的墙钟时刻，
-    /// 每拍跟着缺口重算），**达成之后锁定为实际达成时刻**——两者在缺口归零那一拍
-    /// 是同一个数，交接不跳变。任务一构造完就有值，不用等第一拍 AW 回来。
+    /// The rest wedge's starting point. **A projected value before focus is achieved** (=
+    /// the wall-clock moment corresponding to the commitment arc's end, recomputed every
+    /// tick along with the deficit), **locked to the actual completion moment once
+    /// achieved** -- the two are the same number on the tick the deficit hits zero, so the
+    /// handoff never jumps. It has a value the instant the task is constructed, without
+    /// waiting for the first tick's ActivityWatch response.
     /// </summary>
     public DateTimeOffset? RestFrom { get; private set; }
 
@@ -55,25 +64,31 @@ public sealed class TaskSession : IDisposable
     public bool Finished { get; private set; }
 
     /// <summary>
-    /// 本轮到目前为止的专注秒数 = 已归档结算的 + 还留在 buffer 里的。
+    /// Focus seconds so far this round = already settled by archiving + still sitting in
+    /// the buffer.
     ///
-    /// **整数**——它数的是 buffer 里的格子，不是 AW 事件的 duration，永远不会有小数
-    /// （用户 2026-08-02）。所以除以 60 的地方一律要写 <c>60.0</c>，
-    /// 否则整数除法会把小数位悄悄吃掉（DECISIONS G）。
+    /// **An integer** -- it counts cells in the buffer, not ActivityWatch event durations,
+    /// so it never has a fractional part (user, 2026-08-02). Every division by 60 must
+    /// therefore write <c>60.0</c>, otherwise integer division silently swallows the
+    /// decimal places (DECISIONS G).
     /// </summary>
     public int FocusedSeconds() => _settledSeconds + _buffer.FocusedSeconds;
 
     /// <summary>
-    /// 归档结算掉了一段专注时间（§4.4）。调用方要立刻把它记进 during（§11.2）——
-    /// 那一小时马上就要被移出 buffer 了，不记就永远没了。
+    /// Archiving settled a stretch of focus time (§4.4). The caller must credit it into
+    /// during immediately (§11.2) -- that hour is about to be evicted from the buffer, and
+    /// not recording it now means it's gone for good.
     /// </summary>
     public event Action<int>? Settled;
 
     /// <summary>
-    /// 取走「还没入账」的那部分专注秒数（= 仍留在 buffer 里的）并作废，任务终结时调一次。
+    /// Takes the "not yet credited" portion of focus seconds (= still sitting in the
+    /// buffer) and voids it; called once when a task ends.
     ///
-    /// 幂等：重复调用返回 0。放弃、关窗口、休息结束三条路都会走到这里，
-    /// <b>重复入账比漏账更难查</b>，所以在这里挡死而不是在调用方各自小心。
+    /// Idempotent: repeated calls return 0. All three paths -- abandon, close the window,
+    /// rest ending -- land here, and <b>double-crediting is harder to spot than a missed
+    /// credit</b>, so it's guarded here rather than trusting every caller to be careful on
+    /// their own.
     /// </summary>
     public int TakeUnbankedSeconds()
     {
@@ -99,10 +114,13 @@ public sealed class TaskSession : IDisposable
         _buffer = new JudgmentBuffer(task.StartedAt, task.FocusMinutes);
         _deficitSeconds = task.FocusMinutes * 60;
         _lastAwMinute = task.StartedAt;
-        // 点下按钮那一刻盘面就要有东西：整段灰弧在构造 buffer 时就已经铺好了（§4.5），
-        // 投影一次即可，不用等第一次 AW 回来，也不用界面层另算一份。
+        // The dial needs something to show the instant the button is pressed: the whole
+        // grey arc is already laid out the moment the buffer is constructed (§4.5), so one
+        // projection is all it takes -- no waiting for the first ActivityWatch response, and
+        // the UI layer doesn't need to compute a separate copy.
         Cells = _buffer.ToMinuteCells();
-        // 休息扇形同一刻就有预告：此时缺口还是整段承诺，投影出来正好是 起点+专注时长。
+        // The rest wedge gets its preview at the same instant: the deficit is still the
+        // full commitment right now, and projecting it lands exactly on start + focus length.
         RestFrom = _buffer.TaskStart.AddSeconds(_buffer.ElapsedSeconds + _deficitSeconds);
         _tick.Interval = TimeSpan.FromSeconds(1);
         _tick.Tick += OnTick;
@@ -119,7 +137,7 @@ public sealed class TaskSession : IDisposable
         if (_busy || Finished) return;
         var now = DateTimeOffset.Now;
 
-        // ---- 休息阶段：纯本地计时
+        // ---- Rest phase: purely local timing
         if (_focusDoneAt is { } done)
         {
             var rest = TimeSpan.FromMinutes(Task.RestMinutes);
@@ -136,24 +154,25 @@ public sealed class TaskSession : IDisposable
             return;
         }
 
-        // ---- 计时点：每整分钟一次
+        // ---- Tick point: once every whole minute
         var minute = TimeGrid.FloorToMinute(now);
         if (minute <= _lastAwMinute) return;
         _lastAwMinute = minute;
 
-        // 1) 键鼠空闲
+        // 1) Keyboard/mouse idle
         var idle = InputIdle.Elapsed().TotalSeconds;
         var idleNudge = idle is >= IdleNudgeSeconds and < AwAfkTimeoutSeconds;
         if (idleNudge)
             Log.Info($"No input for {idle:F0}s, nudging (in another {AwAfkTimeoutSeconds - idle:F0}s this time is written off)");
 
-        // 2) 查 AW、更新 buffer（4 分钟窗口）
+        // 2) Query ActivityWatch, update the buffer (4-minute window)
         var focusDone = false;
 
         _busy = true;
         try
         {
-            // 查询区间锚在整分钟上，绝不掺 now 的亚秒零头（DESIGN §4.2 / DECISIONS H9）
+            // The query interval is anchored to a whole minute, never mixing in now's
+            // sub-second remainder (DESIGN §4.2 / DECISIONS H9)
             var queryEnd = minute;
             var queryStart = queryEnd.AddSeconds(-JudgmentBuffer.QueryWindowSeconds);
 
@@ -167,19 +186,26 @@ public sealed class TaskSession : IDisposable
             }
             catch (AwUnavailableException ex)
             {
-                // §3.1 知情 fail-open：「整拍连不上」和「连上了但这一秒没记录」是同一件事
-                // （DESIGN §4.3），喂空事件列表，判定模型自己会把这一分钟填成 AwOffline。
+                // §3.1's knowing fail-open: "the whole tick couldn't connect" and
+                // "connected fine but this second has no record" are the same thing
+                // (DESIGN §4.3) -- feed in empty event lists, and the judgment model will
+                // fill this minute in as AwOffline on its own.
                 //
-                // **不是跳过这一拍**——跳过会让 ElapsedSeconds 不前进、承诺弧和休息扇形
-                // 投影全冻住，那是"暂停"，不是 fail-open，跟设计意图不符（2026-08-02
-                // 实机测试时用户关掉 AW 服务器发现的：盘面冻在灰色，不是该有的绿色）。
+                // **This does not skip the tick** -- skipping would freeze ElapsedSeconds
+                // in place along with the commitment arc and the rest-wedge projection,
+                // which is a "pause", not a fail-open, and doesn't match the design intent
+                // (found by the user on 2026-08-02 during a real-machine test, stopping the
+                // ActivityWatch server: the dial froze grey instead of turning the green it
+                // should have).
                 Log.Warn($"ActivityWatch unreachable this tick, treating as no data (fail-open): {ex.Message}");
                 win = [];
                 afk = [];
             }
 
-            // 这里只做诊断日志，不改判定：watcher 悄悄死掉时 AwOffline 计入专注，
-            // §3.1 的知情 fail-open，代价用户 2026-08-02 明确接受——出问题让用户自己查日志。
+            // This only produces a diagnostic log entry, it never changes judgment: when a
+            // watcher quietly dies, AwOffline still counts as focus -- §3.1's knowing
+            // fail-open, a cost the user explicitly accepted on 2026-08-02: if something's
+            // wrong, the user checks the log themselves.
             if (!HasRecentEvent(win, queryEnd))
                 Log.Warn($"No fresh window events in the last {AwStaleSeconds}s — aw-watcher-window may be stuck (or the machine just woke up)");
             if (!HasRecentEvent(afk, queryEnd))
@@ -187,26 +213,32 @@ public sealed class TaskSession : IDisposable
             var outcome = _buffer.Tick(minute, win, afk, _rules, Task.Group);
             _deficitSeconds = outcome.DeficitSeconds;
 
-            // 休息扇形不等达成才画：**它的起点就是承诺弧的末端**（DESIGN §4.5：
-            // 「承诺弧消失的那一刻 = 专注达成的那一刻」），任务一开始就有了，不用等
-            // 真达成。每拍重算、不记状态——跟判定引擎同一条原则（原则 4）。
+            // The rest wedge doesn't wait for completion to be drawn: **its starting point
+            // is exactly the commitment arc's end** (DESIGN §4.5: "the moment the
+            // commitment arc disappears is the moment focus is achieved"), so it's there
+            // from the very start of the task, no need to wait for actual completion.
+            // Recomputed every tick, no state kept -- the same principle as the judgment
+            // engine itself (Principle 4).
             //
-            // 这也是故意的痛感设计：拖延时缺口不减、ElapsedSeconds 照样 +60，
-            // 投影出来的休息起点跟着**一起往后挪**——不只是灰弧变长，连挣来的休息
-            // 也在实时后退。真正达成那一拍，这个投影值恰好等于 `minute` 本身，
-            // 跟下面 `_focusDoneAt` 落定后 `RestFrom = done` 是同一个数，交接不跳变。
+            // This is also a deliberate design for pain: while procrastinating, the deficit
+            // doesn't shrink and ElapsedSeconds still adds +60 every tick, so the projected
+            // rest start **retreats right along with it** -- not only does the grey arc grow
+            // longer, the rest you've earned is also retreating in real time. On the exact
+            // tick real completion happens, this projected value equals `minute` itself,
+            // matching `RestFrom = done` once `_focusDoneAt` is set below -- the handoff
+            // never jumps.
             RestFrom = _buffer.TaskStart.AddSeconds(_buffer.ElapsedSeconds + outcome.DeficitSeconds);
 
             if (outcome.SettledSeconds > 0)
             {
-                // 归档 = 一次 ignore（§11.2）：那一小时马上要被移出 buffer，当场入账。
+                // Archiving = one ignore event (§11.2): that hour is about to be evicted from the buffer, credit it on the spot.
                 _settledSeconds += outcome.SettledSeconds;
                 Settled?.Invoke(outcome.SettledSeconds);
                 Log.Info($"Archived an hour; {outcome.SettledSeconds}s banked into during.");
             }
 
             var cells = _buffer.ToMinuteCells();
-            Cells = cells; // #11：专注完成后不消失，圆弧保留在休息扇形下层
+            Cells = cells; // #11: doesn't disappear once focus completes, the arc stays underneath the rest wedge
             Updated?.Invoke();
 
             Log.Info($"{FocusedSeconds() / 60.0,5:F1}/{Task.FocusMinutes} min  " +
@@ -215,7 +247,8 @@ public sealed class TaskSession : IDisposable
 
             if (outcome.Completed && _focusDoneAt is null)
             {
-                // 达成时刻**就是这一拍**，不回头去账本里推（DESIGN §4.5 / DECISIONS H5）。
+                // The completion moment **is this very tick**, never derived retroactively
+                // from the ledger (DESIGN §4.5 / DECISIONS H5).
                 _focusDoneAt = minute;
                 focusDone = true;
                 Log.Info($"Focus completed at {minute:HH:mm:ss}, " +
@@ -239,8 +272,10 @@ public sealed class TaskSession : IDisposable
         else if (idleNudge) Interrupted?.Invoke(Interrupt.Idle);
     }
 
-    /// <summary>watcher 只要活着就会持续心跳，事件的 End 会一直贴着 now 往前挪——
-    /// 不管窗口切不切换、人在不在。查这个就不用另外去问 AW 的 bucket 元数据。</summary>
+    /// <summary>As long as a watcher is alive its heartbeat keeps going, and an event's End
+    /// keeps advancing right up against now -- regardless of whether windows switch or
+    /// whether anyone's present. Checking this avoids a separate query against
+    /// ActivityWatch's bucket metadata.</summary>
     private static bool HasRecentEvent(IReadOnlyList<AwEvent> events, DateTimeOffset now)
     {
         var cutoff = now.AddSeconds(-AwStaleSeconds);

@@ -1,0 +1,13 @@
+<Project>
+  <!--
+    Single source of truth for the version number, picked up automatically by every
+    project under this directory (MSBuild convention, no explicit import needed).
+
+    Read at runtime via Assembly.GetName().Version (see SettingsWindow.axaml.cs) and by
+    pack-macos.sh for the macOS bundle's CFBundleShortVersionString/CFBundleVersion —
+    bump it in exactly this one place.
+  -->
+  <PropertyGroup>
+    <Version>1.0.0</Version>
+  </PropertyGroup>
+</Project>

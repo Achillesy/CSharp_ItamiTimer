@@ -1,43 +1,48 @@
 namespace ItamiTimer.Core;
 
 /// <summary>
-/// 覆盖算法（DESIGN.md §4.3）：<b>分层画，不逐秒查</b>。
+/// The covering algorithm: <b>layered painting, not a per-second lookup</b>.
 ///
-/// 纯函数，无 I/O、无时钟。调用方给一段秒级切片和它的起始时刻，这里按码值从大到小
-/// 逐层覆盖，后画的盖前面的：
+/// A pure function, no I/O, no clock. The caller hands in a second-level slice and its
+/// start time; this covers it layer by layer from the largest code value down to the
+/// smallest, later paints covering earlier ones:
 ///
 /// <code>
-/// ② 画 4   命中小目标的窗口事件 → Focused
-/// ③ 画 3   其余窗口事件         → OffTask
-/// ④ 画 2   status == "afk"      → Afk
+/// (2) paint 4   Window events matching the goal -> Focused
+/// (3) paint 3   All other window events          -> OffTask
+/// (4) paint 2   status == "afk"                  -> Afk
 /// </code>
-/// （① 初始化成 <see cref="JudgmentCode.AwOffline"/> 由 <see cref="JudgmentBuffer"/> 按水位线做，
-/// 见 §4.3 第 3 条——它有边界和水位线信息，这里没有。）
+/// (Step (1), initializing to <see cref="JudgmentCode.AwOffline"/>, is done by
+/// <see cref="JudgmentBuffer"/> using the water mark, see §4.3 point 3 -- it has the
+/// boundary and water-mark information this class doesn't.)
 ///
-/// 这四条规则一次办了好几件事，都不用单独写规则：
+/// These four rules handle several things at once, with no separate rule needed for any
+/// of them:
 /// <list type="bullet">
-///   <item><b>一秒里有多条事件</b>（alt-tab）→ 后画的赢 → OffTask 压过 Focused → fail-closed。</item>
-///   <item><b>afk 优先于一切</b> → 它画在最后，天然盖住所有窗口判定。</item>
-///   <item><b>AW 整拍连不上 = 事件列表为空</b> → 没东西可画，切片保持初始化的 AwOffline。
-///         不需要单独的兜底代码路径。</item>
+///   <item><b>Multiple events in the same second</b> (alt-tab) -> the later paint wins -> OffTask beats Focused -> fail-closed.</item>
+///   <item><b>Afk overrides everything</b> -> painted last, naturally covering every window judgment.</item>
+///   <item><b>An entire tick can't reach ActivityWatch = an empty event list</b> -> nothing to paint, the slice stays at its initialized AwOffline. No separate fallback code path needed.</item>
 /// </list>
 ///
-/// <b>为什么不再需要 T4 的桥接</b>（旧 <c>Replay.Bridge</c>）：旧的逐秒查找问「哪条事件
-/// <b>盖住</b>了这一秒」，零时长事件的 <c>[start, start)</c> 是空区间，答案永远是「没有」，
-/// 于是标题每秒都在变的窗口（播放器时间码、编译进度、Claude Code 的转圈动画）整段变成
-/// 「无记录」。这里问的是「这一秒里<b>出现过</b>什么事件」——零时长事件的时间戳实实在在
-/// 落在某一秒里，照样能画。同一份数据换个问法，洞就没了。
+/// <b>Why T4's bridging is no longer needed</b> (the old <c>Replay.Bridge</c>): the old
+/// per-second lookup asked "which event <b>covers</b> this second" -- a zero-duration
+/// event's <c>[start, start)</c> is an empty interval, and the answer was always "none",
+/// so windows whose title changes every second (a media player's timestamp, a build's
+/// progress, Claude Code's spinner) turned entirely into "no record". This asks instead
+/// "what events <b>occurred</b> during this second" -- a zero-duration event's timestamp
+/// genuinely lands inside some second, and still gets painted. Same data, different
+/// question, and the hole is gone.
 /// </summary>
 public static class Judgment
 {
     /// <summary>
-    /// 把事件画进 <paramref name="window"/>。<paramref name="windowStart"/> 是
-    /// <c>window[0]</c> 对应的绝对时刻，之后每个元素 +1 秒。
+    /// Paints events into <paramref name="window"/>. <paramref name="windowStart"/> is the
+    /// absolute moment corresponding to <c>window[0]</c>, each subsequent element +1 second.
     /// </summary>
-    /// <param name="windowEvents">窗口事件（可以含窗口之外的，这里自己裁）。</param>
-    /// <param name="afkEvents">afk 事件，同上。</param>
-    /// <param name="rules">编译好的规则。</param>
-    /// <param name="selectedGroup">当前选中的唯一 goal 名（null = 未选，那就全是 OffTask）。</param>
+    /// <param name="windowEvents">Window events (may include some outside the window; clipped here).</param>
+    /// <param name="afkEvents">Afk events, same as above.</param>
+    /// <param name="rules">Compiled rules.</param>
+    /// <param name="selectedGroup">The single currently-selected goal's name (null = none selected, in which case everything is OffTask).</param>
     public static void Paint(
         Span<JudgmentCode> window,
         DateTimeOffset windowStart,
@@ -48,7 +53,7 @@ public static class Judgment
     {
         if (window.Length == 0) return;
 
-        // 命中与否先算一遍：正则匹配不便宜，而下面要遍历两趟。
+        // Compute matches up front: regex matching isn't cheap, and the loop below runs twice.
         var hit = new bool[windowEvents.Count];
         for (var i = 0; i < windowEvents.Count; i++)
         {
@@ -57,37 +62,42 @@ public static class Judgment
                   && rules.GroupMatches(selectedGroup, e.App ?? "", e.Title ?? "");
         }
 
-        // ② Focused 先画，③ OffTask 后画 —— 顺序就是 tie-break：同一秒里两者都有时
-        //    OffTask 赢（fail-closed）。别把这两趟合成一趟。
+        // (2) Focused is painted first, (3) OffTask painted after -- the order itself is
+        //     the tie-break: when both exist in the same second, OffTask wins
+        //     (fail-closed). Don't merge these two passes into one.
         for (var i = 0; i < windowEvents.Count; i++)
             if (hit[i]) PaintOne(window, windowStart, windowEvents[i], JudgmentCode.Focused);
 
         for (var i = 0; i < windowEvents.Count; i++)
             if (!hit[i]) PaintOne(window, windowStart, windowEvents[i], JudgmentCode.OffTask);
 
-        // ④ afk 最后画 —— 人不在的时候窗口是什么无所谓（否则锁屏时长照涨）。
+        // (4) Afk is painted last -- when nobody's there, whatever the window shows
+        //     doesn't matter (otherwise time locked away from the desk would still tick up).
         foreach (var e in afkEvents)
             if (e.Status == "afk") PaintOne(window, windowStart, e, JudgmentCode.Afk);
     }
 
     /// <summary>
-    /// 一条事件画哪几秒：<b>它触碰到的每一秒都画</b>，即 <c>floor(start) … ceil(end)−1</c>。
+    /// Which seconds one event paints: <b>every second it touches</b>, i.e.
+    /// <c>floor(start) ... ceil(end)-1</c>.
     ///
-    /// <b>零时长事件也占满一秒</b>（T4）：<c>end == start</c> 时 ceil 和 floor 相等，
-    /// 这里把区间撑到 1 秒——等价于「默认 duration = 0.001」。
+    /// <b>A zero-duration event still fills one full second</b> (T4): when
+    /// <c>end == start</c>, ceil and floor are equal, and this stretches the interval to
+    /// 1 second -- equivalent to "duration defaults to 0.001".
     ///
-    /// 边界那一秒会被相邻两条事件同时认领，那正好交给覆盖顺序去裁决：
-    /// <b>归属由优先级决定，不由四舍五入决定</b>。代价是跨秒切换最多算错 1 秒，
-    /// 方向恒定偏严。
+    /// The second at a boundary gets claimed by both neighbouring events at once, which is
+    /// exactly handed off to the covering order to decide: <b>ownership is decided by
+    /// priority, not by rounding</b>. The cost is that a switch across a second boundary
+    /// can be off by at most 1 second, always biased toward the stricter side.
     /// </summary>
     private static void PaintOne(Span<JudgmentCode> window, DateTimeOffset windowStart,
                                  AwEvent e, JudgmentCode code)
     {
         var from = (int)Math.Floor((e.Start - windowStart).TotalSeconds);
         var to = (int)Math.Ceiling((e.End - windowStart).TotalSeconds);
-        if (to <= from) to = from + 1;              // 零时长：至少占它落进的那一秒
+        if (to <= from) to = from + 1;              // Zero duration: occupies at least the one second it lands in
 
-        if (from < 0) from = 0;                     // 裁到切片范围（6 小时预取，见 T1/F7）
+        if (from < 0) from = 0;                     // Clip to the slice's range (6-hour prefetch, see T1/F7)
         if (to > window.Length) to = window.Length;
         if (to <= from) return;
 

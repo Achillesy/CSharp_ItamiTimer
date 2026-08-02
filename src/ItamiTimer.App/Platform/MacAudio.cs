@@ -5,19 +5,23 @@ using System.Text;
 namespace ItamiTimer.App;
 
 /// <summary>
-/// macOS 的放音底座。<see cref="Sound"/>（系统提示音）和 <see cref="Tick"/>（合成的
-/// 滴答）都走这里 —— 它是 winmm 那个 <c>PlaySound</c> 在 macOS 这一侧的对应物。
+/// The macOS playback base. Both <see cref="Sound"/> (system notification sounds) and
+/// <see cref="Tick"/> (the synthesized tick) go through here -- it's this side's
+/// counterpart to winmm's <c>PlaySound</c>.
 ///
-/// **为什么是 AudioToolbox 而不是 <c>afplay</c>**：滴答是**每秒一次**的。拿子进程放
-/// 就是一小时 fork 三千六百次，而且 afplay 自己的启动延迟有几十毫秒 —— 那点抖动
-/// 加在一声 35 毫秒的"咔"上，听感就散了，钟会变得像在喘。AudioServices 是进程内
-/// 调用，SystemSoundID 建一次就一直留着，放的时候只是一句话的事。
+/// **Why AudioToolbox and not <c>afplay</c>**: the tick fires **once a second**. Playing it
+/// via a child process would mean forking 3,600 times an hour, and afplay's own startup
+/// latency is tens of milliseconds -- that much jitter on top of a 35-millisecond "click"
+/// falls apart audibly, and the clock would start to sound like it's gasping. AudioServices
+/// is an in-process call; a SystemSoundID is created once and kept around, and playing it
+/// is just one line.
 ///
-/// **不引入任何 NuGet 音频包**：AudioToolbox 是系统自带的框架，跟 Windows 那边只用
-/// winmm 是同一条纪律 —— 表盘不用位图、提示音不打包 wav、放音不引第三方。
+/// **No NuGet audio package pulled in**: AudioToolbox is a framework the OS already ships
+/// with, the same rule as the Windows side only using winmm -- the dial uses no bitmaps,
+/// notification sounds bundle no wav files, playback pulls in nothing third-party.
 ///
-/// 已在 macOS 26.5.2 / arm64 上实测：<c>AudioServicesCreateSystemSoundID</c> 返回 0，
-/// 出声正常。
+/// Verified on macOS 26.5.2 / arm64: <c>AudioServicesCreateSystemSoundID</c> returns 0,
+/// sound plays correctly.
 /// </summary>
 [SupportedOSPlatform("macos")]
 internal static class MacAudio
@@ -42,15 +46,18 @@ internal static class MacAudio
     private static extern int AudioServicesDisposeSystemSoundID(uint soundId);
 
     /// <summary>
-    /// 路径 → SystemSoundID。**建一次就留着**：创建那一步要把整个文件读进来解码，
-    /// 每秒重建一遍等于每秒读一次盘。滴答只有两个音、提示音只有三条，缓存不会长大。
+    /// Path -> SystemSoundID. **Created once and kept**: the creation step reads the
+    /// entire file in and decodes it, so rebuilding it every second would mean reading from
+    /// disk every second. There are only two tick sounds and three notification sounds, so
+    /// this cache never grows large.
     /// </summary>
     private static readonly Dictionary<string, uint> Ids = [];
     private static readonly Lock Gate = new();
 
     /// <summary>
-    /// 放一声。**放不出来就安静收场** —— 跟 winmm 那边的 <c>SND_NODEFAULT</c> 同一个
-    /// 意思：找不到文件宁可没声音，也不要退化成一个突兀的系统"叮"。
+    /// Plays one sound. **Fails quietly if it can't play** -- the same idea as the winmm
+    /// side's <c>SND_NODEFAULT</c>: if the file can't be found, better no sound at all than
+    /// falling back to an out-of-place system "ding".
     /// </summary>
     public static void Play(string path)
     {
@@ -75,21 +82,23 @@ internal static class MacAudio
     }
 
     /// <summary>
-    /// 忘掉某个文件已经建好的 SoundID。**改音量时必须叫一次** —— SystemSoundID 在创建
-    /// 那一刻就把音频数据吃进去了，之后覆盖同名文件是不会生效的（会一直放老音量）。
+    /// Forgets a file's already-created SoundID. **Must be called when the volume
+    /// changes** -- a SystemSoundID ingests the audio data the moment it's created, and
+    /// overwriting the same-named file afterward has no effect (it would keep playing at
+    /// the old volume forever).
     /// </summary>
     public static void Forget(string path)
     {
         lock (Gate)
         {
             if (!Ids.Remove(path, out var id)) return;
-            try { AudioServicesDisposeSystemSoundID(id); } catch { /* 释放失败无所谓 */ }
+            try { AudioServicesDisposeSystemSoundID(id); } catch { /* Doesn't matter if releasing it fails */ }
         }
     }
 
     private static uint Create(string path)
     {
-        // CFURL 要的是文件系统表示（UTF-8 字节，不带结尾 0 也行，长度是显式传的）
+        // CFURL wants the file-system representation (UTF-8 bytes, doesn't need a trailing 0, length is passed explicitly)
         var bytes = Encoding.UTF8.GetBytes(path);
         var url = CFURLCreateFromFileSystemRepresentation(IntPtr.Zero, bytes, bytes.Length, false);
         if (url == IntPtr.Zero) { Log.Warn($"Could not create CFURL for {path}"); return 0; }

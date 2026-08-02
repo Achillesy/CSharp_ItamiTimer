@@ -1,32 +1,37 @@
 namespace ItamiTimer.Core;
 
-/// <summary>本拍做完之后的结果（DESIGN.md §4.2 的第 2~4 步）。</summary>
-/// <param name="SettledSeconds">本拍归档结算掉的专注秒数。调用方要把它 <c>+=</c> 进 during（§11.2）。</param>
-/// <param name="DeficitSeconds">还欠多少专注秒（已向上取整到整分钟）。0 = 达成。</param>
-/// <param name="Completed">本拍是否达成。<b>达成时刻就是这一拍</b>，不要回头去推。</param>
+/// <summary>The result of one completed tick.</summary>
+/// <param name="SettledSeconds">Focus seconds settled by archiving this tick. The caller must <c>+=</c> it into during (§11.2).</param>
+/// <param name="DeficitSeconds">How many focus seconds are still owed (already rounded up to a whole minute). 0 = achieved.</param>
+/// <param name="Completed">Whether this tick achieved completion. <b>The moment of completion is this very tick</b> — never derived retroactively.</param>
 public readonly record struct TickOutcome(int SettledSeconds, int DeficitSeconds, bool Completed);
 
 /// <summary>
-/// 秒级专注存储空间（DESIGN.md §4，第二版）。
+/// Second-level focus storage (second version of the judgment engine).
 ///
-/// <c>7380 = 180 秒 padding + 7200 秒绘制区</c>（120 分钟 = 表盘两圈）。
-/// <c>buffer[i]</c> 对应绝对时刻 <c>WallClock + i 秒</c>，<c>buffer[180]</c> = 任务起点。
+/// <c>7380 = 180 seconds of padding + 7200 seconds of drawable span</c> (120 minutes = two
+/// turns of the dial). <c>buffer[i]</c> corresponds to the absolute moment
+/// <c>WallClock + i seconds</c>; <c>buffer[180]</c> is the task's start point.
 ///
 /// <list type="bullet">
-///   <item><b>padding 的唯一用途</b>：第一拍要查起点前 3 分钟，那段数据得有地方落。
-///         它<b>永不计入、永不绘制</b>。</item>
-///   <item><b>绘制区 7200 秒不是内存考虑，是画图考虑</b>：钟面一圈 60 分钟，螺旋只留两圈，
-///         所以能画的就是 120 分钟。超出部分靠归档滚动（<see cref="TryArchive"/>）。</item>
+///   <item><b>Padding exists for exactly one reason</b>: the first tick needs to query the
+///         3 minutes before the start point, and that data needs somewhere to land. It's
+///         <b>never counted, never drawn</b>.</item>
+///   <item><b>The 7200-second drawable span isn't a memory decision, it's a rendering
+///         decision</b>: one turn of the dial is 60 minutes, the spiral only has two turns,
+///         so 120 minutes is all that can be drawn. Anything beyond that is handled by
+///         archiving (<see cref="TryArchive"/>).</item>
 /// </list>
 ///
-/// 每个整分钟做五件事，前四件在这里（第五件染色是渲染层的事）：
+/// Five things happen every whole minute; the first four live here (the fifth, colouring,
+/// belongs to the rendering layer):
 /// <code>
-/// 1. 覆盖   Cover()        把 [整分钟−4min, 整分钟) 重画一遍
-/// 2. 归档   TryArchive()   ElapsedSeconds ≥ 7200 才做
-/// 3. Gray   RefreshGray()  重算承诺弧
-/// 4. 达成   缺口 ≤ 0 就是达成，时刻 = 这一拍
+/// 1. Cover     Cover()        Repaint [whole-minute-4min, whole-minute)
+/// 2. Archive   TryArchive()   Only once ElapsedSeconds >= 7200
+/// 3. Gray      RefreshGray()  Recompute the commitment arc
+/// 4. Complete  Deficit <= 0 means achieved, at this very tick
 /// </code>
-/// <see cref="Tick"/> 把这四步串好，正常调用它就行。
+/// <see cref="Tick"/> chains these four steps together — normal callers just call it.
 /// </summary>
 public sealed class JudgmentBuffer
 {
@@ -34,58 +39,62 @@ public sealed class JudgmentBuffer
     public const int DrawSeconds = 7200;
     public const int TotalSize = PaddingSeconds + DrawSeconds;   // 7380
 
-    /// <summary>AW 查询窗口固定 4 分钟：afk 默认 180 秒才出结论并回填，取 4 分钟必然覆盖。</summary>
+    /// <summary>The ActivityWatch query window is a fixed 4 minutes: afk defaults to taking 180 seconds to settle and backfill, so 4 minutes is guaranteed to cover it.</summary>
     public const int QueryWindowSeconds = 240;
 
-    /// <summary>一次归档滚动掉多少秒。</summary>
+    /// <summary>How many seconds one archive roll evicts.</summary>
     public const int ArchiveSeconds = 3600;
 
     private readonly JudgmentCode[] _buf = new JudgmentCode[TotalSize];
 
-    /// <summary><c>buffer[0]</c> 对应的绝对时刻 = 任务起点 − 180 秒。归档时 +3600。</summary>
+    /// <summary>The absolute moment corresponding to <c>buffer[0]</c> = task start − 180 seconds. Advances by +3600 on each archive.</summary>
     public DateTimeOffset WallClock { get; private set; }
 
-    /// <summary>任务起点 = <see cref="WallClock"/> + 180 秒。<b>归档后它会往前走一小时</b>（§4.4）。</summary>
+    /// <summary>Task start = <see cref="WallClock"/> + 180 seconds. <b>It moves forward by an hour after archiving</b> (§4.4).</summary>
     public DateTimeOffset TaskStart => WallClock.AddSeconds(PaddingSeconds);
 
-    /// <summary>从（当前的）任务起点算起已流逝的秒数 = 已写入覆盖过的最大偏移。归档时 −3600。</summary>
+    /// <summary>Seconds elapsed since the (current) task start = the highest offset written so far. −3600 on each archive.</summary>
     public int ElapsedSeconds { get; private set; }
 
-    /// <summary>写入头在 buffer 里的下标。</summary>
+    /// <summary>The write head's index into the buffer.</summary>
     public int Head => PaddingSeconds + ElapsedSeconds;
 
     /// <summary>
-    /// <b>剩余</b>目标秒数——达成判定和承诺弧长度的唯一依据，归档时扣减（§4.4）。
+    /// <b>Remaining</b> target seconds — the sole basis for both the completion check and
+    /// the commitment arc's length; decremented on archiving (§4.4).
     ///
-    /// ⚠️ 它<b>不是</b>休息时长的依据。休息只读提交时锁定的 <c>TaskRecord.FocusMinutes</c>，
-    /// 跟这一轮拖了多久毫无关系（DECISIONS H6：拖得越久歇得越少，激励方向就反了）。
+    /// ⚠️ It is <b>not</b> the basis for the rest length. Rest only ever reads the
+    /// <c>TaskRecord.FocusMinutes</c> locked in at submission, regardless of how long this
+    /// round actually took (DECISIONS H6: the longer you drag it out, the shorter your
+    /// break would get, which is a backwards incentive).
     /// </summary>
     public int RemainingTargetSeconds { get; private set; }
 
-    /// <summary>本轮已经归档掉的秒数（每次归档 +3600）。圈号之外的地方一般用不到。</summary>
+    /// <summary>Seconds archived so far this round (+3600 on each archive). Rarely needed outside of lap-number bookkeeping.</summary>
     public int ArchivedSeconds { get; private set; }
 
     public JudgmentBuffer(DateTimeOffset taskStart, int focusMinutes)
     {
         WallClock = taskStart.AddSeconds(-PaddingSeconds);
         RemainingTargetSeconds = focusMinutes * 60;
-        // 开局那段灰弧用的就是每拍那套算法，不另写一份初始化（§4.5）。
+        // The opening grey arc uses the exact same per-tick algorithm — no separate
+        // initialization routine (§4.5).
         RefreshGray();
     }
 
     public JudgmentCode this[int index] => _buf[index];
 
-    // 给测试和 CLI 直接看内部的只读视图
+    // Read-only views for tests and the CLI to inspect internals directly
     public ReadOnlySpan<JudgmentCode> Raw => _buf;
     public ReadOnlySpan<JudgmentCode> DrawSpan => _buf.AsSpan(PaddingSeconds, DrawSeconds);
 
-    /// <summary>已计入的专注秒数 = <c>[180, 7380)</c> 里码 ≥ Focused 的个数。<b>不含 padding。</b></summary>
+    /// <summary>Seconds counted as focus so far = the count of codes >= Focused within <c>[180, 7380)</c>. <b>Excludes padding.</b></summary>
     public int FocusedSeconds => CountFocused(PaddingSeconds, TotalSize);
 
-    /// <summary>专注是否已达成。等价于「承诺弧为空」。</summary>
+    /// <summary>Whether focus has been achieved. Equivalent to "the commitment arc is empty".</summary>
     public bool IsFocusComplete => RemainingTargetSeconds - FocusedSeconds <= 0;
 
-    /// <summary>一拍的完整流程：覆盖 → 归档 → 重算承诺弧 → 判达成（§4.2）。</summary>
+    /// <summary>The full pipeline for one tick: cover -> archive -> recompute the commitment arc -> check completion (§4.2).</summary>
     public TickOutcome Tick(
         DateTimeOffset now,
         IReadOnlyList<AwEvent> windowEvents,
@@ -100,13 +109,17 @@ public sealed class JudgmentBuffer
     }
 
     /// <summary>
-    /// 第 1 步·覆盖（§4.3）。查询窗口是 <c>[FloorToMinute(now) − 4min, FloorToMinute(now))</c>。
+    /// Step 1: cover (§4.3). The query window is
+    /// <c>[FloorToMinute(now) − 4min, FloorToMinute(now))</c>.
     ///
-    /// <b>一切都从整分钟算，绝不掺 <c>now</c> 的亚秒零头</b>（DECISIONS H9）：否则每拍相位
-    /// 不同，同一个 buffer 秒会被相差近 1 秒的两个采样点各写一次、边界秒来回翻面；
-    /// AW 响应慢 10 秒时写入位置还会整段错位。
+    /// <b>Everything is computed from the whole minute, never mixing in <c>now</c>'s
+    /// sub-second remainder</b> (DECISIONS H9): otherwise the phase differs from tick to
+    /// tick, the same buffer second gets written twice by two sample points nearly a second
+    /// apart, boundary seconds flip back and forth; and when ActivityWatch responds 10
+    /// seconds slow, the write offset ends up shifted for the whole span.
     ///
-    /// 返回：为了给这一拍腾地方而强制归档结算掉的专注秒数（正常情况恒为 0）。
+    /// Returns: focus seconds forcibly settled by archiving to make room for this tick
+    /// (normally always 0).
     /// </summary>
     public int Cover(
         DateTimeOffset now,
@@ -118,42 +131,55 @@ public sealed class JudgmentBuffer
         var minute = TimeGrid.FloorToMinute(now);
         var settled = 0;
 
-        // §15.6：机器睡眠/挂起超过绘制区容量时，写入偏移会永久越界 → ElapsedSeconds
-        // 冻住 → 归档条件再也不成立 → 会话死锁（表盘停住、达成永远不来）。
-        // 先滚动到这一拍落得进 buffer 为止。64 次 = 64 小时，够任何一次挂起。
+        // §15.6: when the machine sleeps/suspends longer than the drawable span's
+        // capacity, the write offset would permanently run out of bounds -> ElapsedSeconds
+        // freezes -> the archive condition never becomes true again -> the session
+        // deadlocks (the dial stalls, completion never comes).
+        // Roll forward first until this tick fits in the buffer. 64 iterations = 64 hours,
+        // enough for any single suspend.
         for (var guard = 0; guard < 64; guard++)
         {
-            if (OffsetOf(minute) <= TotalSize) break;   // 窗口末端（= 这一拍）落得进 buffer
+            if (OffsetOf(minute) <= TotalSize) break;   // The window's end (= this tick) now fits in the buffer
             settled += Archive();
         }
 
-        var offset = OffsetOf(minute) - QueryWindowSeconds;   // 窗口起点相对 buffer[0]
+        var offset = OffsetOf(minute) - QueryWindowSeconds;   // Window start relative to buffer[0]
         var from = Math.Max(offset, 0);
         var to = Math.Min(offset + QueryWindowSeconds, TotalSize);
         if (to <= from) return settled;
 
-        // ① 初始化「新地盘」= [上次写入头, 这次写入头) ∩ 本次查询窗口，填 AwOffline。
+        // (1) Initialize "new ground" = [last write head, this write head) intersected with
+        // this query window, filling it with AwOffline.
         //
-        // 交这一刀是**故意的**：正常运行时新地盘就是最后那一分钟，跟「AW 连不上只写
-        // 上一分钟」是同一条规则（H4）；漏了三拍以内也全在窗口里、会被事件重画。
-        // 而漏得更久（机器睡了两小时）时，窗口之外的那些分钟**保持 Init、不计入**——
-        // 不能把「我根本没查过」当成「AW 没记录」白送出去，否则睡一觉就能刷满任务。
+        // This cut is **deliberate**: in normal operation the new ground is just the last
+        // minute, the same rule as "an ActivityWatch outage only ever writes the last
+        // minute" (H4); missing up to three ticks still lands entirely inside the window
+        // and gets repainted by real events. But missing longer than that (the machine
+        // slept for two hours), the minutes **outside** the window stay Init and
+        // uncounted — "I simply never queried this" must not be handed out for free as
+        // "ActivityWatch has no record", or sleeping through the night could fill an
+        // entire task.
         var head = Head;
         if (head < from)
         {
-            // 漏得比查询窗口还久（机器睡了两小时）：窗口**之外**那段既没查过、也永远
-            // 不会查了，清成 Init —— 不计入、不绘制。不能把「我根本没查过」当成
-            // 「AW 没记录」白送出去，否则睡一觉就能刷满任务。
-            // 也不能不管：上一拍的承诺弧还铺在那儿，不清就会被染成「还没走到」。
+            // Missed longer than the query window itself (the machine slept for two
+            // hours): the stretch **outside** the window was neither queried nor ever will
+            // be, so it's cleared to Init — not counted, not drawn. "I simply never
+            // queried this" must not be handed out for free as "ActivityWatch has no
+            // record", or sleeping through the night could fill an entire task.
+            // It can't be left untouched either: the previous tick's commitment arc is
+            // still sitting there, and leaving it would get it coloured as "not reached yet".
             _buf.AsSpan(head, from - head).Fill(JudgmentCode.Init);
         }
         var newFrom = Math.Max(head, from);
         if (newFrom < to) _buf.AsSpan(newFrom, to - newFrom).Fill(JudgmentCode.AwOffline);
 
-        // ②③④ 分层覆盖。前 3 分钟只被**重画**、不被清空：一秒一旦被判成
-        // Afk/OffTask/Focused 就不会再退回 AwOffline，只会被后来的真实数据改判。
-        // 别为了「一致」把整个 4 分钟都清成 AwOffline 再重画——AW 万一返回一份不完整
-        // 的响应，那就等于把已经判红的秒一次性抹绿。
+        // (2)(3)(4) layered covering. The last 3 minutes are only ever **repainted**, never
+        // cleared: once a second has been judged Afk/OffTask/Focused, it never falls back
+        // to AwOffline — it can only be revised by later, real data. Don't clear the whole
+        // 4 minutes back to AwOffline "for consistency" and repaint — if ActivityWatch ever
+        // returns an incomplete response, that would wipe seconds already judged red back
+        // to green in one stroke.
         Judgment.Paint(_buf.AsSpan(from, to - from), WallClock.AddSeconds(from),
                        windowEvents, afkEvents, rules, selectedGroup);
 
@@ -163,22 +189,29 @@ public sealed class JudgmentBuffer
     }
 
     /// <summary>
-    /// 第 2 步·归档（§4.4）：buffer 写满 2 小时就滚动一次。返回结算掉的专注秒数（0 = 没归档）。
+    /// Step 2: archive (§4.4): rolls forward once the buffer has filled up 2 hours. Returns
+    /// the focus seconds settled (0 = didn't archive).
     ///
-    /// <b>第一次在满 2 小时，之后每 1 小时一次</b>（归档后 <see cref="ElapsedSeconds"/> 回到 3600）。
+    /// <b>The first roll happens at 2 full hours, then once every hour after that</b>
+    /// (after archiving, <see cref="ElapsedSeconds"/> returns to 3600).
     /// </summary>
     public int TryArchive() => ElapsedSeconds < DrawSeconds ? 0 : Archive();
 
     /// <summary>
-    /// 无条件滚动一次。语义上等价于<b>「在 1 小时前把任务放弃掉、又在同一刻用剩余目标
-    /// 重新开始」</b>——这句话就是判断这段代码对不对的标准。
+    /// Rolls forward unconditionally, once. Semantically equivalent to <b>"abandoning the
+    /// task an hour ago, and immediately restarting at that same instant with the remaining
+    /// target"</b> — that sentence is the standard for judging whether this code is
+    /// correct.
     ///
-    /// 所以被结算掉的必须<b>正好是「上一个任务的全部时间」</b>，即 <c>[180, 3780)</c>：
-    /// 旧起点到新起点，不多不少 3600 秒。
+    /// So what gets settled must be <b>exactly "the entirety of the previous task's
+    /// time"</b>, i.e. <c>[180, 3780)</c>: from the old start to the new start, exactly
+    /// 3600 seconds, no more, no less.
     ///
-    /// ⚠️ 写成 <c>[0, 3600)</c> 就是 §15.5 那个 Bug——偏了 180 之后既把「点 Start 之前」
-    /// 的专注秒算进账，又漏掉 <c>[3600, 3780)</c> 那 3 分钟，归档瞬间「还差多少」会跳一下，
-    /// 正负都可能，跳负时快达成的任务会突然倒退且毫无提示。
+    /// ⚠️ Writing this as <c>[0, 3600)</c> is exactly the bug in §15.5 — off by 180, it both
+    /// credits the focus seconds from "before Start was clicked" and drops the 3 minutes in
+    /// <c>[3600, 3780)</c>; at the instant of archiving, "how much is left" jumps, in either
+    /// direction, and when it jumps negative a nearly-complete task suddenly regresses with
+    /// no warning at all.
     /// </summary>
     private int Archive()
     {
@@ -187,9 +220,9 @@ public sealed class JudgmentBuffer
         RemainingTargetSeconds -= settled;
         if (RemainingTargetSeconds < 0) RemainingTargetSeconds = 0;
 
-        // [3600, 7380) → [0, 3780)：
-        //   旧 [3780,7380) 成为新 [180,3780)——新任务的第一小时
-        //   旧 [3600,3780) 成为新 [0,180)  ——新任务的 padding，已结算过，不再统计
+        // [3600, 7380) -> [0, 3780):
+        //   old [3780,7380) becomes new [180,3780) -- the new task's first hour
+        //   old [3600,3780) becomes new [0,180)     -- the new task's padding, already settled, not counted again
         Array.Copy(_buf, ArchiveSeconds, _buf, 0, TotalSize - ArchiveSeconds);
         Array.Fill(_buf, JudgmentCode.Init, TotalSize - ArchiveSeconds, ArchiveSeconds);
 
@@ -200,32 +233,37 @@ public sealed class JudgmentBuffer
     }
 
     /// <summary>
-    /// 第 3 步·重算承诺弧（§4.5）。返回缺口秒数（已向上取整到整分钟），<c>0</c> = 达成。
+    /// Step 3: recompute the commitment arc (§4.5). Returns the deficit in seconds
+    /// (already rounded up to a whole minute); <c>0</c> means achieved.
     ///
-    /// <b>每拍重算，不记状态。</b>「记住最后一个 Gray 的位置再往前推」是错的：
-    /// afk 收缩（T5）把原本判 Afk 的几十秒改判 Focused 时，缺口减得比写入头前进得多，
-    /// 弧的末端会<b>前移</b>——增量做法会在原地留下一截残渣，承诺弧比实际长。
-    /// 所以先把 <c>[Head, 7380)</c> 清成 Init，再填 Gray。每分钟一次 7KB 的 Fill，
-    /// 开销可以忽略，但省掉了所有「该清哪一段」的判断。
+    /// <b>Recomputed every tick, no state kept.</b> "Remember the last Gray position and
+    /// advance from there" is wrong: when afk shrinkage (T5) reclassifies dozens of seconds
+    /// from Afk to Focused, the deficit shrinks faster than the write head advances, and the
+    /// arc's end <b>moves backward</b> — an incremental approach would leave a leftover
+    /// smear behind, making the commitment arc longer than it should be. So <c>[Head,
+    /// 7380)</c> is cleared to Init first, then filled with Gray. One 7KB Fill per minute
+    /// costs nothing worth mentioning, and it eliminates every "which range needs
+    /// clearing" question.
     /// </summary>
     public int RefreshGray()
     {
         var deficit = RemainingTargetSeconds - FocusedSeconds;
         if (deficit < 0) deficit = 0;
-        deficit = (deficit + 59) / 60 * 60;                     // 向上取整到整分钟
+        deficit = (deficit + 59) / 60 * 60;                     // Round up to a whole minute
 
         var head = Head;
         if (head >= TotalSize) return deficit;
 
         Array.Fill(_buf, JudgmentCode.Init, head, TotalSize - head);
-        var grayEnd = Math.Min(head + deficit, TotalSize);      // 超出绘制区就裁掉
+        var grayEnd = Math.Min(head + deficit, TotalSize);      // Clip if it exceeds the drawable span
         if (grayEnd > head) Array.Fill(_buf, JudgmentCode.Gray, head, grayEnd - head);
         return deficit;
     }
 
     /// <summary>
-    /// 投影成每分钟一格（§4.6）。范围是 <c>[180, Head + 缺口)</c>——<b>已走过 + 承诺弧</b>，
-    /// 再往后全是 Init，不吐。只吐完整的 60 秒。
+    /// Projects into one cell per minute (§4.6). Range is <c>[180, Head + deficit)</c> —
+    /// <b>elapsed so far + the commitment arc</b> — everything beyond that is Init and
+    /// isn't emitted. Only whole 60-second cells are emitted.
     /// </summary>
     public List<MinuteCell> ToMinuteCells()
     {
@@ -268,6 +306,6 @@ public sealed class JudgmentBuffer
         return n;
     }
 
-    /// <summary>某个绝对时刻在 buffer 里的下标（可能越界，调用方自己裁）。</summary>
+    /// <summary>The index of an absolute moment within the buffer (may be out of range; the caller clips it themselves).</summary>
     private int OffsetOf(DateTimeOffset t) => (int)Math.Round((t - WallClock).TotalSeconds);
 }

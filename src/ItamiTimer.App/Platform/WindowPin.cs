@@ -5,22 +5,29 @@ using Avalonia.Controls;
 namespace ItamiTimer.App;
 
 /// <summary>
-/// 窗口置顶开关（右上角那个图钉）。
+/// The window pin toggle (the pin icon in the top-right corner).
 ///
-/// ⚠️ **这跟 2026-07-28 上午被砍掉的那套「置顶提醒」不是一回事**，别混。被砍掉的是
-/// **自动**置顶：程序自己判断该顶、该撤，撤的条件还要跨越会话生命周期 —— 那套东西
-/// 在实机上连塌三次，用户的评价是"逻辑混乱，又容易出错"（§8.3）。
+/// ⚠️ **Not the same thing as the "pinning nudge" scheme that got cut on the morning of
+/// 2026-07-28** -- don't conflate them. What got cut was **automatic** pinning: the
+/// program deciding on its own when to pin and unpin, with the unpinning condition also
+/// needing to survive across session lifetimes -- that scheme fell over three times on
+/// real machines, and the user's verdict was "the logic is a mess and keeps breaking"
+/// (§8.3).
 ///
-/// 现在这个是**手动图钉**：用户点一下顶上去，再点一下放下来。**没有状态机，没有
-/// "什么时候该撤"的判断**，所以那三类 bug 一个都不会回来。
+/// This one is a **manual pin**: the user clicks once to pin, clicks again to unpin.
+/// **No state machine, no "when should it unpin" logic to get wrong**, so none of those
+/// three categories of bugs can come back.
 ///
-/// **Windows 上为什么不用 Avalonia 自带的 <c>Window.Topmost</c>**：那个属性在
-/// Windows 上会顺手激活窗口，而 §13 第 6 条要求**绝不抢焦点** —— 用户按图钉的时候
-/// 正在别处打字。<c>SWP_NOACTIVATE</c> 才是那条纪律的落点。
+/// **Why Windows doesn't use Avalonia's built-in <c>Window.Topmost</c>**: that property
+/// activates the window as a side effect on Windows, and §13 point 6 requires **never
+/// stealing focus** -- the user is probably typing somewhere else when they click the pin.
+/// <c>SWP_NOACTIVATE</c> is where that rule actually lands.
 ///
-/// **macOS 上反过来**：`Window.Topmost` 走的是 NSWindow 的 window level，
-/// 本来就不带激活语义，用它即可 —— 没有理由为此再引一个 P/Invoke。
-/// 类名从 <c>Win32Topmost</c> 改成中性的现名，就是因为它不再只有 Win32 那一条路。
+/// **macOS is the other way around**: <c>Window.Topmost</c> goes through NSWindow's window
+/// level, which carries no activation semantics to begin with -- so it can just be used
+/// directly, no reason to pull in another P/Invoke for it. The class was renamed from
+/// <c>Win32Topmost</c> to this neutral name precisely because it's no longer only a Win32
+/// path.
 /// </summary>
 public static class WindowPin
 {
@@ -31,7 +38,7 @@ public static class WindowPin
     [DllImport("user32.dll")]
     private static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
 
-    /// <summary>置顶开 / 关。**绝不抢焦点**（§13 第 6 条）—— 用户按图钉时正在别处打字。</summary>
+    /// <summary>Pin on / off. **Never steals focus** (§13 point 6) -- the user is probably typing somewhere else when they click the pin.</summary>
     public static void Set(Window w, bool on)
     {
         if (OperatingSystem.IsWindows()) SetWindows(w, on);

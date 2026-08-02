@@ -1,18 +1,21 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!--
-    DESIGN.md §8 的第一条边界纪律：模块 1~6（AwClient / GroupRules /
-    TaskRecord / TaskEvaluator / TaskStore / Settings）不含任何 UI 代码、
-    不含任何 Win32 调用。
+    The first boundary rule of this project's layering: modules 1-6 (AwClient / GroupRules /
+    TaskRecord / TaskEvaluator / TaskStore / Settings) contain no UI code and
+    no Win32 calls at all.
 
-    net10.0（没有 -windows 后缀）让编译器挡住 UI 那一半：WinForms / WPF /
-    Avalonia 这些桌面 SDK 在这个 target 上根本引不进来。绝对不要给这个项目
-    加 UseWindowsForms、UseWPF 或任何 UI 包引用。
+    net10.0 (no -windows suffix) lets the compiler block off the UI half: desktop
+    SDKs like WinForms / WPF / Avalonia simply can't be referenced under this
+    target. Never add UseWindowsForms, UseWPF, or any UI package reference to
+    this project.
 
-    ⚠️ 但要说准确：net10.0 【挡不住】 P/Invoke —— [DllImport("user32.dll")]
-    在这里是能正常编译的。所以"不碰 Win32"这半条是【纪律】，不是编译器强制。
-    需要平台特定调用（置顶不抢焦点、读键鼠空闲时间）时，写进 ItamiTimer.App
-    或 Cli，不要图省事塞进来。
+    ⚠️ But to be precise: net10.0 does NOT block P/Invoke — [DllImport("user32.dll")]
+    compiles here just fine. So "no touching Win32" is a matter of DISCIPLINE,
+    not something the compiler enforces. When a platform-specific call is
+    needed (pinning without stealing focus, reading keyboard/mouse idle time),
+    write it in ItamiTimer.App or Cli — don't take the shortcut of dropping it
+    in here.
   -->
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>

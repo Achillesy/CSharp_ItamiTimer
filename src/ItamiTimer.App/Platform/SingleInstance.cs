@@ -5,35 +5,43 @@ using System.Threading;
 namespace ItamiTimer.App;
 
 /// <summary>
-/// 单实例限制（DESIGN.md §16.4，原 ISSUE #12 的另一条）。
+/// The single-instance limit.
 ///
-/// **命名 Mutex 判活，不是进程扫描**：扫进程名要处理「同名但不是这个程序」「僵尸进程
-/// 占着名字」这类误判，命名 Mutex 是操作系统自己维护的、进程退出必然释放，不会有
-/// 「上次崩溃后名字没释放」这种事。
+/// **A named Mutex decides liveness, not a process scan**: scanning process names has to
+/// handle cases like "same name but a different program" or "a zombie process still
+/// holding the name", while a named Mutex is maintained by the OS itself -- a process
+/// exiting always releases it, so there's no such thing as "the name wasn't released after
+/// last time's crash".
 ///
-/// **第二个实例发现占用后不弹错误、不退出了事**：把已经在跑的那个窗口拉到前台，
-/// 自己安静退出——用户的动作（双击图标/热键）应该总是有效果，而不是变成一次没有
-/// 任何反馈的空点击。
+/// **When a second instance finds the lock taken, it doesn't pop an error or just quit**:
+/// it brings the already-running window to the foreground and quits quietly itself -- the
+/// user's action (double-clicking the icon / a hotkey) should always have some effect,
+/// rather than turning into a click with no feedback at all.
 ///
-/// **只有 Windows 有「拉到前台」这一步**：`FindWindow` + `SetForegroundWindow` 是
-/// Win32 API，macOS 没有对应的零依赖等价物。macOS 上退化成「静默拒绝第二个实例」——
-/// 单实例这条硬约束仍然成立，只是少了「顺手把已有窗口调出来」这个体验糖。
+/// **Only Windows has the "bring to foreground" step**: `FindWindow` +
+/// `SetForegroundWindow` are Win32 APIs, and macOS has no zero-dependency equivalent. On
+/// macOS this degrades to "silently reject the second instance" -- the single-instance
+/// guarantee itself still holds, it just loses the nicety of bringing the existing window
+/// forward.
 /// </summary>
 public static class SingleInstance
 {
     private const string MutexName = "ItamiTimer-SingleInstance";
 
-    // Windows 上窗口按标题找（跟 MainWindow.axaml 的 Title 对上）——
-    // CLAUDE.md：界面文字英文，窗口标题中文是产品名，这里就该用同一个字符串。
+    // Looked up by window title on Windows (matching MainWindow.axaml's Title) --
+    // UI text is English, but the window title is the product name in Chinese,
+    // so the same string is used here.
     private const string WindowTitle = "一袋米要扛几楼";
 
-    // 持有引用防止被 GC 回收——Mutex 一旦被回收就等于释放，第二个实例就会误判自己是第一个。
-    // 进程退出时操作系统会自动释放，不需要手动 Dispose。
+    // Held to prevent GC from collecting it -- once the Mutex is collected it's released,
+    // and a second instance would then wrongly think it's the first.
+    // The OS releases it automatically when the process exits; no manual Dispose needed.
     private static Mutex? _mutex;
 
     /// <summary>
-    /// 抢占单实例锁。<c>true</c> = 这是第一个实例，正常往下启动；
-    /// <c>false</c> = 已经有一个在跑，调用方应该直接退出（Windows 上顺手把老窗口拉到前台）。
+    /// Attempts to claim the single-instance lock. <c>true</c> = this is the first
+    /// instance, proceed with normal startup; <c>false</c> = one is already running, the
+    /// caller should quit right away (bringing the old window to the foreground on Windows).
     /// </summary>
     public static bool TryAcquire()
     {
@@ -48,7 +56,7 @@ public static class SingleInstance
     private static void ActivateExistingWindow()
     {
         var hwnd = FindWindow(null, WindowTitle);
-        if (hwnd == IntPtr.Zero) return;   // 找不到也没办法，安静退出就是了
+        if (hwnd == IntPtr.Zero) return;   // Nothing to be done if it can't be found, just quit quietly
 
         const int SW_RESTORE = 9;
         ShowWindow(hwnd, SW_RESTORE);

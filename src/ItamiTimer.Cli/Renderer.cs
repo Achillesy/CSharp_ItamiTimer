@@ -4,11 +4,14 @@ using ItamiTimer.Core;
 namespace ItamiTimer.Cli;
 
 /// <summary>
-/// 把 <see cref="MinuteCell"/> 列表画成终端色块。
+/// Renders a <see cref="MinuteCell"/> list into terminal colour blocks.
 ///
-/// 这是 DESIGN.md §8 第四条纪律的落点：**Core 只吐秒数，不吐颜色**。上色在这里，
-/// 表盘的上色在 App 里，两边消费同一个列表——而且**分档规则是渲染层的事**（§4.6）：
-/// 终端用离散的三档，表盘将来想回到连续编码时原始计数还在。
+/// This is where the project's rule about separating logic and presentation lands:
+/// **Core only emits seconds, never colour**. Colouring happens here; the dial's colouring
+/// lives in App, and both consume the same list -- and **the tiering rule belongs to the
+/// rendering layer**: the
+/// terminal uses three discrete tiers, while the dial keeps the raw counts around in case
+/// it ever wants to go back to a continuous encoding.
 /// </summary>
 public static class Renderer
 {
@@ -17,27 +20,30 @@ public static class Renderer
     private static readonly (int R, int G, int B) SlackC = (0xD6, 0x45, 0x3F);
     private static readonly (int R, int G, int B) GrayC = (0x99, 0x99, 0x99);
 
-    private static string Fg((int R, int G, int B) c) => $"[38;2;{c.R};{c.G};{c.B}m";
-    private const string Reset = "[0m";
-    private const string Dim = "[2m";
-    private const string Bold = "[1m";
+    private static string Fg((int R, int G, int B) c) => $"[38;2;{c.R};{c.G};{c.B}m";
+    private const string Reset = "[0m";
+    private const string Dim = "[2m";
+    private const string Bold = "[1m";
 
     /// <summary>
-    /// **所有时刻都必须经过这里再显示。**
+    /// **Every displayed moment must go through this function.**
     ///
-    /// 2026-07-27 踩过：账单把「专注已达成于」打成了 06:40:45，实际是 14:40:45。
-    /// 原因是同一份账单里混了两个时区 —— StartedAt 来自 DateTimeOffset.Now（本地
-    /// 偏移），而另一个时刻是从 AW 事件推导来的；AW 返回 UTC，
-    /// DateTimeOffset.Parse 保留 +00:00，直接格式化出来就是 UTC 时钟。
+    /// Hit on 2026-07-27: a report printed "Focus achieved at" as 06:40:45 when it was
+    /// actually 14:40:45. The cause was two time zones mixed in the same report --
+    /// StartedAt comes from DateTimeOffset.Now (local offset), while the other moment was
+    /// derived from an ActivityWatch event; ActivityWatch returns UTC,
+    /// DateTimeOffset.Parse keeps +00:00, and formatting it directly prints a UTC clock.
     ///
-    /// 指望每个显示点都记得写 .ToLocalTime() 是靠不住的（就是这么漏的），
-    /// 所以收口到一个函数。新增任何显示时刻的地方都走它。
+    /// Trusting every display site to remember `.ToLocalTime()` is unreliable (that's
+    /// exactly how this slipped through), so it's funneled into one function instead. Any
+    /// new place that displays a moment must go through it.
     /// </summary>
     public static string Clock(DateTimeOffset t, string fmt = "HH:mm:ss") => t.ToLocalTime().ToString(fmt);
 
     /// <summary>
-    /// 一格 → 一个字符。**只做「档位 → 字符」的映射**——「这一格该读成什么」
-    /// 是判定层的事（<see cref="MinuteCell.Tier"/>，§4.6），不在这里重写一遍。
+    /// One cell -> one character. **Only maps "tier -> character"** -- "what this cell
+    /// should be read as" belongs to the judgment layer (<see cref="MinuteCell.Tier"/>,
+    /// §4.6), not rewritten here.
     /// </summary>
     public static string CellChar(MinuteCell c) => c.Tier switch
     {
@@ -50,7 +56,7 @@ public static class Renderer
         _ => $"{Dim}·{Reset}",
     };
 
-    /// <summary>一分钟一个字符，60 个换一行（正好一圈）。</summary>
+    /// <summary>One character per minute, wrapping every 60 (exactly one lap).</summary>
     public static string Cells(IReadOnlyList<MinuteCell> cells)
     {
         if (cells.Count == 0) return $"{Dim}(no full minute has elapsed yet){Reset}";
@@ -69,7 +75,7 @@ public static class Renderer
          + $"{Fg(SlackC)}█{Reset} off-task   {Dim}□{Reset} away   "
          + $"{Fg(GrayC)}█{Reset} still owed   {Dim}·{Reset} no data";
 
-    /// <summary>打印 buffer 摘要：色块条 + 统计。bench 用。</summary>
+    /// <summary>Prints a buffer summary: the colour-block strip plus statistics. Used by bench.</summary>
     public static void BufferSummary(JudgmentBuffer buf)
     {
         var cells = buf.ToMinuteCells();
@@ -102,13 +108,16 @@ public static class Renderer
     }
 
     /// <summary>
-    /// 账单。**只有 CLI 才给账单**——它没有表盘可看（B4：界面任何时候都不给数字）。
+    /// The report. **Only the CLI ever shows a report** -- it has no dial to look at
+    /// instead (B4: the UI never shows numbers, ever).
     ///
-    /// 因为一切都是从 buffer 投影出来的，这份报告不需要额外记账，是免费的。
+    /// Since everything is projected from the buffer, this report needs no extra
+    /// bookkeeping of its own -- it comes for free.
     /// </summary>
     /// <param name="asOf">
-    /// 「现在」是几点。**必须由调用方给**，不能在这里读 <c>DateTimeOffset.Now</c>——
-    /// 干跑历史数据时那会算出「8080 分钟的墙钟时间」（2026-08-02 实跑抓到）。
+    /// What time "now" is. **Must be supplied by the caller**, never read from
+    /// <c>DateTimeOffset.Now</c> in here -- dry-running historical data would then compute
+    /// "8080 minutes of wall-clock time" (caught during a real run on 2026-08-02).
     /// </param>
     public static string Bill(TaskRecord task, JudgmentBuffer buf, double settledSeconds,
                               DateTimeOffset asOf, DateTimeOffset? completedAt)

@@ -3,30 +3,32 @@ using ItamiTimer.Core;
 namespace ItamiTimer.Core.Tests;
 
 /// <summary>
-/// 第二版引擎的**边界与追赶**。
+/// **Boundaries and catch-up** for the second-version engine.
 ///
-/// 这一批是把 2026-08-02 删掉的 `BoundaryTests` / `CheckpointCatchUpTests` 守的东西
-/// 搬过来重写的——那两个文件守的是已经不存在的 `Replay`，但它们守的**问题**还在：
-/// 跨整点会不会错位、漏了几拍能不能补齐、写到 buffer 尽头会不会越界。
+/// This batch rewrites and carries over what `BoundaryTests` / `CheckpointCatchUpTests`
+/// (deleted 2026-08-02) used to guard — those two files guarded the now-deleted `Replay`,
+/// but the **problems** they guarded against are still real: does crossing a whole hour
+/// misalign anything, can missed ticks be caught up, does writing to the end of the buffer
+/// overflow.
 ///
-/// 全是纯函数：喂合成事件，不等时间、不碰 AW。
+/// All pure functions: feed in synthetic events, no waiting, no touching ActivityWatch.
 /// </summary>
 public class JudgmentBufferBoundaryTests
 {
     private static readonly GroupRules Rules = GroupRules.Parse(
-        """{ "groups": { "经济学": { "rules": [ { "app": "^econ$" } ] } } }""");
+        """{ "groups": { "Economics": { "rules": [ { "app": "^econ$" } ] } } }""");
 
-    private const string Goal = "经济学";
+    private const string Goal = "Economics";
     private static readonly DateTimeOffset Start =
         new(2026, 8, 2, 14, 5, 0, TimeSpan.FromHours(8));
 
     private static AwEvent Win(DateTimeOffset from, double seconds, string app)
-        => new(from, seconds, app, $"{app} 窗口", null);
+        => new(from, seconds, app, $"{app} window", null);
 
     private static AwEvent Afk(DateTimeOffset from, double seconds)
         => new(from, seconds, null, null, "afk");
 
-    /// <summary>一条盖满整个查询窗口的窗口事件。</summary>
+    /// <summary>One window event that covers the entire query window.</summary>
     private static List<AwEvent> Whole(DateTimeOffset tick, string app)
         => [Win(tick.AddSeconds(-JudgmentBuffer.QueryWindowSeconds),
                 JudgmentBuffer.QueryWindowSeconds, app)];
@@ -38,15 +40,16 @@ public class JudgmentBufferBoundaryTests
         return -1;
     }
 
-    // ---------------------------------------------------------------- 跨边界
+    // ---------------------------------------------------------------- Crossing boundaries
 
     /// <summary>
-    /// 2026-07-28 那个 bug 的守卫（承诺弧跨零点跳到第二圈）：格子的时刻和圈号都只能从
-    /// **任务已走了多少分钟**来，不能从钟面上的绝对分钟数来。任何整点都会犯，零点只是
-    /// 碰巧也是整点。
+    /// Guard for the 2026-07-28 bug (the commitment arc jumping to the second lap across
+    /// midnight): a cell's time and lap number must both come from **how many minutes the
+    /// task has been running**, never from the wall-clock's absolute minute number. Any
+    /// whole hour would trigger this; midnight just happens to also be one.
     /// </summary>
     [Fact]
-    public void 跨过整点和午夜时格子不错位()
+    public void CellsDoNotShiftAcrossHourAndMidnightBoundaries()
     {
         var late = new DateTimeOffset(2026, 8, 2, 23, 58, 0, TimeSpan.FromHours(8));
         var buf = new JudgmentBuffer(late, 10);
@@ -61,29 +64,29 @@ public class JudgmentBufferBoundaryTests
         for (var i = 0; i < 5; i++)
         {
             Assert.Equal(i, cells[i].Index);
-            Assert.Equal(late.AddMinutes(i), cells[i].Start);   // 23:58 / 23:59 / 00:00 …
+            Assert.Equal(late.AddMinutes(i), cells[i].Start);   // 23:58 / 23:59 / 00:00 ...
         }
-        // 第 2 格正好跨过午夜，日期要跟着走
+        // Cell 2 crosses midnight exactly; the date must follow along
         Assert.Equal(3, cells[2].Start.Day);
     }
 
-    /// <summary>投影范围 = 已走过 + 承诺弧（§4.6），再往后是 Init，不吐。</summary>
+    /// <summary>Projection range = elapsed so far + the commitment arc (§4.6); beyond that is Init, not emitted.</summary>
     [Fact]
-    public void 投影范围恰好是已走过加上承诺弧()
+    public void ProjectionRangeIsExactlyElapsedPlusCommitmentArc()
     {
         var buf = new JudgmentBuffer(Start, 10);
         var t1 = Start.AddMinutes(1);
-        buf.Tick(t1, Whole(t1, "econ"), [], Rules, Goal);      // 走了 1 分钟，赚了 1 分钟
+        buf.Tick(t1, Whole(t1, "econ"), [], Rules, Goal);      // 1 minute elapsed, 1 minute earned
 
         var cells = buf.ToMinuteCells();
-        Assert.Equal(1 + 9, cells.Count);                       // 1 格走过 + 9 格还欠着
+        Assert.Equal(1 + 9, cells.Count);                       // 1 cell elapsed + 9 cells still owed
         Assert.Equal(60, cells[0].FocusSeconds);
         Assert.Equal(60, cells[^1].GraySeconds);
     }
 
-    /// <summary>每一格恒为完整的 60 秒——五个计数加起来必须正好 60。</summary>
+    /// <summary>Every cell is always exactly 60 seconds -- the five counts must always add up to 60.</summary>
     [Fact]
-    public void 每一格的五个计数加起来恒为六十()
+    public void TheFiveCountsInEveryCellAlwaysAddUpToSixty()
     {
         var buf = new JudgmentBuffer(Start, 10);
         var t2 = Start.AddMinutes(2);
@@ -94,86 +97,86 @@ public class JudgmentBufferBoundaryTests
             Assert.Equal(60, c.FocusSeconds + c.OffTaskSeconds + c.AfkSeconds + c.GraySeconds + c.InitSeconds);
     }
 
-    // ---------------------------------------------------------------- 追赶
+    // ---------------------------------------------------------------- Catch-up
 
     /// <summary>
-    /// 漏拍**仍在 4 分钟窗口内**时必须完全补齐——buffer 按绝对偏移写入，晚一拍只是晚一拍。
+    /// A tick missed **still within the 4-minute window** must be fully caught up -- the
+    /// buffer writes by absolute offset, so a late tick is only late, not lost.
     /// </summary>
     [Fact]
-    public void 漏两拍但没超出查询窗口_下一拍全部补齐()
+    public void MissingTwoTicksStillWithinTheQueryWindowIsFullyCaughtUpNextTick()
     {
         var buf = new JudgmentBuffer(Start, 10);
         var t1 = Start.AddMinutes(1);
         buf.Tick(t1, Whole(t1, "econ"), [], Rules, Goal);
 
-        // 第 2、3 拍没跑（AW 超时 / 界面卡住），第 4 拍才回来
+        // Ticks 2 and 3 didn't run (ActivityWatch timeout / UI froze), tick 4 comes back
         var t4 = Start.AddMinutes(4);
         buf.Tick(t4, Whole(t4, "econ"), [], Rules, Goal);
 
-        Assert.Equal(4 * 60, buf.FocusedSeconds);               // 四分钟一秒不少
+        Assert.Equal(4 * 60, buf.FocusedSeconds);               // Not a second short across four minutes
         Assert.Equal(4, buf.ToMinuteCells().Count(c => c.FocusSeconds == 60));
     }
 
     /// <summary>
-    /// 漏得比查询窗口还久时，窗口之外那段判 `Init`：**不计入，也不能白送**。
-    /// 判据是缺口——那段时间必须原封不动地欠着。
+    /// When the gap is longer than the query window, the stretch outside the window is
+    /// judged `Init`: **not counted, and not given away for free either**. The deficit is
+    /// the test: that stretch of time must remain owed, untouched.
     /// </summary>
     [Fact]
-    public void 漏拍超出窗口时缺口不减少()
+    public void DeficitDoesNotShrinkWhenAMissedTickExceedsTheWindow()
     {
         var buf = new JudgmentBuffer(Start, 30);
         var t1 = Start.AddMinutes(1);
         var before = buf.Tick(t1, Whole(t1, "econ"), [], Rules, Goal).DeficitSeconds;
 
-        // 睡了 20 分钟；醒来只查得到最近 4 分钟
+        // Slept for 20 minutes; on waking only the last 4 minutes can be queried
         var wake = Start.AddMinutes(21);
         var after = buf.Tick(wake, Whole(wake, "econ"), [], Rules, Goal).DeficitSeconds;
 
-        // 只有醒来那 4 分钟能减账，中间 16 分钟一秒都不算
+        // Only the 4 minutes right after waking reduce the deficit; the 16 minutes in between don't count at all
         Assert.Equal(before - JudgmentBuffer.QueryWindowSeconds, after);
     }
 
-    // ---------------------------------------------------------------- buffer 尽头
+    // ---------------------------------------------------------------- End of buffer
 
     /// <summary>
-    /// 承诺弧比绘制区还长时要裁掉，**不能越界**。目标 200 分钟 = 12000 秒，
-    /// 而绘制区只有 7200 秒。
+    /// When the commitment arc would be longer than the drawable span, it must be clipped,
+    /// **never overflow**. Target is 200 minutes = 12000 seconds, while the drawable span
+    /// is only 7200 seconds.
     /// </summary>
     [Fact]
-    public void 承诺弧超出绘制区时裁到末尾而不越界()
+    public void CommitmentArcIsClippedAtTheEndWhenItExceedsTheDrawableSpan()
     {
         var buf = new JudgmentBuffer(Start, 200);
         var t1 = Start.AddMinutes(1);
         buf.Tick(t1, Whole(t1, "econ"), [], Rules, Goal);
 
-        Assert.Equal(JudgmentBuffer.TotalSize, GrayEnd(buf));           // 一直铺到末尾
+        Assert.Equal(JudgmentBuffer.TotalSize, GrayEnd(buf));           // Runs all the way to the end
         Assert.Equal(JudgmentCode.Gray, buf[JudgmentBuffer.TotalSize - 1]);
     }
 
     /// <summary>
-    /// §15.5 的**真**守卫：归档的结算范围必须是 `[180, 3780)`，不是 `[0, 3600)`。
+    /// The **real** guard for §15.5: the settlement range for archiving must be
+    /// `[180, 3780)`, not `[0, 3600)`.
     ///
-    /// ⚠️ 这条测试要能抓到那个偏移，**padding 里的内容必须跟正文不一样**。
-    /// 如果整个 buffer 都是专注，两种写法都算出 3600，测试全绿而 bug 还在——
-    /// 「同一个量两处口径」的错就是这么溜过去的。
-    ///
-    /// 所以这里让点 Start **之前**那 3 分钟在摸鱼、之后全在专注：
-    /// <list type="bullet">
-    ///   <item>正确的 `[180, 3780)` → 3600 秒（整整一小时的专注）</item>
-    ///   <item>错误的 `[0, 3600)`   → 3420 秒（漏掉了 [3600,3780) 那 3 分钟，
-    ///         又把 padding 里 3 分钟的摸鱼算了进来）</item>
-    /// </list>
+    /// ⚠️ For this test to actually catch that offset, **the content inside padding must
+    /// differ from the content in the real span**. If the whole buffer were focus time,
+    /// both formulas would come out to 3600 and the test would pass green while the bug
+    /// stayed alive -- that's exactly how a "same quantity, two different conventions" bug
+    /// slips through.
     /// </summary>
     [Fact]
-    public void 归档只结算任务开始之后的那一小时_padding不算()
+    public void ArchivingOnlySettlesTheHourAfterTaskStart_PaddingDoesNotCount()
     {
         var buf = new JudgmentBuffer(Start, 200);
 
-        // 第一拍：窗口里前 3 分钟（padding，点 Start 之前）在摸鱼，之后在专注
+        // First tick: the first 3 minutes in the window (padding, before Start was clicked)
+        // are off-task, everything after is focus
         var t1 = Start.AddMinutes(1);
         buf.Tick(t1, [Win(Start.AddMinutes(-3), 180, "chrome"), Win(Start, 60, "econ")],
                  [], Rules, Goal);
-        Assert.Equal(JudgmentCode.OffTask, buf[0]);            // padding 里确实是红的
+        Assert.Equal(JudgmentCode.OffTask, buf[0]);            // Padding really is red
 
         var settled = 0;
         for (var i = 2; i <= 120; i++)
@@ -185,9 +188,9 @@ public class JudgmentBufferBoundaryTests
         Assert.Equal(JudgmentBuffer.ArchiveSeconds, settled);
     }
 
-    /// <summary>跑满 3 小时应该归档两次，结算出来的正好是两小时。</summary>
+    /// <summary>Running for a full 3 hours should archive twice, settling exactly two hours.</summary>
     [Fact]
-    public void 三小时里归档两次_每次正好一小时()
+    public void ThreeHoursArchivesTwice_ExactlyOneHourEachTime()
     {
         var buf = new JudgmentBuffer(Start, 300);
         var settled = 0;
@@ -200,62 +203,67 @@ public class JudgmentBufferBoundaryTests
         Assert.Equal(2 * JudgmentBuffer.ArchiveSeconds, settled);
         Assert.Equal(2 * JudgmentBuffer.ArchiveSeconds, buf.ArchivedSeconds);
         Assert.Equal(Start.AddHours(2), buf.TaskStart);
-        // 三个量对得上：原始 300 分钟 = 已结算 120 分钟 + 剩余目标
+        // The three quantities line up: the original 300 minutes = 120 minutes settled + the remaining target
         Assert.Equal(300 * 60 - settled, buf.RemainingTargetSeconds);
     }
 
-    // ---------------------------------------------------------------- 事件边界
+    // ---------------------------------------------------------------- Event boundaries
 
     /// <summary>
-    /// T1/F7：查询窗口往前放宽 6 小时，所以事件列表里会有**起点在几小时前**的长事件。
-    /// 它必须能画进来（否则一直开着同一个窗口反而判成没记录），而且不能画出界。
+    /// T1/F7: the query window is widened 6 hours into the past, so the event list can
+    /// contain long events that **started hours earlier**. They must still be paintable
+    /// (otherwise leaving the same window open the whole time would wrongly read as no
+    /// record), and must not paint out of bounds.
     /// </summary>
     [Fact]
-    public void 起点远在窗口之前的长事件也要画进来且不越界()
+    public void ALongEventStartingWellBeforeTheWindowStillPaintsWithoutOverflowing()
     {
         var buf = new JudgmentBuffer(Start, 10);
         var t1 = Start.AddMinutes(1);
-        // 六小时前开始、持续七小时的一条事件
+        // An event that started six hours ago and lasts seven hours
         var long_ = Win(Start.AddHours(-6), 7 * 3600, "econ");
 
         buf.Tick(t1, [long_], [], Rules, Goal);
 
-        Assert.Equal(60, buf.FocusedSeconds);                  // 任务这一分钟算上了
+        Assert.Equal(60, buf.FocusedSeconds);                  // This minute of the task is counted
         Assert.Equal(JudgmentCode.Focused, buf[JudgmentBuffer.PaddingSeconds]);
     }
 
     /// <summary>
-    /// 点 Start **之前**那 3 分钟（padding）永不计入，哪怕当时就在目标应用上。
-    /// 起点截断到整分钟（A6）本来就白送了最多 59 秒，padding 再送就送过头了。
+    /// The 3 minutes **before** Start was clicked (padding) are never counted, even if the
+    /// goal app was already in focus at the time. Truncating the start to a whole minute
+    /// (A6) already gives away up to 59 seconds for free; giving away padding too would be
+    /// too generous.
     /// </summary>
     [Fact]
-    public void padding里的专注永不计入()
+    public void FocusInsidePaddingIsNeverCounted()
     {
         var buf = new JudgmentBuffer(Start, 10);
         var t1 = Start.AddMinutes(1);
-        // 事件盖满整个 4 分钟窗口，其中前 3 分钟在任务开始之前
+        // The event covers the entire 4-minute window, of which the first 3 minutes are before the task started
         buf.Tick(t1, Whole(t1, "econ"), [], Rules, Goal);
 
-        Assert.Equal(JudgmentCode.Focused, buf[0]);            // padding 里确实画上了
-        Assert.Equal(60, buf.FocusedSeconds);                  // 但一秒都不算
+        Assert.Equal(JudgmentCode.Focused, buf[0]);            // Padding really did get painted
+        Assert.Equal(60, buf.FocusedSeconds);                  // But not a single second of it counts
     }
 
     /// <summary>
-    /// afk 收缩（T5）会让承诺弧的末端**前移**——`RefreshGray` 必须先清后填，
-    /// 否则原地留下一截残渣，弧比实际长。
+    /// Afk shrinkage (T5) can move the commitment arc's end **backward** --
+    /// `RefreshGray` must clear before it fills, otherwise a leftover smear stays behind and
+    /// the arc ends up longer than it should be.
     /// </summary>
     [Fact]
-    public void afk被改判回专注时承诺弧末端前移且不留残渣()
+    public void CommitmentArcEndMovesBackWhenAfkIsReclassifiedAsFocusWithNoLeftoverSmear()
     {
         var buf = new JudgmentBuffer(Start, 10);
 
-        // 第一拍：整个第 0 分钟被 afk 盖住 → 一秒都没赚到
+        // First tick: the entire minute 0 is covered by afk -> not a single second earned
         var t1 = Start.AddMinutes(1);
         buf.Tick(t1, Whole(t1, "econ"), [Afk(Start, 60)], Rules, Goal);
         Assert.Equal(0, buf.FocusedSeconds);
         var endBefore = GrayEnd(buf);
 
-        // 第二拍：afk 收缩到没有（人其实一直在），前两分钟都改判成专注
+        // Second tick: afk shrinks to nothing (the person was there the whole time), the first two minutes get reclassified as focus
         var t2 = Start.AddMinutes(2);
         buf.Tick(t2, Whole(t2, "econ"), [], Rules, Goal);
 
@@ -263,26 +271,27 @@ public class JudgmentBufferBoundaryTests
         var endAfter = GrayEnd(buf);
 
         Assert.True(endAfter < endBefore,
-            $"弧末端应该前移：{endBefore} → {endAfter}");
-        Assert.NotEqual(JudgmentCode.Gray, buf[endAfter]);     // 末端之后干干净净，没有残渣
+            $"The arc's end should move backward: {endBefore} -> {endAfter}");
+        Assert.NotEqual(JudgmentCode.Gray, buf[endAfter]);     // Clean past the end, no leftover smear
     }
 
     /// <summary>
-    /// 一秒里既被 afk 盖住又有目标应用的窗口事件时判 `Afk`——afk 画在最后，盖住一切。
-    /// 「停在目标应用上起身走开」是最省力的作弊路径（A4），必须堵死。
+    /// When a second is covered by both afk and a window event in the goal app, it's judged
+    /// `Afk` -- afk is painted last and covers everything. "Walk away while the goal app
+    /// stays focused" is the cheapest exploit available (A4) and must be sealed shut.
     /// </summary>
     [Fact]
-    public void 停在目标应用上走开的那几秒判离开而不是专注()
+    public void WalkingAwayWhileStayingOnTheGoalAppIsJudgedAwayNotFocus()
     {
         var buf = new JudgmentBuffer(Start, 10);
         var t1 = Start.AddMinutes(1);
 
-        // 整分钟都在目标应用上，但后 30 秒 afk
+        // The whole minute is on the goal app, but afk for the last 30 seconds
         buf.Tick(t1, Whole(t1, "econ"), [Afk(Start.AddSeconds(30), 30)], Rules, Goal);
 
         var cell = buf.ToMinuteCells()[0];
         Assert.Equal(30, cell.FocusSeconds);
         Assert.Equal(30, cell.AfkSeconds);
-        Assert.Equal(0, cell.OffTaskSeconds);                  // 离开不怪你，不判红
+        Assert.Equal(0, cell.OffTaskSeconds);                  // Being away isn't your fault, not judged red
     }
 }

@@ -4,19 +4,24 @@ using System.Runtime.Versioning;
 namespace ItamiTimer;
 
 /// <summary>
-/// 全系统键鼠空闲时间（DESIGN.md §8.3.6）。
+/// System-wide keyboard/mouse idle time.
 ///
-/// **这个信号只用来决定什么时候催用户，绝不参与任何核算。** 判定输入仍然只有
-/// AW 的两个 bucket（原则 0）。所以它属于第 9 层，放在这里而不是 Core——
-/// Core 的 net10.0 挡得住 UI 框架，但挡不住 P/Invoke，那半条靠纪律。
+/// **This signal only decides when to nudge the user, and never participates in any
+/// accounting.** Judgment's input is still exclusively ActivityWatch's two buckets
+/// (Principle 0). So this belongs to layer 9, and lives here rather than in Core -- Core's
+/// net10.0 blocks UI frameworks, but not P/Invoke; that half is enforced by discipline
+/// alone.
 ///
-/// 文件放在 App（§8.5：平台特定代码归这一层），再由 ItamiTimer.Cli.csproj 用
-/// &lt;Compile Link&gt; 链接过去 —— 同一份源码两边编译，不复制。命名空间因此取中性的
-/// ItamiTimer，不跟着任何一个项目走。
+/// The file lives in App (§8.5: platform-specific code belongs to this layer), and gets
+/// linked into ItamiTimer.Cli.csproj with &lt;Compile Link&gt; -- the same source compiled
+/// on both sides, not copied. That's why the namespace is the neutral ItamiTimer, not tied
+/// to either project.
 ///
-/// 为什么不干脆拿它当在座信号、彻底不要 afk：**AW 在 ItamiTimer 关掉时照样在
-/// 记，本程序自己的采样不会**。原则 3 要求关掉界面不影响结果——在座数据若来自
-/// 本程序轮询，一关就是个永久的洞（不像 AW 那样事后能补查）。
+/// Why not just treat this as the presence signal and drop afk entirely: **ActivityWatch
+/// keeps recording even while ItamiTimer is closed; this program's own sampling doesn't**.
+/// Principle 3 requires that closing the UI not affect the outcome -- if presence data came
+/// from this program's own polling, closing it would leave a permanent hole (unlike
+/// ActivityWatch, which can be queried retroactively).
 /// </summary>
 public static class InputIdle
 {
@@ -27,8 +32,8 @@ public static class InputIdle
         public uint dwTime;
     }
 
-    // 用经典的 DllImport 而不是 LibraryImport：后者要求整个项目开
-    // AllowUnsafeBlocks，为这一个调用不值得。
+    // Uses the classic DllImport rather than LibraryImport: the latter requires the whole
+    // project to turn on AllowUnsafeBlocks, not worth it for this one call.
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetLastInputInfo(ref LastInputInfo plii);
@@ -37,17 +42,19 @@ public static class InputIdle
         "/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices";
 
     /// <summary>
-    /// macOS 这一侧。<c>kCGEventSourceStateCombinedSessionState</c> = 0 表示"整个登录
-    /// 会话的输入"，跟 <c>GetLastInputInfo</c> 的口径一致（不是只看本进程）；
-    /// <c>kCGAnyInputEventType</c> = 0xFFFFFFFF 表示"任何一种输入事件"。
+    /// The macOS side. <c>kCGEventSourceStateCombinedSessionState</c> = 0 means "input
+    /// across the entire login session", matching the same scope as
+    /// <c>GetLastInputInfo</c> (not limited to this process); <c>kCGAnyInputEventType</c>
+    /// = 0xFFFFFFFF means "any kind of input event".
     ///
-    /// **不需要辅助功能权限** —— 它只问"上一次输入过了多久"，不装事件钩子、
-    /// 读不到任何输入内容。已在 macOS 26.5.2 上实测。
+    /// **Doesn't need Accessibility permission** -- it only asks "how long since the last
+    /// input", installs no event hook, and can't read any input content. Verified on
+    /// macOS 26.5.2.
     /// </summary>
     [DllImport(ApplicationServices)]
     private static extern double CGEventSourceSecondsSinceLastEventType(uint stateId, uint eventType);
 
-    /// <summary>距离最后一次键鼠输入过了多久。拿不到就返回 <see cref="TimeSpan.Zero"/>（当作刚动过，宁可不催）。</summary>
+    /// <summary>How long since the last keyboard/mouse input. Returns <see cref="TimeSpan.Zero"/> if it can't be determined (treated as just moved -- better not to nudge than to nudge wrongly).</summary>
     public static TimeSpan Elapsed()
     {
         if (OperatingSystem.IsWindows()) return WindowsElapsed();
@@ -67,11 +74,13 @@ public static class InputIdle
         }
         catch
         {
-            // 读不到就当作刚动过 —— 宁可不催，也不要凭空催一声（§8.3.5：这一声是
-            // 补救，不是通报，误报比漏报更糟）。
+            // If it can't be read, treat it as just moved -- better not to nudge than to
+            // nudge out of nowhere (§8.3.5: this beep is a rescue, not a report; a false
+            // positive is worse than a missed one).
             //
-            // 这里**刻意不记日志**：本文件要能被 ItamiTimer.Cli 用 <Compile Link>
-            // 原样链过去（见类注释），所以它不能依赖 App 层的 Log。
+            // **Deliberately doesn't log anything here**: this file needs to be linkable
+            // into ItamiTimer.Cli unchanged via <Compile Link> (see the class doc comment),
+            // so it can't depend on the App layer's Log.
             return TimeSpan.Zero;
         }
     }
@@ -82,7 +91,8 @@ public static class InputIdle
         var info = new LastInputInfo { cbSize = (uint)Marshal.SizeOf<LastInputInfo>() };
         if (!GetLastInputInfo(ref info)) return TimeSpan.Zero;
 
-        // 两个都是 32 位毫秒计数、49.7 天回绕。无符号减法在回绕时依然给出正确的差值。
+        // Both are 32-bit millisecond counters that wrap every 49.7 days. Unsigned
+        // subtraction still gives the correct difference across the wraparound.
         var idleMs = unchecked((uint)Environment.TickCount - info.dwTime);
         return TimeSpan.FromMilliseconds(idleMs);
     }

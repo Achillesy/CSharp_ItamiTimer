@@ -4,137 +4,138 @@ namespace ItamiTimer.Core.Tests;
 
 public class GroupRulesTests
 {
-    /// <summary>用户 2026-07-27 建的真实 rules.json：一个小目标，一条只写 title 的规则。</summary>
+    /// <summary>A real rules.json the user set up on 2026-07-27: one goal, one rule that only writes a title.</summary>
     private const string RealJson = """
         {
           "groups": {
-            "学习经济学": { "rules": [ { "title": "经济学" } ] }
+            "Economics": { "rules": [ { "title": "Econ" } ] }
           }
         }
         """;
 
-    private const string Econ = "学习经济学";
+    private const string Econ = "Economics";
 
     private static GroupRules Real() => GroupRules.Parse(RealJson);
 
-    // ---- 只写 title 的规则要跨应用生效（§5.2）
+    // ---- A title-only rule must work across apps (§5.2)
 
     [Theory]
-    [InlineData("SumatraPDF.exe", "曼昆经济学原理第五版.pdf - SumatraPDF")]
-    [InlineData("chrome.exe", "经济学原理 公开课 - Google Chrome")]
-    [InlineData("vlc.exe", "曼昆经济学 第03讲.mp4")]
-    public void 标题含经济学就算_不管用什么应用(string app, string title)
+    [InlineData("SumatraPDF.exe", "Mankiw's Principles of Econ 5th Edition.pdf - SumatraPDF")]
+    [InlineData("chrome.exe", "Econ Principles Open Course - Google Chrome")]
+    [InlineData("vlc.exe", "Mankiw Econ Lecture 03.mp4")]
+    public void ATitleContainingTheKeywordCounts_RegardlessOfApp(string app, string title)
     {
         Assert.True(Real().GroupMatches(Econ, app, title));
     }
 
     [Fact]
-    public void 同一个应用_标题不含关键词就是偷懒()
+    public void SameApp_TitleWithoutTheKeywordIsOffTask()
     {
-        Assert.False(Real().GroupMatches(Econ, "chrome.exe", "斗破苍穹 第1章 - 起点中文网"));
+        Assert.False(Real().GroupMatches(Econ, "chrome.exe", "Anime Episode 1 - Some Streaming Site"));
     }
 
     // ---- fail-closed
 
     [Fact]
-    public void 规则文件里没有的应用算偷懒_fail_closed()
+    public void AnAppNotInTheRulesFileIsOffTask_FailClosed()
     {
-        Assert.False(Real().GroupMatches(Econ, "Weixin.exe", "微信"));
+        Assert.False(Real().GroupMatches(Econ, "Messenger.exe", "Messenger"));
     }
 
     /// <summary>
-    /// 规则文件里没有的组名永不命中。「一个都没选」那种情况在上一层挡掉——
-    /// <see cref="Judgment.Paint"/> 在 `selectedGroup is null` 时根本不画 Focused。
+    /// A group name that isn't in the rules file never matches. The case of "nothing
+    /// selected" is blocked one layer up -- <see cref="Judgment.Paint"/> doesn't draw
+    /// Focused at all when `selectedGroup is null`.
     /// </summary>
     [Fact]
-    public void 不存在的组名永不命中()
+    public void ANonexistentGroupNameNeverMatches()
     {
-        Assert.False(Real().GroupMatches("查无此组", "SumatraPDF.exe", "曼昆经济学.pdf"));
+        Assert.False(Real().GroupMatches("NoSuchGroup", "SumatraPDF.exe", "Mankiw Econ.pdf"));
     }
 
-    // ---- 组内是「或」，不是「与」（§5.2）
+    // ---- Rules within a group are OR, not AND (§5.2)
 
     [Fact]
-    public void 组内多条规则是或的关系()
+    public void MultipleRulesWithinAGroupAreOred()
     {
         var rules = GroupRules.Parse("""
             {
               "groups": {
-                "学习经济学": { "rules": [
-                  { "title": "经济学" },
+                "Economics": { "rules": [
+                  { "title": "Econ" },
                   { "app": "^EconReader\\.exe$" }
                 ] }
               }
             }
             """);
-        Assert.True(rules.GroupMatches(Econ, "SumatraPDF.exe", "曼昆经济学.pdf"));
-        Assert.True(rules.GroupMatches(Econ, "EconReader.exe", "未命名文档"));
-        Assert.False(rules.GroupMatches(Econ, "notepad.exe", "购物清单"));
+        Assert.True(rules.GroupMatches(Econ, "SumatraPDF.exe", "Mankiw Econ.pdf"));
+        Assert.True(rules.GroupMatches(Econ, "EconReader.exe", "Untitled Document"));
+        Assert.False(rules.GroupMatches(Econ, "notepad.exe", "Shopping list"));
     }
 
     [Fact]
-    public void 单条规则里app和title都写则是与的关系()
+    public void WhenARuleHasBothAppAndTitleTheyAreAnded()
     {
         var rules = GroupRules.Parse("""
-            { "groups": { "网页学习": { "rules": [ { "app": "^chrome\\.exe$", "title": "教程" } ] } } }
+            { "groups": { "WebStudy": { "rules": [ { "app": "^chrome\\.exe$", "title": "Tutorial" } ] } } }
             """);
-        const string g = "网页学习";
-        Assert.True(rules.GroupMatches(g, "chrome.exe", "Blender 教程"));
-        Assert.False(rules.GroupMatches(g, "chrome.exe", "微博热搜"));
-        Assert.False(rules.GroupMatches(g, "msedge.exe", "Blender 教程"));
+        const string g = "WebStudy";
+        Assert.True(rules.GroupMatches(g, "chrome.exe", "Blender Tutorial"));
+        Assert.False(rules.GroupMatches(g, "chrome.exe", "Trending on Weibo"));
+        Assert.False(rules.GroupMatches(g, "msedge.exe", "Blender Tutorial"));
     }
 
-    // ---- fail-closed：宁可拒绝加载，也不要静默放行（§5.2）
+    // ---- fail-closed: better to refuse to load than to silently let everything through (§5.2)
 
     [Fact]
-    public void 空规则必须拒绝加载_否则勾上它等于关掉约束()
+    public void AnEmptyRuleMustBeRejectedAtLoad_OtherwiseCheckingItTurnsOffTheConstraint()
     {
         var e = Assert.Throws<InvalidDataException>(() =>
-            GroupRules.Parse("""{ "groups": { "什么都算": { "rules": [ {} ] } } }"""));
+            GroupRules.Parse("""{ "groups": { "MatchesEverything": { "rules": [ {} ] } } }"""));
         Assert.Contains("match everything", e.Message);
     }
 
     [Fact]
-    public void 空的规则数组也必须拒绝加载()
+    public void AnEmptyRulesArrayMustAlsoBeRejectedAtLoad()
     {
         Assert.Throws<InvalidDataException>(() =>
-            GroupRules.Parse("""{ "groups": { "空组": { "rules": [] } } }"""));
+            GroupRules.Parse("""{ "groups": { "EmptyGroup": { "rules": [] } } }"""));
     }
 
     [Fact]
-    public void 正则写错要报清楚是哪一条()
+    public void ABadRegexReportsClearlyWhichOneItWas()
     {
         var e = Assert.Throws<InvalidDataException>(() =>
-            GroupRules.Parse("""{ "groups": { "坏的": { "rules": [ { "title": "[未闭合" } ] } } }"""));
-        Assert.Contains("坏的", e.Message);
+            GroupRules.Parse("""{ "groups": { "Broken": { "rules": [ { "title": "[unterminated" } ] } } }"""));
+        Assert.Contains("Broken", e.Message);
     }
 
-    // ---- disabled（§5.2.1）
+    // ---- disabled (§5.2.1)
 
     [Fact]
-    public void 屏蔽掉的小目标不出现在勾选列表里_也永不命中()
+    public void ADisabledGoalDoesNotAppearInTheSelectableList_AndNeverMatches()
     {
         var rules = GroupRules.Parse("""
             {
               "groups": {
-                "学习经济学": { "rules": [ { "title": "经济学" } ] },
-                "上季度的目标": { "disabled": true, "rules": [ { "title": "Blender" } ] }
+                "Economics": { "rules": [ { "title": "Econ" } ] },
+                "Last quarter": { "disabled": true, "rules": [ { "title": "Blender" } ] }
               }
             }
             """);
-        Assert.Equal(["学习经济学"], rules.SelectableGroups);
-        Assert.False(rules.GroupMatches("Blender 教程", "上季度的目标", "blender.exe"));
+        Assert.Equal(["Economics"], rules.SelectableGroups);
+        Assert.False(rules.GroupMatches("Blender Tutorial", "Last quarter", "blender.exe"));
     }
 
     [Fact]
-    public void 规则文件允许写注释和结尾逗号()
+    public void TheRulesFileAllowsCommentsAndTrailingCommas()
     {
         var rules = GroupRules.Parse("""
             {
-              // 这是注释
-              "groups": { "学习经济学": { "rules": [ { "title": "经济学" }, ] }, },
+              // this is a comment
+              "groups": { "Economics": { "rules": [ { "title": "Econ" }, ] }, },
             }
             """);
-        Assert.True(rules.GroupMatches(Econ, "SumatraPDF.exe", "经济学.pdf"));
+        Assert.True(rules.GroupMatches(Econ, "SumatraPDF.exe", "Econ.pdf"));
     }
 }

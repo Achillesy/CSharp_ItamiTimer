@@ -4,7 +4,7 @@
 
   <application xmlns="urn:schemas-microsoft-com:asm.v3">
     <windowsSettings>
-      <!-- 表盘要按 DPI 缩放画，不能让系统拉伸位图 -->
+      <!-- The dial needs to be drawn scaled to DPI, not stretched as a bitmap by the system -->
       <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness>
     </windowsSettings>
   </application>

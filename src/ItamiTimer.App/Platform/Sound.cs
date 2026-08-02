@@ -3,31 +3,35 @@ using System.Runtime.InteropServices;
 namespace ItamiTimer.App;
 
 /// <summary>
-/// 提示音。**只用系统自带的音**（用户 2026-07-28：「直接使用系统提供的声音」），
-/// 不打包任何音频资源 —— 跟表盘不用位图是同一条纪律。
+/// Notification sounds. **Only uses sounds the OS already ships with** (user, 2026-07-28:
+/// "just use the sounds the system already provides"), no audio asset bundled at all --
+/// the same rule as the dial not using bitmaps.
 ///
-/// 这是整个程序**唯一**的提醒手段了。原来那套"置顶但不抢焦点"被用户否掉：
-/// 「不要再纠结窗口置顶这种事情了。逻辑混乱，又容易出错。」
+/// This is the program's **only** means of nudging you, full stop. The old "pinned but
+/// never steals focus" scheme was rejected by the user: "Stop fussing over window pinning.
+/// The logic is a mess and keeps breaking."
 ///
-/// 平台差异只有两条，**都在这个文件里收口**：去哪儿找、拿什么放。
+/// There are only two platform differences, **both funneled into this one file**: where to
+/// look, and what plays it.
 ///
 /// <code>
-///            音库                                放音
-/// Windows    C:\Windows\Media\*.wav              winmm 的 PlaySound
-/// macOS      ~/Library/Sounds                    AudioToolbox（见 MacAudio）
+///            Library                              Playback
+/// Windows    C:\Windows\Media\*.wav              winmm's PlaySound
+/// macOS      ~/Library/Sounds                    AudioToolbox (see MacAudio)
 ///            /Library/Sounds
 ///            /System/Library/Sounds  \*.aiff
 /// </code>
 ///
-/// macOS 那三个目录按**优先级从高到低**排 —— 这是系统自己的约定，用户放在
-/// <c>~/Library/Sounds</c> 里的同名文件盖住系统那份。所以列举时要去重，先来的赢。
+/// macOS's three directories are ordered **from highest to lowest priority** -- this is the
+/// system's own convention, where a same-named file in <c>~/Library/Sounds</c> overrides
+/// the system's copy. So enumerating them needs deduplication, first one wins.
 /// </summary>
 public static class Sound
 {
     private const string WindowsDir = @"C:\Windows\Media";
     private const string WindowsExt = ".wav";
 
-    /// <summary>macOS 的音库，优先级从高到低。系统自带的那 14 个在最后一档。</summary>
+    /// <summary>macOS's sound libraries, highest to lowest priority. The 14 system-provided ones are the last tier.</summary>
     private static readonly string[] MacDirs =
     [
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Library", "Sounds"),
@@ -36,9 +40,9 @@ public static class Sound
     ];
     private const string MacExt = ".aiff";
 
-    private const int SND_ASYNC = 0x0001;      // 立刻返回，别把界面卡住
+    private const int SND_ASYNC = 0x0001;      // Returns immediately, don't block the UI
     private const int SND_FILENAME = 0x00020000;
-    private const int SND_NODEFAULT = 0x0002;  // 找不到就安静，别退化成"叮"
+    private const int SND_NODEFAULT = 0x0002;  // Stay quiet if not found, don't fall back to a generic "ding"
 
     [DllImport("winmm.dll", EntryPoint = "PlaySoundW", CharSet = CharSet.Unicode)]
     private static extern bool PlaySound(string? name, IntPtr mod, int flags);
@@ -47,7 +51,7 @@ public static class Sound
         ? ([WindowsDir], WindowsExt)
         : (MacDirs, MacExt);
 
-    /// <summary>系统自带的可选音色，按名字排序。名字就是文件名去掉扩展名。</summary>
+    /// <summary>The system-provided sounds available to choose from, sorted by name. The name is the filename with its extension stripped.</summary>
     public static IReadOnlyList<string> Available()
     {
         var (dirs, ext) = Library;
@@ -60,7 +64,7 @@ public static class Sound
                 if (!Directory.Exists(dir)) continue;
                 foreach (var f in Directory.EnumerateFiles(dir, "*" + ext))
                     if (Path.GetFileNameWithoutExtension(f) is { Length: > 0 } n)
-                        names.Add(n);   // 高优先级目录先走，同名的后面那份自然进不来
+                        names.Add(n);   // Higher-priority directories go first, so a same-named later entry naturally can't get in
             }
             catch (Exception e)
             {
@@ -71,7 +75,7 @@ public static class Sound
         return [.. names.OrderBy(n => n, StringComparer.OrdinalIgnoreCase)];
     }
 
-    /// <summary>名字 → 完整路径。按优先级取第一个存在的，都没有就返回 null。</summary>
+    /// <summary>Name -> full path. Takes the first one that exists, in priority order; returns null if none do.</summary>
     private static string? Resolve(string name)
     {
         var (dirs, ext) = Library;
@@ -84,8 +88,9 @@ public static class Sound
     }
 
     /// <summary>
-    /// 按名字放一声。名字为空、文件不存在、播放失败 —— 一律安静收场。
-    /// **提示音绝不能把程序搞挂**，跟日志同一个原则。
+    /// Plays one sound by name. An empty name, a missing file, a playback failure -- all
+    /// fail quietly. **A notification sound must never crash the program**, the same
+    /// principle as logging.
     /// </summary>
     public static void Play(string? name)
     {
@@ -105,7 +110,7 @@ public static class Sound
         }
     }
 
-    /// <summary>从候选里挑第一个装机自带的，挑不到就退回列表里的第一个。</summary>
+    /// <summary>Picks the first candidate that's actually shipped with the system, falling back to the first entry in the list if none match.</summary>
     public static string? PreferredOrFirst(params string[] wanted)
     {
         var all = Available();

@@ -5,55 +5,75 @@ using Avalonia.Media;
 namespace ItamiTimer.App;
 
 /// <summary>
-/// 钟下方的七块多米诺骨牌 —— **星期几**。倒下几块就是周几（周一 1 … 周日 7）。
-/// **界面上一个字都没有**，扫一眼就知道，不需要读。
+/// The row of seven dominoes below the clock — **the day of the week**. However many have
+/// fallen is the day (Monday = 1 ... Sunday = 7). **Not a single word on screen** — one
+/// glance is enough, nothing to read.
 ///
-/// 纯矢量绘制，没有图片：跟着 DPI 缩放、跟着主题变色。
+/// Pure vector drawing, no images: scales with DPI, recolours with the theme.
 ///
-/// ── 几何（用户 2026-07-27 定的硬规格）────────────────────────────
+/// -- Geometry (hard spec set by the user, 2026-07-27) --------------------
 ///
-/// **比例 6 : 3 : 1**（高 : 宽面 : 厚），**间距 = 高的一半**。
+/// **Ratio 6 : 3 : 1** (height : face width : thickness), **spacing = half the height**.
 ///
-/// **倒向右边，压在还没倒的那块身上**（参考实物图：手指在左边推，波往右传）。
-/// 每块绕**右下角**顺时针转。
+/// **Falls to the right, leaning on the still-standing domino next to it** (per the
+/// reference photo: a finger pushes from the left, the wave travels right). Each domino
+/// rotates clockwise about its **bottom-right corner**.
 ///
-/// **倒角是算出来的，不是画上去的。** 两块的情形有解析解：左边那块的右上角
-/// 画一段半径 h 的弧，够到右边那块的左面时停住，水平距离恰好是间距，所以
-/// `sin θ = gap / h = 1/2 → θ = 30°`。三块以上接触面不再竖直，改用
-/// 「从 0° 起转、凸多边形求交、第一次接触即停」扫掠求解（解析式容易取到伪根）。
+/// **The tilt angle is computed, not eyeballed.** With two dominoes there's a closed-form
+/// solution: the left domino's top-right corner sweeps an arc of radius h, stopping the
+/// instant it reaches the left face of the domino to its right; the horizontal distance is
+/// exactly the spacing, so `sin θ = gap / h = 1/2 → θ = 30°`. With three or more, the
+/// contact surface is no longer vertical, so it's solved by sweeping instead ("rotate from
+/// 0°, test convex-polygon intersection, stop at first contact" — the closed form is prone
+/// to picking up spurious roots).
 ///
-/// ── 两条省事的性质 ─────────────────────────────────────────
+/// -- Two shortcuts worth noting -------------------------------------------
 ///
-/// 1. **倒 1~6 块共用一个数组的后缀**（见 <see cref="Cascade"/>）。物理原因是这条
-///    链**右对齐**：最右那块永远靠着还立着的那块，姿态与左边有几块无关。所以周一到
-///    周六右端完全不变，只是左边不断长出更平的一块。
-/// 2. **周日是特例**：七块全倒就没有靠山了，最右那块只能躺平 90°。
+/// 1. **Falling 1 through 6 dominoes shares one array's suffix** (see
+///    <see cref="Cascade"/>). The physical reason is that the chain is **right-aligned**:
+///    the rightmost domino always leans against the one still standing, and its pose
+///    doesn't depend on how many are down to its left. So Monday through Saturday leave the
+///    right end completely unchanged; only the left side keeps growing another, flatter
+///    domino.
+/// 2. **Sunday is a special case**: with all seven down there's nothing left to lean on, so
+///    the rightmost one just lies flat at 90°.
 ///
-/// 数值可以互相印证：递推收敛到 75.52°，而「面贴面摞起来」的极限角满足
-/// `cos θ = t / pitch = 1/4`，`arccos(0.25) = 75.52°`。两条路算出同一个数。
+/// The numbers cross-check each other: the recurrence converges to 75.52°, and the limiting
+/// angle for "faces stacked flush" satisfies `cos θ = t / pitch = 1/4`, i.e.
+/// `arccos(0.25) = 75.52°`. Two different derivations land on the same number.
 ///
-/// ── 渲染近似（用户 2026-07-27 定）─────────────────────────
+/// -- Rendering approximation (set by the user, 2026-07-27) ------------------
 ///
-/// **整排是镜像的。** 几何仍然按「向右倒」算（那样递推最好写），但画到屏幕时把 x
-/// 翻过来：于是**第一块倒下的在右边、往左倒**，影子自然投向右侧，跟表盘那个
-/// **左上**光源就一致了——不用改表盘，也不用改光源。递减的侧面因此落在左边，
-/// 正好是受光面。
+/// **The whole row is mirrored.** The geometry is still computed as "falling to the right"
+/// (that's the easiest way to write the recurrence), but x is flipped when drawn to screen:
+/// so **the first domino to fall is on the right, falling leftward**, and its shadow
+/// naturally falls to the right, matching the dial's own **upper-left** light source — no
+/// need to change the dial, and no need to change the light source. The narrowing side face
+/// therefore ends up on the left, which happens to be the lit face.
 ///
-/// **看不到顶面。** 相机高度在骨牌顶端一线，能看见顶面就意味着俯视，跟平视的
-/// 消失点矛盾。这一条同时决定了地上的影子只能是很薄的一条带子。
+/// **The top face is never visible.** The camera height sits level with the top edge of the
+/// dominoes; being able to see the top face would imply looking down, which contradicts an
+/// eye-level vanishing point. This same fact also dictates that the shadow on the ground can
+/// only ever be a thin strip.
 ///
-/// **侧面宽度按像素定死**：屏幕上从左数 6、5、4、3、2、1 像素，第七块起没有。
-/// **侧面是向光面，正对屏幕的正面反而略暗。**
+/// **Side-face width is pinned in pixels**: counting from the left on screen, 6, 5, 4, 3, 2,
+/// 1 pixels, and nothing from the seventh domino onward.
+/// **The side face catches the light; the front face, facing the screen, is actually
+/// slightly darker.**
 ///
-/// **倒下的牌没有侧面**：它转到了侧向，那个面已经看不见了。
+/// **A fallen domino has no side face**: it has rotated sideways, so that face is no longer
+/// visible at all.
 ///
-/// **影子是连成一片的一条带子，大小固定**，不随倒下块数变化。先画影子后画骨牌，
-/// 并且**骨牌整体下移、底部压住影子的上沿**——不压住的话骨牌会看着像浮在影子上方。
+/// **The shadow is one continuous strip of fixed size**, unaffected by how many have
+/// fallen. The shadow is drawn first, the dominoes after, and **the whole row is shifted
+/// down so its base overlaps the shadow's top edge** — without that overlap the dominoes
+/// would look like they're floating above the shadow.
 ///
-/// ── 性能 ──────────────────────────────────────────────
+/// -- Performance --------------------------------------------------------
 ///
-/// 布局一天只变一次、总共只有 7 种，所以**几何算好就缓存**（<see cref="_cache"/>），
-/// 重绘时只是顺序画一遍，运行时一次三角函数都不算。
+/// The layout only changes once a day and there are only 7 possible layouts total, so
+/// **the geometry is computed once and cached** (<see cref="_cache"/>); repainting just
+/// replays the cached list — not a single trig call at runtime.
 /// </summary>
 public class DominoRow : Control
 {
@@ -63,7 +83,7 @@ public class DominoRow : Control
     public static readonly StyledProperty<DialPalette> PaletteProperty =
         AvaloniaProperty.Register<DominoRow, DialPalette>(nameof(Palette), DialPalette.Light);
 
-    /// <summary>倒下的块数 = 星期几。0~7。</summary>
+    /// <summary>Number fallen = day of week. 0-7.</summary>
     public int Fallen { get => GetValue(FallenProperty); set => SetValue(FallenProperty, value); }
     public DialPalette Palette { get => GetValue(PaletteProperty); set => SetValue(PaletteProperty, value); }
 
@@ -75,49 +95,58 @@ public class DominoRow : Control
 
     public const int Count = 7;
 
-    // ---- 骨牌单位：高 6、厚 1、间距 3（= 高/2）、中心距 4
+    // ---- Domino units: height 6, thickness 1, spacing 3 (= height/2), pitch 4
     private const double H = 6, T = 1, Pitch = 4;
 
     /// <summary>
-    /// 露出的侧面宽度，**直接用像素定死**（用户 2026-07-27）：从左数第几块站着的骨牌
-    /// 决定基础宽度 6、5、4、3、2、1，第七档和所有倒下的都没有。
+    /// Visible side-face width, **pinned directly in pixels** (user, 2026-07-27): the
+    /// position (counting from the left) of a still-standing domino determines its base
+    /// width — 6, 5, 4, 3, 2, 1 — with nothing for the seventh slot or for any fallen
+    /// domino.
     ///
-    /// 刻意不跟缩放走。这个面本来就只是一道暗示厚度的窄边，按比例算的话在小窗口上
-    /// 会细到看不见、在大窗口上又会宽得像另一块骨牌；给绝对像素反而稳定。
-    /// （Avalonia 画的是 DIP，所以高 DPI 下它仍会跟着系统缩放，不会变成发丝。）
+    /// Deliberately not scaled with the layout. This face is only a narrow edge hinting at
+    /// thickness in the first place — scaling it proportionally would make it too thin to
+    /// see in a small window and as wide as another whole domino in a large one; absolute
+    /// pixels are more stable. (Avalonia draws in DIPs, so it still scales with the system
+    /// at high DPI — it won't turn into a hairline.)
     /// </summary>
     private static readonly double[] SidePx = [6, 5, 4, 3, 2, 1.5];
 
     /// <summary>
-    /// 亮面宽度还要随 <paramref name="fallen"/> 递减（原 ISSUE #12 / DESIGN §16.1）：
-    /// 最左边那块骨牌是**同一块**（世界坐标恒为 <c>Count-1</c>），它会站到周日才倒，
-    /// 若只按屏幕位置查表，它整周都会是固定的 6px。
+    /// The lit face's width also has to shrink as <paramref name="fallen"/> grows
+    /// (originally ISSUE #12 / DESIGN §16.1): the leftmost domino is **the same physical
+    /// domino** the whole week (its world coordinate is always <c>Count-1</c>) — it doesn't
+    /// fall until Sunday — so looking it up purely by screen position would keep it fixed
+    /// at 6px all week.
     ///
-    /// 按「剩余站立数」移窗（<c>shift = fallen − 1</c>，钳到 0）：周一（fallen=1）
-    /// 用回原表 6…1；此后每多倒一块，可见的这一截就整体收窄一档；它自己站着的
-    /// 最后一天（周六，fallen=6）宽度正好收到 1px 而不是提前归零——**不出现「还没倒
-    /// 但已经没有侧面」的空窗期**，宽度用尽和它倒下是同一天。
+    /// Instead it's windowed by "how many are still standing"
+    /// (<c>shift = fallen − 1</c>, clamped to 0): on Monday (fallen=1) the original table
+    /// 6...1 is used as-is; each further fall narrows the visible slice by one more tier;
+    /// on its own last standing day (Saturday, fallen=6) the width lands exactly at 1px
+    /// instead of hitting zero early — **there's no window where it "hasn't fallen yet but
+    /// already has no side face"**: running out of width and falling happen on the same day.
     /// </summary>
     private static double SideWidthPx(int i, int fallen)
     {
-        var j = Count - 1 - i;                 // 镜像之后，屏幕上从左数第几块（0 起）
+        var j = Count - 1 - i;                 // After mirroring, position counting from the left on screen (0-based)
         var index = j + Math.Max(0, fallen - 1);
         return index < SidePx.Length ? SidePx[index] : 0;
     }
 
     /// <summary>
-    /// 倒 1~6 块的角度（度）。**取这个数组的后 N 个**就是倒 N 块的布局。
-    /// 由 6:3:1 + 「间距 = 高/2」扫掠算出，见类注释。
+    /// Angles (in degrees) for 1 through 6 fallen. **Taking the last N entries** of this
+    /// array is the layout for N fallen. Computed by sweeping 6:3:1 plus "spacing =
+    /// height/2" — see the class doc comment.
     /// </summary>
     private static readonly double[] Cascade = [75.13, 74.41, 72.43, 67.12, 54.25, 30.00];
 
-    /// <summary>周日：七块全倒，没有靠山，最右那块躺平。</summary>
+    /// <summary>Sunday: all seven down, nothing left to lean on, the rightmost lies flat.</summary>
     private static readonly double[] Sunday = [75.52, 75.52, 75.52, 75.52, 75.52, 75.96, 90.00];
 
-    /// <summary>统一包围盒。**七天共用一个缩放**，否则周一的骨牌会明显比周日的大。</summary>
+    /// <summary>Shared bounding box. **All seven days share one scale**, otherwise Monday's dominoes would look noticeably bigger than Sunday's.</summary>
     private static readonly double MinX, MaxX, MaxY;
 
-    /// <summary>今天该倒几块。周一 1 … 周日 7。</summary>
+    /// <summary>How many should be down today. Monday = 1 ... Sunday = 7.</summary>
     public static int FallenForToday(DateTime now)
         => now.DayOfWeek == DayOfWeek.Sunday ? Count : (int)now.DayOfWeek;
 
@@ -128,7 +157,7 @@ public class DominoRow : Control
         _ => Cascade.AsSpan(Cascade.Length - fallen),
     };
 
-    // ---- 缓存
+    // ---- Cache
     private readonly record struct CacheKey(double W, double H, int Fallen, DialPalette? Palette);
     private CacheKey _key;
     private List<(Geometry Geo, IBrush Brush)> _cache = [];
@@ -140,7 +169,7 @@ public class DominoRow : Control
         foreach (var (geo, brush) in _cache) ctx.DrawGeometry(brush, null, geo);
     }
 
-    /// <summary>把七天所有姿态都走一遍，取并集包围盒，用来定死那个共用的缩放。</summary>
+    /// <summary>Walks every one of the seven days' poses and takes the union bounding box, used to pin the shared scale.</summary>
     private static (double, double, double) MeasureAllLayouts()
     {
         double minX = double.MaxValue, maxX = double.MinValue, maxY = 0;
@@ -160,13 +189,13 @@ public class DominoRow : Control
         return (minX, maxX, maxY);
     }
 
-    /// <summary>骨牌四角（世界坐标，y 向上）。绕右下角 (px,0) 顺时针倒 angleDeg。</summary>
+    /// <summary>The four corners of a domino (world coordinates, y up). Rotated angleDeg clockwise about its bottom-right corner (px,0).</summary>
     private static Point[] Corners(double px, double angleDeg)
     {
         var r = angleDeg * Math.PI / 180;
         var (c, s) = (Math.Cos(r), Math.Sin(r));
         Point Rot(double u, double v) => new(px + u * c + v * s, -u * s + v * c);
-        return [Rot(-T, 0), Rot(0, 0), Rot(0, H), Rot(-T, H)];   // 左下、右下、右上、左上
+        return [Rot(-T, 0), Rot(0, 0), Rot(0, H), Rot(-T, H)];   // bottom-left, bottom-right, top-right, top-left
     }
 
     private static List<(Geometry, IBrush)> Build(CacheKey k)
@@ -174,49 +203,63 @@ public class DominoRow : Control
         var list = new List<(Geometry, IBrush)>();
         if (k.W <= 0 || k.H <= 0 || k.Palette is not { } p) return list;
 
-        // 缩放七天共用（以并集包围盒为准），否则周一的骨牌会明显比周日的大。
+        // The scale is shared across all seven days (based on the union bounding box), otherwise Monday's dominoes would look noticeably bigger than Sunday's.
         var scale = Math.Min(k.W / (MaxX - MinX), k.H * 0.94 / MaxY);
 
-        // 转成数组：ReadOnlySpan 不能被局部函数捕获。只有 7 个元素，而 Build
-        // 一天才跑一次，这点开销无所谓。
+        // Converted to an array: a ReadOnlySpan can't be captured by a local function. Only
+        // 7 elements, and Build only runs once a day, so the overhead doesn't matter.
         var ang = Angles(k.Fallen).ToArray();
         double AngleAt(int i) => i < ang.Length ? ang[i] : 0;
 
-        // **左对齐**：锚点取【本布局自己】的最大世界 x（镜像后就是屏幕最左那一点），
-        // 而不是七天并集的。用并集会让周一到周六左边空出一大块——那块是留给周日
-        // 倒平的牌的，可周一根本没有。
-        // 周日因此有自己的锚点，但那天一块立着的都没有，看不出位置变过（用户说
-        // 周日是特例、位置随便）。
+        // **Left-aligned**: the anchor is this layout's **own** maximum world x (after
+        // mirroring, that's the leftmost point on screen), not the union across all seven
+        // days. Using the union would leave a big empty gap on the left from Monday through
+        // Saturday — that gap is reserved for Sunday's dominoes lying flat, which Monday
+        // doesn't have at all.
+        // Sunday therefore has its own anchor, but that day has no domino standing at all,
+        // so no shift in position is visible (per the user, Sunday is a special case and its
+        // position doesn't matter).
         var anchor = double.MinValue;
         for (var i = 0; i < Count; i++)
             foreach (var q in Corners(i * Pitch + T, AngleAt(i)))
                 anchor = Math.Max(anchor, q.X);
 
-        // 影子的跨度：左端 = 最左那块的左下角（= 屏幕上的 padX）；
-        // **右端 = 最右那块的接地点**，一点都不多出来（用户 2026-07-27 最终定）。
+        // The shadow's span: left end = the leftmost domino's bottom-left corner (= padX on
+        // screen); **right end = the rightmost domino's contact point, not a pixel more**
+        // (the user's final call, 2026-07-27).
         //
-        // 倒下的骨牌只有右下角还挨着地，那个角就是它的支点，世界坐标恒为 T。
-        // 曾经改成「右下顶点在 X 轴上的投影」——那个点比支点更靠右，于是影子会
-        // 探出骨牌之外一小截，而那一截末端没有任何东西遮，就露出一个直角。
-        // 现实里影子不会这么收尾。收回到支点，末端正好被骨牌自己压住。
+        // A fallen domino only still touches the ground at its bottom-right corner, which is
+        // its pivot, always at world coordinate T. This was once changed to "the bottom-right
+        // vertex's projection onto the X axis" — that point sits further right than the
+        // pivot, so the shadow would poke out slightly past the domino, and with nothing
+        // covering that little stretch it exposed a right angle. Real shadows don't end like
+        // that. Pulling it back to the pivot means the end is exactly covered by the domino
+        // itself.
         var shadowSpan = (anchor - T) * scale;
         var padX = (k.W - shadowSpan) / 2;
 
-        // 骨牌整体下移，脚跟压住影子，否则会看着像浮在影子上方
+        // The whole row shifts down so its heel overlaps the shadow, otherwise it would look like it's floating above the shadow
         var baseY = k.H * 0.965;
         Point S(Point w) => new(padX + (anchor - w.X) * scale, baseY - w.Y * scale);
 
-        // ---- 第一遍：一整条影子。**连成一片、大小固定**，不随倒下块数变化。
-        //      范围只取【七块都立着时】的那一段（倒下的牌伸出去的部分不带影子，
-        //      因为影子大小是固定的），光在左上所以往右多探一截。
-        //      上下沿都用渐变淡出：硬边会读成一条独立的灰带，骨牌就像浮在它上面。
+        // ---- Pass one: the single shadow strip. **One continuous piece, fixed size**,
+        //      unaffected by how many have fallen. Its span only covers the stretch from
+        //      when **all seven are standing** (a fallen domino's reach doesn't extend the
+        //      shadow, since the shadow's size is fixed), and it extends a bit further right
+        //      since the light is in the upper-left.
+        //      Both top and bottom edges fade out via gradient: a hard edge would read as an
+        //      independent grey band, making the dominoes look like they're floating above it.
         {
-            // **执行标准（用户 2026-07-27）：最左那块骨牌的左下角 = 影子的左下角。**
-            // 所以带子的左边界就是 padX、底边就是脚跟线 baseY，往上、往右铺开。
-            // 光从左边来 → 左边不该有影子；地面近乎侧看 → 越远越高，所以往上长。
+            // **Governing rule (user, 2026-07-27): the leftmost domino's bottom-left corner
+            // = the shadow's bottom-left corner.** So the strip's left boundary is padX, its
+            // bottom edge is the heel line baseY, and it extends upward and rightward.
+            // Light comes from the left -> there shouldn't be shadow on the left; the ground
+            // is seen nearly edge-on -> the further away, the higher up, hence it grows
+            // upward.
             //
-            // 右端跟着最右那块走：它一旦倒下，影子也跟着缩到斜面落下来的位置附近，
-            // 所以右端锚在它的支点上，而不是固定的满宽。
+            // The right end tracks the rightmost domino: once it falls, the shadow shrinks
+            // back to around where its sloped face lands, so the right end is anchored to
+            // its pivot rather than a fixed full width.
             var left = padX;
             var right = padX + shadowSpan;
             var top = baseY - T * scale * 1.15;
@@ -229,15 +272,21 @@ public class DominoRow : Control
                     EndPoint = new RelativePoint(0, 1, RelativeUnit.Relative),
                     GradientStops =
                     {
-                        // **上浅下深**，但整体压软（用户 2026-07-27 最终定）。
+                        // **Lighter at the top, darker at the bottom**, but the whole thing
+                        // toned down (the user's final call, 2026-07-27).
                         //
-                        // 关键不在方向而在**最深的那一档不能落在底边上** —— 落在底边就
-                        // 必然切出一条硬边。所以峰值放在 88% 处，最后一小段再淡回去，
-                        // 底边本身就不是最黑的地方，边界自己糊掉。
-                        // 峰值也从 0x30 降到 0x1C：影子只要"有"，不要"重"。
+                        // What matters isn't the direction but that **the darkest stop must
+                        // not land on the bottom edge** — landing there would necessarily cut
+                        // a hard edge. So the peak sits at 88%, fading back out over the last
+                        // stretch, so the bottom edge itself is never the darkest point and
+                        // the boundary smears itself away.
+                        // The peak was also lowered from 0x30 to 0x1C: the shadow only needs
+                        // to "exist", not to be "heavy".
                         //
-                        // 中间试过整个上下颠倒（上深下浅），边界确实没了，但读起来不对
-                        // ——影子该压在脚下，不该浮在骨牌腰上。
+                        // Flipping the whole gradient upside down (dark on top, light on
+                        // bottom) was tried along the way — the hard edge really did go away,
+                        // but it read wrong: the shadow should press down at the feet, not
+                        // float around the dominoes' waist.
                         new GradientStop(Color.FromArgb(0x00, 0, 0, 0), 0.00),
                         new GradientStop(Color.FromArgb(0x0C, 0, 0, 0), 0.50),
                         new GradientStop(Color.FromArgb(0x1C, 0, 0, 0), 0.88),
@@ -246,28 +295,33 @@ public class DominoRow : Control
                 }));
         }
 
-        // ---- 第二遍：骨牌。从右往左，左边倒下的那块压在右邻身上（在上层）
+        // ---- Pass two: the dominoes. Right to left, so a fallen domino on the left overlaps its right neighbour (drawn on top).
         for (var i = Count - 1; i >= 0; i--)
         {
             var a = AngleAt(i);
             var c = Corners(i * Pitch + T, a);
             var (bl, br, tr, tl) = (S(c[0]), S(c[1]), S(c[2]), S(c[3]));
 
-            // 立着的牌在右边多出一个侧面，宽度逐块减半（消失点在左）。
-            // **没有顶面**——相机在骨牌顶端一线，看得见顶面就意味着俯视，
-            // 跟平视的消失点矛盾。
+            // A standing domino gets an extra side face on the right, its width halving
+            // domino by domino (vanishing point to the left). **No top face** — the camera
+            // sits level with the top edge of the dominoes, so a visible top face would
+            // imply looking down, contradicting an eye-level vanishing point.
             if (a < 1e-6)
             {
-                // 镜像之后侧面落在【左】边，正对左上的光 —— 它是向光面。
+                // After mirroring, the side face ends up on the **left**, facing the
+                // upper-left light source — it's the lit face.
                 //
-                // **不是上下等宽**：视平线就在骨牌顶端（所以看不到顶面），纵深方向的
-                // 线全都朝那里收，于是这个面越往上越窄、到顶几乎并成一条。远端的
-                // 底角同时要抬起来一点——它比近端离视平线更近。
+                // **Not the same width top and bottom**: the eye level sits right at the top
+                // edge of the dominoes (hence no visible top face), and every line running in
+                // depth converges toward it, so this face narrows going upward, nearly
+                // meeting at the top. The far bottom corner also has to lift slightly — it's
+                // closer to eye level than the near corner.
                 var d = SideWidthPx(i, k.Fallen);
                 if (d > 0.4)
                 {
-                    // 消失点在**画面之外**、大致在半高的位置，所以远端那条边
-                    // **上下各收一截**（而不是只收顶上）。收多少跟露出的宽度成正比。
+                    // The vanishing point sits **off-canvas**, roughly at half height, so the
+                    // far edge **pulls in at both top and bottom** (not just at the top). How
+                    // much it pulls in is proportional to the visible width.
                     var shrink = d * 0.55;
                     list.Add((Quad(br,
                                    new Point(br.X - d, br.Y - shrink),

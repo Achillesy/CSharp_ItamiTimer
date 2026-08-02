@@ -3,14 +3,16 @@ using Avalonia.Media;
 namespace ItamiTimer.App;
 
 /// <summary>
-/// DESIGN.md §8.2.7 的两套配色。
+/// The two colour schemes for the dial.
 ///
-/// **盘面跟随主题**（§0.4 修正后的第 1 项）：白天素白、夜里深灰，是同一套东西的
-/// 日面与夜面，不是二选一。
+/// **The dial follows the theme** (item 1 of §0.4's revision): plain white by day, deep
+/// grey by night, the day and night face of the same thing, not an either/or choice.
 ///
-/// 2026-07-27 补：光是几何对了还不够。用户拿一张真实木质挂钟的照片指出，差别在
-/// **材质和光**——边框的渐变、钟底的落影、边框投在盘面上的影、指针投在盘面上的影。
-/// 所以这里除了语义色，还带了一组画"实物感"用的颜色。
+/// Added 2026-07-27: getting the geometry right wasn't enough. The user pointed at a photo
+/// of a real wooden wall clock and noted the difference was in **material and light** --
+/// the bezel's gradient, the clock's cast shadow on the wall, the bezel's shadow cast onto
+/// the face, the hands' shadows on the face. So besides the semantic colours, this also
+/// carries a set of colours purely for painting "physical feel".
 /// </summary>
 public sealed record DialPalette(
     Color Face, Color FaceRim, Color Ink, Color Tick,
@@ -19,43 +21,48 @@ public sealed record DialPalette(
     Color DominoTop, Color DominoFace, Color DominoSide,
     Color Alarm)
 {
-    /// <summary>日面：素白盘 + 木质边框（对着用户给的那张实物照片调的）。</summary>
+    /// <summary>Day face: a plain white face plus a wooden bezel (tuned against the reference photo the user provided).</summary>
     public static readonly DialPalette Light = new(
         Face: Color.FromRgb(0xFF, 0xFF, 0xFF),
-        FaceRim: Color.FromRgb(0xF2, 0xF3, 0xF5),   // 盘面边缘，被边框挡住光的地方
+        FaceRim: Color.FromRgb(0xF2, 0xF3, 0xF5),   // The face's rim, where the bezel blocks the light
         Ink: Color.FromRgb(0x1B, 0x22, 0x2A),
         Tick: Color.FromRgb(0x5A, 0x63, 0x6D),
-        // 木框：左上受光 → 右下背光
+        // The wooden bezel: lit upper-left -> unlit lower-right
         BezelLit: Color.FromRgb(0xB5, 0x7C, 0x4C),
         BezelMid: Color.FromRgb(0x8C, 0x58, 0x30),
         BezelDark: Color.FromRgb(0x5A, 0x35, 0x1C),
         Focus: Color.FromRgb(0x2F, 0xA3, 0x6B),
         Amber: Color.FromRgb(0xE0, 0xA0, 0x3A),
         Slack: Color.FromRgb(0xD6, 0x45, 0x3F),
-        // ⚠️ 2026-07-28 起没有任何地方在用：「人不在」的格子改成什么都不画
-        // （§8.2.3）。留着这个 token 是因为它是四种结局之一的语义位置，
-        // 哪天想把离开重新画出来时不必再调一次色。
+        // ⚠️ Unused anywhere since 2026-07-28: "not present" cells changed to drawing
+        // nothing at all (§8.2.3). This token stays because it's the semantic slot for one
+        // of the four possible outcomes -- if being away is ever drawn again, no colour
+        // needs picking a second time.
         Absent: Color.FromRgb(0x8A, 0x94, 0xA0),
         Pending: Color.FromRgb(0x3B, 0x7D, 0xD8),
-        // §8.2.6：秒针【不能】用 slack 红。红是"偷懒"的语义色，色带全红时秒针
-        // 会消失，而且会教育眼睛"红 = 正常"。独立 token，而且要【轻】——
-        // 它是装饰，不该跟时分针抢。
+        // §8.2.6: the second hand must NOT use slack red. Red is the semantic colour for
+        // "off-task", and if the band is entirely red the second hand would disappear, and
+        // it would also train the eye that "red = normal". A separate token, and it needs
+        // to be LIGHT -- it's decoration and shouldn't compete with the hour/minute hands.
         Sweep: Color.FromRgb(0x33, 0x40, 0x4B),
-        // §8.4.4 休息扇形。**不能是灰**：灰在这个盘面上已经是"不计入"的意思
-        // （离开、还欠着的时间），拿它画奖励等于让奖励长得像欠账。
-        // 蓝是唯一还空着的色相，而且它天然读作"歇一歇"。
+        // §8.4.4's rest wedge. **Must not be grey**: grey already means "not counted" on
+        // this dial (being away, time still owed), so drawing a reward in grey would make
+        // it look like a debt. Blue is the only hue still free, and it naturally reads as
+        // "take a break".
         Rest: Color.FromRgb(0x4E, 0x8C, 0xC8),
-        // 骨牌：**木质**（用户 2026-07-27 定），比表盘的木框浅一档，免得抢。
-        // 镜像之后侧面落在【左】边正对左上的光，所以侧面是向光面 ——
-        // 但**只需要稍微亮一点**，明暗拉太开就不像同一块木头了。
-        // DominoTop 保留但不再使用：相机在骨牌顶端一线，看不到顶面。
+        // The dominoes: **wood** (set by the user, 2026-07-27), a shade lighter than the
+        // dial's wooden bezel so it doesn't compete. After mirroring, the side face ends
+        // up on the LEFT, facing the upper-left light, so it's the lit face -- but it only
+        // needs to be **slightly** brighter, too much of a gap and it stops reading as the
+        // same piece of wood. DominoTop is kept but no longer used: the camera sits level
+        // with the top of the dominoes, so the top face is never visible.
         DominoTop: Color.FromRgb(0xE2, 0xC6, 0xA4),
         DominoFace: Color.FromRgb(0xC4, 0x9E, 0x74),
         DominoSide: Color.FromRgb(0xE6, 0xC8, 0xA4),
-        // 闹钟指针：暖黄，老式闹钟那种。比分针短、比时针粗。
+        // The alarm hand: warm yellow, like an old-fashioned alarm clock. Shorter than the minute hand, thicker than the hour hand.
         Alarm: Color.FromRgb(0xF0, 0xC0, 0x40));
 
-    /// <summary>夜面：深灰盘 + 深色金属边框。</summary>
+    /// <summary>Night face: a deep grey face plus a dark metal bezel.</summary>
     public static readonly DialPalette Dark = new(
         Face: Color.FromRgb(0x20, 0x27, 0x2F),
         FaceRim: Color.FromRgb(0x14, 0x19, 0x1F),
@@ -70,18 +77,20 @@ public sealed record DialPalette(
         Absent: Color.FromRgb(0x6E, 0x7A, 0x87),
         Pending: Color.FromRgb(0x5C, 0x97, 0xE8),
         Sweep: Color.FromRgb(0xB8, 0xC4, 0xD0),
-        Rest: Color.FromRgb(0x63, 0xA6, 0xE0),      // 夜面提亮一档，见 §8.4.4
+        Rest: Color.FromRgb(0x63, 0xA6, 0xE0),      // Brightened a tier for the night face, see §8.4.4
         DominoTop: Color.FromRgb(0x8A, 0x6E, 0x50),
         DominoFace: Color.FromRgb(0x6E, 0x56, 0x3C),
         DominoSide: Color.FromRgb(0x93, 0x77, 0x57),
         Alarm: Color.FromRgb(0xF5, 0xD0, 0x50));
 
     /// <summary>
-    /// §8.2.3 的三段过渡：focus → amber → slack。
+    /// §8.2.3's three-stop transition: focus -> amber -> slack.
     ///
-    /// 为什么不 RGB 直插（§0.4 选项 A）：直插在 50% 处会出现发脏的橄榄绿，看着像
-    /// 画错了。经琥珀走一趟就干净，而且自带明度变化——红绿是最常见的色盲混淆对
-    /// （约 8% 男性），明度差是颜色之外的第二个信号。
+    /// Why not interpolate RGB directly (§0.4's option A): a direct interpolation lands on
+    /// a muddy olive green at 50%, which looks like a mistake. Routing through amber stays
+    /// clean, and comes with a brightness change built in for free -- red/green is the most
+    /// common colour-blindness confusion pair (about 8% of men), so a brightness
+    /// difference is a second signal beyond colour alone.
     /// </summary>
     public Color Ramp(double impurity)
     {

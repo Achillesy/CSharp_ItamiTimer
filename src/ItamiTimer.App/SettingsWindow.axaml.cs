@@ -1,3 +1,4 @@
+using System.Reflection;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Markup.Xaml;
@@ -5,18 +6,22 @@ using Avalonia.Markup.Xaml;
 namespace ItamiTimer.App;
 
 /// <summary>
-/// 设置窗口。三条通知音（任务结束 / 休息结束 / 键鼠空闲）各带开关和音色，
-/// 外加闹钟（响铃 + 到点关机）和滴答的**音量**。照 Windows 时钟应用的
-/// 「专注时段」设置页排版。
+/// The settings window. Three notification sounds (task done / rest done / keyboard-mouse
+/// idle) each with a toggle and a sound choice, plus the alarm (ring + shut down at the due
+/// time) and the tick's **volume**. Laid out after the Windows Clock app's "Focus
+/// sessions" settings page.
 ///
-/// **滴答的开关不在这里** —— 它在钟的右上角那个喇叭上（DECISIONS C4）。
-/// 滴答是钟本身的功能，跟督促学习那三声不是一类东西。
+/// **The tick's toggle isn't here** -- it lives on the speaker in the top-right corner of
+/// the clock (DECISIONS C4). Ticking is the clock's own function, a different category
+/// from the three nudges that push you back to work.
 ///
-/// **一个字的说明都没有**（DECISIONS D6）：标题 + 控件，剩下的自己猜。
+/// **Not a single word of explanation** (DECISIONS D6): a title plus the controls, the rest
+/// is left to guess.
 ///
-/// 没有「确定 / 取消」：改一下存一下，跟系统设置一个路数。选中音色立刻试听一次，
-/// **且不看对应开关是否打开**：挑铃声本身就是想听个响，跟"这声以后会不会真的响"
-/// 是两回事。
+/// No "OK / Cancel": change it, it's saved, the same approach as the system's own settings.
+/// Selecting a sound plays it once immediately, **regardless of whether its toggle is
+/// on** -- picking a ringtone is about wanting to hear it, which is a separate matter from
+/// "will this actually ring later".
 /// </summary>
 public partial class SettingsWindow : Window
 {
@@ -32,7 +37,7 @@ public partial class SettingsWindow : Window
 
         var names = Sound.Available();
 
-        // 三张「开关 + 音色」卡，接线完全同构。
+        // Three "toggle + sound" cards, wired up identically.
         WireSoundCard("FocusOn", "FocusSound", names,
             () => settings.FocusDoneEnabled, v => settings.FocusDoneEnabled = v,
             () => settings.FocusDoneSound, v => settings.FocusDoneSound = v);
@@ -43,14 +48,14 @@ public partial class SettingsWindow : Window
             () => settings.IdleEnabled, v => settings.IdleEnabled = v,
             () => settings.IdleSound, v => settings.IdleSound = v);
 
-        // Command 卡：Execute on → 执行命令、音色变灰。Execute off → 响铃、可选音色。
+        // The Command card: Execute on -> runs the command, sound picker greys out. Execute off -> rings, sound is selectable.
         {
             var toggle = this.FindControl<ToggleSwitch>("ExecuteOn")!;
             var combo = this.FindControl<ComboBox>("CommandSound")!;
             combo.ItemsSource = names;
             toggle.IsChecked = settings.CommandEnabled;
             combo.SelectedItem = settings.CommandSound;
-            combo.IsEnabled = !settings.CommandEnabled; // 互斥：开 Execute 则禁用音色
+            combo.IsEnabled = !settings.CommandEnabled; // Mutually exclusive: turning on Execute disables the sound picker
 
             toggle.IsCheckedChanged += (_, _) =>
             {
@@ -80,20 +85,28 @@ public partial class SettingsWindow : Window
         {
             if (e.Property != RangeBase.ValueProperty) return;
             settings.TickVolume = (int)Math.Round(tickVol.Value);
-            // 拖动时实时试听：音量是唯一一个"不听见就调不准"的设置。
-            // 这里【不看】TickEnabled —— 用户正在调音量，就是要听见，
-            // 哪怕此刻喇叭是关着的。
+            // Plays live while dragging: volume is the one setting that "can't be tuned
+            // right without hearing it". This **ignores** TickEnabled -- the user is
+            // adjusting the volume, which means they want to hear it, even if the speaker
+            // is currently off.
             if (!_loading) Tick.Play(0, settings.TickVolume);
             Persist();
         };
+
+        // Version, read from the single <Version> in Directory.Build.props at build time --
+        // there's nowhere else in the app that shows this, so it lives here rather than
+        // getting its own About window.
+        var version = Assembly.GetExecutingAssembly().GetName().Version;
+        this.FindControl<TextBlock>("VersionLabel")!.Text = version is null ? "" : $"v{version.ToString(3)}";
 
         _loading = false;
     }
 
     /// <summary>
-    /// 一张「开关 + 音色下拉框」卡的全部接线：初值、开关联动、选中即试听即保存。
-    /// <paramref name="comboFollowsToggle"/> 控制下拉框是否随开关禁用——
-    /// 闹钟那张卡传 false：关着也能挑铃声。
+    /// All the wiring for one "toggle + sound dropdown" card: initial value, toggle
+    /// linkage, playing a preview and saving on selection. <paramref name="comboFollowsToggle"/>
+    /// controls whether the dropdown gets disabled along with the toggle -- the alarm's
+    /// card passes false: a sound can be picked even while it's off.
     /// </summary>
     private void WireSoundCard(
         string toggleName, string comboName, IReadOnlyList<string> names,
@@ -123,7 +136,7 @@ public partial class SettingsWindow : Window
         };
     }
 
-    /// <summary>改一下存一下。<c>_loading</c> 挡住构造期间那几次赋值触发的回调。</summary>
+    /// <summary>Change it, save it. <c>_loading</c> blocks the callbacks triggered by the initial assignments during construction.</summary>
     private void Persist()
     {
         if (_loading) return;

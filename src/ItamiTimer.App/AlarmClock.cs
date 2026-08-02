@@ -1,75 +1,82 @@
 namespace ItamiTimer.App;
 
 /// <summary>
-/// 闹钟模型（DESIGN.md §10）。**纯逻辑，不碰 UI、不碰时钟**——now 全部是参数，
-/// 所以整个类可以直接单元测试（tests/ItamiTimer.App.Tests/AlarmClockTests.cs）。
+/// The alarm model. **Pure logic, no UI, no clock** -- now is always a
+/// parameter, so the whole class can be unit tested directly
+/// (tests/ItamiTimer.App.Tests/AlarmClockTests.cs).
 ///
-/// 状态只有一个：<see cref="FireAt"/>，最后一次拨针算出的响铃时间点。
-/// **黄针位置是它的推导值**（时间点对 12 小时取余，用户 2026-07-30 定）——
-/// 不单独存位置、不记"变没变、响没响"，跟本项目「状态是推导出来的，
-/// 不是攒出来的」（原则 4）一个路数。
+/// There's exactly one piece of state: <see cref="FireAt"/>, the ring time computed from
+/// the last time the hand was moved. **The yellow hand's position is derived from it**
+/// (the time point mod 12 hours, set by the user on 2026-07-30) -- its position isn't
+/// stored separately, and "did it change, did it fire" isn't recorded either, the same
+/// approach as this project's "state is derived, not accumulated" (Principle 4).
 ///
-/// 响铃判定是单调比较 <see cref="ShouldFire"/>，不做角度容差（0.5°/分钟，
-/// 1.5° 的"容差"等于提前 3 分钟就响，DECISIONS E1）。
+/// Firing is a monotonic comparison, <see cref="ShouldFire"/>, with no angular tolerance
+/// (0.5°/minute, and a 1.5° "tolerance" would mean firing 3 minutes early, DECISIONS E1).
 /// </summary>
 public sealed class AlarmClock
 {
-    /// <summary>一格 1 分钟，表盘一圈 720 分钟（12 小时制），共 720 个停靠位。</summary>
+    /// <summary>One notch = 1 minute; the dial has 720 minutes per revolution (12-hour clock), so 720 stops total.</summary>
     public const double SlotMinutes = 1;
     public const double FaceMinutes = 720;
 
     /// <summary>
-    /// 最后一次拨针算出的响铃时间点。**响过也不清**——它还是黄针位置的来源；
-    /// "已经响过"由 <see cref="_fired"/> 记。null = 从来没拨过针。
+    /// The ring time computed from the last time the hand was moved. **Not cleared once it
+    /// fires** -- it's still the source of the yellow hand's position; "already fired" is
+    /// tracked separately by <see cref="_fired"/>. Null = the hand has never been moved.
     /// </summary>
     public DateTime? FireAt { get; private set; }
 
-    /// <summary>本轮时间点已经响过（或恢复进来时就已过期 = 无效）。</summary>
+    /// <summary>Whether this round's time point has already fired (or was already expired on restore = invalid).</summary>
     private bool _fired;
 
     /// <summary>
-    /// 黄针停在表盘上的位置（0~719 分钟）：**时间点对 12 小时取余**。
-    /// 没拨过针时黄针停在 12 点（0）。
+    /// The yellow hand's position on the dial (0-719 minutes): **the time point mod 12
+    /// hours**. Rests at 12 o'clock (0) if the hand has never been moved.
     /// </summary>
     public double Position => FireAt is { } at
         ? (at.Hour % 12) * 60 + at.Minute + at.Second / 60.0
         : 0;
 
     /// <summary>
-    /// 把黄针拨 <paramref name="minutes"/> 分钟——正数顺时针、负数逆时针
-    /// （滚轮：前滚逆时针、后滚顺时针）。拨完立刻用严格算法把「下一次几点响」
-    /// 算死存住；悬浮提示直接读 <see cref="FireAt"/>——显示的和会响的是同一个值。
+    /// Moves the yellow hand by <paramref name="minutes"/> minutes -- positive is
+    /// clockwise, negative is counter-clockwise (scroll wheel: forward = counter-clockwise,
+    /// back = clockwise). Immediately recomputes and fixes "when will it next ring" with a
+    /// strict algorithm; the tooltip reads <see cref="FireAt"/> directly -- what's shown and
+    /// what will actually fire are the same value.
     ///
-    /// <see cref="NextRing"/> 保持钟面位置不变（今天 T / T+12 / 明天 T 对 12 小时
-    /// 取余相同），所以推导出的 <see cref="Position"/> 恰好就是拨完的新位置。
+    /// <see cref="NextRing"/> preserves the dial position (today's T / T+12 / tomorrow's T
+    /// are all the same mod 12 hours), so the derived <see cref="Position"/> lands exactly
+    /// on the new position after the move.
     /// </summary>
     public void Bump(double minutes, DateTime now)
     {
-        // C# 的 % 对负数会给出负值，逆时针跨过 12 点要做真模运算才能环绕
+        // C#'s % gives a negative result for negative numbers; wrapping counter-clockwise past 12 needs true modular arithmetic
         var pos = ((Position + minutes) % FaceMinutes + FaceMinutes) % FaceMinutes;
         FireAt = NextRing(now, pos);
         _fired = false;
     }
 
-    /// <summary>到点了吗。单调比较，不重新判黄针位置。</summary>
+    /// <summary>Is it due yet. A monotonic comparison, doesn't re-derive the yellow hand's position.</summary>
     public bool ShouldFire(DateTime now) => !_fired && FireAt is { } at && now >= at;
 
-    /// <summary>响过即撤——闹钟是一次性的，不是每日重复（DECISIONS E5）。时间点留着当黄针位置。</summary>
+    /// <summary>Fires once and is done -- the alarm is one-shot, not a daily repeat (DECISIONS E5). The time point stays, as the source of the yellow hand's position.</summary>
     public void MarkFired() => _fired = true;
 
     /// <summary>
-    /// 从上次会话恢复（ISSUE_FIX #2.6）：加载时间点只为显示黄针，**不激活闹钟**。
-    /// 关着程序时错过的闹钟不补响。
+    /// Restored from a previous session: loading the time point is only for display, it
+    /// **doesn't activate the alarm**. An alarm missed while the program was closed doesn't
+    /// fire late.
     /// </summary>
     public void Restore(DateTime? fireAt, DateTime now)
     {
         FireAt = fireAt;
-        _fired = true; // 启动时一律不激活，等用户滚轮或开 Execute 才激活
+        _fired = true; // Never active on startup; only activated once the user moves the wheel or turns on Execute
     }
 
     /// <summary>
-    /// 激活闹钟（用户滚轮拨针 / 开启 Execute 时调用）。
-    /// 只有目标时刻在将来才激活——已过期的不补响。
+    /// Activates the alarm (called when the user scrolls the wheel / turns on Execute).
+    /// Only activates if the target time is still in the future -- an expired one doesn't fire late.
     /// </summary>
     public void Activate(DateTime now)
     {
@@ -78,17 +85,20 @@ public sealed class AlarmClock
     }
 
     /// <summary>
-    /// 黄针格子（12 小时制钟面时刻 T）→ 下一次会响的具体时刻。
-    /// 三级判断**全部用严格小于**（用户 2026-07-30 定，DECISIONS E2）：
+    /// Yellow-hand slot (12-hour dial time T) -> the next actual moment it will ring.
+    /// All three tiers use **strictly less than** (set by the user on 2026-07-30,
+    /// DECISIONS E2):
     ///
     /// <code>
-    /// now &lt; 今天的 T       → 今天的 T（上午那一半）
-    /// now &lt; 今天的 T + 12h → T + 12（下午那一半）
-    /// 否则                  → 明天的 T
+    /// now &lt; today's T       -> today's T (the morning half)
+    /// now &lt; today's T + 12h -> T + 12 (the afternoon half)
+    /// otherwise               -> tomorrow's T
     /// </code>
     ///
-    /// **故意不用「小于等于」**——now 恰好落在黄针那一格上（拨的瞬间正好和时针
-    /// 重合）的意思是"12 小时后"，不是"现在"，不然拨着拨着突然就响了。
+    /// **Deliberately not "less than or equal"** -- if now lands exactly on the yellow
+    /// hand's slot (the moment it was set happens to coincide with the hour hand), that
+    /// means "12 hours from now", not "right now", otherwise it would suddenly ring in the
+    /// middle of being adjusted.
     /// </summary>
     public static DateTime NextRing(DateTime now, double faceMinutes)
     {

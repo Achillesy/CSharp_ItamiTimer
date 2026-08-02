@@ -6,24 +6,29 @@ using Avalonia.Media.Imaging;
 namespace ItamiTimer.App;
 
 /// <summary>
-/// 番茄 —— 应用图标。
+/// Tomato -- the app icon.
 ///
-/// 一个番茄钟用番茄做图标是本分。**任务进行中**任务栏图标换成 <see cref="RingIcon"/>
-/// 的进度色环（§8.3.2）；**空闲时**就是这颗番茄。
+/// A pomodoro timer using a tomato as its icon is fitting. **While a task is running**,
+/// the taskbar icon switches to <see cref="RingIcon"/>'s progress ring (§8.3.2); **while
+/// idle**, it's this tomato.
 ///
-/// 跟表盘和骨牌一样是纯矢量：几个多边形和贝塞尔，没有位图资源，任何尺寸都清晰。
+/// Pure vector, like the dial and the dominoes: a handful of polygons and Beziers, no
+/// bitmap asset, crisp at any size.
 ///
-/// **配色约束（用户定）：标准红 + 标准绿，总用色不超过 8 种。** 实际 6 种。
-/// **不描边**——加黑线就变成插画了。层次靠面与面的明暗差，不用渐变：渐变在 16px
-/// 的任务栏图标上会糊成一团，而纯色块缩到再小也还能看出是个番茄。
+/// **Colour constraint (set by the user): standard red + standard green, no more than 8
+/// colours total.** Actually 6. **No outline** -- adding a black line would turn it into
+/// an illustration. Depth comes from the brightness difference between faces, not
+/// gradients: a gradient smears into a blur at a 16px taskbar icon size, while flat colour
+/// blocks still read as a tomato even scaled down further.
 ///
-/// 2026-07-27 重画：第一版照着「折纸番茄」做了一个很大的绿色罩子扣在果身上，
-/// 那是常识性错误 —— 真实番茄顶上的萼片是**小而尖的几片叶子**，外加一小截梗，
-/// 绝不会大到盖住果肩。
+/// Redrawn on 2026-07-27: the first version modeled a "paper-tomato" look with a big green
+/// cap sitting over the whole body, which was a plain factual error -- a real tomato's
+/// sepals are **a few small, pointed leaves**, plus a short stem, never large enough to
+/// cover the shoulders of the fruit.
 /// </summary>
 public static class TomatoIcon
 {
-    // ---- 6 种颜色，一个不多
+    // ---- 6 colours, not one more
     private static readonly Color Red = Color.FromRgb(0xE0, 0x1B, 0x24);
     private static readonly Color RedDark = Color.FromRgb(0xB3, 0x11, 0x18);
     private static readonly Color RedLit = Color.FromRgb(0xF2, 0x55, 0x5B);
@@ -41,40 +46,43 @@ public static class TomatoIcon
             Point P(double x, double y) => new(x * size, y * size);
             void Fill(Color c, Geometry g) => ctx.DrawGeometry(new SolidColorBrush(c), null, g);
 
-            // ---- 果身。先画暗的一整个，再把亮的往左上错开一点点盖上去，
-            //      右下就自然露出一弯暗部 —— 两个形状做出体积，不用渐变。
+            // ---- The fruit body. Draws the dark version whole first, then offsets the
+            //      bright version slightly toward the upper-left on top of it, so the
+            //      lower-right naturally shows a crescent of shadow -- two shapes create
+            //      volume without any gradient.
             Fill(RedDark, Body(P, 0.512, 0.572));
             Fill(Red, Body(P, 0.492, 0.556));
 
-            // 左上的高光：一道弯月形的亮红
+            // The upper-left highlight: a crescent of bright red
             Fill(RedLit, Highlight(P));
 
-            // ---- 萼片：小而尖的几片叶子，从果顶中心朝外散开、略微下垂。
-            //      左右不完全对称才像真的。
+            // ---- Sepals: a few small, pointed leaves fanning outward from the top of the
+            //      fruit, drooping slightly. Not quite symmetric left to right, which is
+            //      what makes it look real.
             var hub = P(0.50, 0.250);
             foreach (var (tx, ty, w) in new[]
                      {
-                         (0.150, 0.248, 0.026),   // 最左，几乎平伸
+                         (0.150, 0.248, 0.026),   // Leftmost, nearly horizontal
                          (0.252, 0.146, 0.024),
                          (0.388, 0.108, 0.022),
                          (0.618, 0.102, 0.022),
                          (0.762, 0.150, 0.024),
-                         (0.858, 0.262, 0.026),   // 最右
+                         (0.858, 0.262, 0.026),   // Rightmost
                      })
                 Fill(GreenDark, Leaf(hub, P(tx, ty), w * size));
 
-            // 中间两片压在上层、亮一档，做出叶子相互叠压的层次
+            // The middle two overlap on top, one shade brighter, giving the leaves a sense of layering
             foreach (var (tx, ty, w) in new[] { (0.318, 0.186, 0.028), (0.692, 0.182, 0.028) })
                 Fill(Green, Leaf(hub, P(tx, ty), w * size));
 
-            // ---- 梗：一小截，稍微朝右斜
+            // ---- Stem: a short piece, tilted slightly to the right
             Fill(Green, Quad(P(0.470, 0.268), P(0.524, 0.268), P(0.558, 0.078), P(0.512, 0.072)));
             Fill(GreenLit, Quad(P(0.512, 0.072), P(0.558, 0.078), P(0.564, 0.048), P(0.518, 0.042)));
         }
         return rtb;
     }
 
-    /// <summary>果身：圆润、略扁、下部更饱满，接近实物那种「圆角方」的轮廓。</summary>
+    /// <summary>The fruit body: rounded, slightly flattened, fuller toward the bottom, close to the real thing's "rounded square" silhouette.</summary>
     private static Geometry Body(Func<double, double, Point> P, double cx, double cy)
     {
         var geo = new StreamGeometry();
@@ -88,7 +96,7 @@ public static class TomatoIcon
         return geo;
     }
 
-    /// <summary>左上那道弯月形高光。</summary>
+    /// <summary>The crescent highlight in the upper-left.</summary>
     private static Geometry Highlight(Func<double, double, Point> P)
     {
         var geo = new StreamGeometry();
@@ -101,7 +109,7 @@ public static class TomatoIcon
         return geo;
     }
 
-    /// <summary>一片叶子：从中心朝 tip 的细长三角，腰略鼓、尖端收成一点。</summary>
+    /// <summary>One leaf: a slender triangle from the hub toward the tip, slightly bulged at the waist, tapering to a point.</summary>
     private static Geometry Leaf(Point hub, Point tip, double halfWidth)
     {
         var dx = tip.X - hub.X;

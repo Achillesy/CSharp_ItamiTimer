@@ -1,28 +1,32 @@
 namespace ItamiTimer.Core;
 
 /// <summary>
-/// 整分钟对齐（DESIGN.md §14.1）。纯函数，无时钟——所有时刻都是参数传进来的。
+/// Whole-minute alignment. A pure function, no clock -- every moment is passed in as a parameter.
 /// </summary>
 public static class TimeGrid
 {
     /// <summary>
-    /// 抹掉秒和更细的部分，落到当前所在的那个整分钟。
+    /// Wipes out seconds and anything finer, landing on the whole minute it's currently
+    /// inside of.
     ///
-    /// 两处都用它：
+    /// Used in two places:
     ///
-    /// **任务的 startedAt**（2026-07-27 用户改定，DECISIONS A6）。23:13:10 点的开始
-    /// → 23:13:00 起算，而不是 23:14:00。代价说清楚：这会把点击**之前**最多 59 秒
-    /// 也算进来。
+    /// **A task's startedAt** (settled by the user on 2026-07-27, DECISIONS A6). Starting
+    /// at 23:13:10 -> counted from 23:13:00, not 23:14:00. The cost, stated plainly: this
+    /// counts up to 59 seconds **before** the click too.
     ///
-    /// 原设计是**进位**，正是为了避免那 59 秒；但那样用户点完要干等最多 59 秒才开始
-    /// —— 用户选了不等。（`CeilToMinute` 因此在 2026-08-02 删掉：它到最后只剩自己的
-    /// 测试在用，而那条决策的理由留在这里就够了。）
+    /// The original design rounded **up**, precisely to avoid those 59 seconds; but then
+    /// the user would have to sit and wait up to 59 seconds after clicking before it even
+    /// started -- the user chose not to wait. (<c>CeilToMinute</c> was therefore removed on
+    /// 2026-08-02: by the end it was only used by its own test, and the reasoning behind
+    /// that decision is enough to keep here.)
     ///
-    /// 进位还有一个副作用是**这里同样成立**的：每格恒为完整的 60 秒，因为起点照样
-    /// 落在整分钟上。
+    /// Rounding up would also have had a side effect that **still holds here too**: every
+    /// cell is always a full 60 seconds, because the start still lands on a whole minute.
     ///
-    /// **核算区间的末端**（§14.2）：正在进行的那一分钟不画，等它走完再画，
-    /// 否则那一格会随着秒数变化不停闪。
+    /// **The end of the accounting interval** (§14.2): the minute currently in progress
+    /// isn't drawn -- it waits until that minute has finished, otherwise that cell would
+    /// keep flickering as the seconds tick by.
     /// </summary>
     public static DateTimeOffset FloorToMinute(DateTimeOffset t)
         => new(t.Year, t.Month, t.Day, t.Hour, t.Minute, 0, t.Offset);

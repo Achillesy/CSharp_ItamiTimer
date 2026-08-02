@@ -3,18 +3,22 @@ using System.Text;
 namespace ItamiTimer.App;
 
 /// <summary>
-/// 诊断日志。
+/// Diagnostic logging.
 ///
-/// **界面对用户是沉默的**（分割线以下一个提示字都没有，用户 2026-07-27 定），
-/// 但沉默不等于把原因丢掉 —— 出错的**理由必须留下来**，否则程序坏了就成了黑箱：
-/// 用户只看到按钮灰着，而谁也说不出为什么。
+/// **The UI is silent toward the user** (not a single word below the divider explains
+/// itself, set by the user 2026-07-27), but silent doesn't mean the reason gets thrown
+/// away -- **the cause of a failure must be recorded somewhere**, otherwise a broken
+/// program becomes a black box: the user just sees a greyed-out button, and nobody can say
+/// why.
 ///
-/// ⚠️ **这是本程序唯一会写盘的东西**，跟 DESIGN.md §8.1「完全不写盘」并不冲突：
-/// 那一条禁的是**任务状态**落盘（不要 current-task.json、不要累加值、退出即放弃），
-/// 目的是让状态永远由 AW 历史推导。日志是另一类东西 —— 它只往后追加、从不被读回来
-/// 参与任何判定，删掉它不影响程序的任何行为。
+/// ⚠️ **This is the one thing this program writes to disk**, which doesn't conflict with
+/// this project's "never write to disk" rule: that rule forbids **task state** being
+/// persisted (no current-task.json, no accumulators, quitting = abandoning), so that state
+/// is always derivable from ActivityWatch history. The log is a different category of
+/// thing -- it's only ever appended to, never read back to participate in any judgment,
+/// and deleting it doesn't change the program's behaviour at all.
 ///
-/// 写不进去就算了：**日志本身绝不能把程序搞挂**。
+/// If it can't be written, fine: **logging itself must never crash the program**.
 /// </summary>
 public static class Log
 {
@@ -26,29 +30,35 @@ public static class Log
     public static string Path_ => System.IO.Path.Combine(Directory, "itami.log");
 
     /// <summary>
-    /// <b>两个配置都写</b>（用户 2026-07-28 傍晚：「让 Release 版本也写 log」）。
+    /// <b>Both configurations write</b> (user, evening of 2026-07-28: "have the Release
+    /// build write logs too").
     ///
-    /// 这条<b>推翻了同一天早些时候</b>的「log 文件只有 Debug 才写，Release 版本不必了」。
-    /// 当时那个方案用 <c>[Conditional("DEBUG")]</c> 让整个调用连同实参在 Release 里
-    /// 一起消失，省掉了每分钟一次的字符串插值；但代价是 —— 这个类原来的注释里
-    /// 就把它写明白了 —— <b>界面对用户是沉默的</b>（分割线以下一个提示字都没有），
-    /// 日志是<b>唯一</b>能让人事后看出"它到底怎么了"的地方（§8.1a）。Release 下出了错
-    /// （AW 连不上、rules.json 写坏、抛异常），屏幕上只有一个灰按钮，谁也查不起。
+    /// This <b>reverses a decision from earlier the same day</b>: "the log file is only
+    /// written in Debug, Release doesn't need to". That approach used
+    /// <c>[Conditional("DEBUG")]</c> to make the whole call, arguments included, vanish in
+    /// Release, saving a once-a-minute string interpolation; but the cost -- already spelled
+    /// out in this class's own comment -- is that <b>the UI is silent toward the user</b>
+    /// (not a word below the divider explains itself), and the log is the <b>only</b> place
+    /// anyone can find out "what actually went wrong" after the fact (§8.1a). If something
+    /// fails in Release (ActivityWatch unreachable, a broken rules.json, an exception
+    /// thrown), all the screen shows is one greyed-out button, and nobody can investigate.
     ///
-    /// 省下的那点开销本来也不值一提：一分钟一行，一轮任务最多五十行。
+    /// The overhead saved wasn't worth mentioning anyway: one line a minute, at most fifty lines for a whole round.
     ///
-    /// 写入量仍然有上限兜底 —— 超过 1MB 就滚一次，只留一份旧的（见 <see cref="Roll"/>），
-    /// 所以长期开着也不会把盘吃光。
+    /// Write volume still has a backstop -- past 1MB it rolls over once, keeping only one
+    /// old copy (see <see cref="Roll"/>), so leaving it running for a long time doesn't eat
+    /// up the disk.
     ///
-    /// 想回到"只在出事时留痕"的中间档：给 <see cref="Info"/> 和 <see cref="Warn"/>
-    /// 加回 <c>[Conditional("DEBUG")]</c>、<see cref="Error"/> 不加即可。正常一轮任务
-    /// 零写入，出事时又有据可查。
+    /// To go back to a middle ground of "only leave a trace when something breaks": add
+    /// <c>[Conditional("DEBUG")]</c> back to <see cref="Info"/> and <see cref="Warn"/>,
+    /// leaving <see cref="Error"/> without it. A normal round then writes nothing at all,
+    /// while a failure still leaves evidence.
     /// </summary>
     public static void Info(string message) => Write("INFO ", message);
 
     public static void Warn(string message) => Write("WARN ", message);
 
-    /// <summary>记一条错误。**异常的完整信息一定要进去** —— 界面上那句话是不会有的。</summary>
+    /// <summary>Logs an error. **The exception's full detail must go in** -- there's no UI message to fall back on.</summary>
     public static void Error(string what, Exception e)
         => Write("ERROR", $"{what}: {e.GetType().Name}: {e.Message}"
                           + (e.InnerException is { } inner ? $"  <- {inner.GetType().Name}: {inner.Message}" : ""));
@@ -68,12 +78,12 @@ public static class Log
         }
         catch
         {
-            // 日志写不进去就算了。绝不能因为记不了日志而把程序搞挂 ——
-            // 那会把一个小毛病升级成崩溃。
+            // Couldn't write the log, fine. Logging must never crash the program --
+            // that would turn a minor hiccup into a real failure.
         }
     }
 
-    /// <summary>超过 1MB 就滚一次，只留一份旧的。长期开着也不会把盘吃光。</summary>
+    /// <summary>Rolls over past 1MB, keeping only one old copy. Leaving it running for a long time doesn't eat up the disk.</summary>
     private static void Roll()
     {
         var f = new FileInfo(Path_);

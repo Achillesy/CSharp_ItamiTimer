@@ -3,74 +3,86 @@ using ItamiTimer.Core;
 namespace ItamiTimer.Core.Tests;
 
 /// <summary>
-/// 2026-07-27 踩到的时区显示 bug 的守卫。
+/// A guard for the time-zone display bug hit on 2026-07-27.
 ///
-/// 账单里「专注已达成于」打成了 06:40:45，实际是 14:40:45——同一份账单混了两个
-/// 时区：`StartedAt` 来自 `DateTimeOffset.Now`（本地偏移），而 `FocusCompletedAt`
-/// 是从 AW 事件推导来的，AW 返回 UTC，`DateTimeOffset.Parse` 保留 `+00:00`。
+/// The report's "Focus achieved at" printed 06:40:45 when the real time was 14:40:45 -- the
+/// same report mixed two time zones: `StartedAt` came from `DateTimeOffset.Now` (local
+/// offset), while `FocusCompletedAt` was derived from an ActivityWatch event, and
+/// ActivityWatch returns UTC, which `DateTimeOffset.Parse` keeps as `+00:00`.
 ///
-/// 这里守的是根因：**从 AW 事件推导出来的时刻，会带着事件自己的偏移量**。
-/// 所以任何显示它的地方都必须先转本地（渲染层已收口到 Renderer.Clock）。
+/// What's guarded here is the root cause: **a moment derived from an ActivityWatch event
+/// carries that event's own offset along with it**. So anywhere it gets displayed must
+/// convert to local time first (the rendering layer already funnels through
+/// Renderer.Clock).
 ///
-/// **2026-07-28 又犯了一次**：界面层的日志打出「专注达成于 16:37:35」，实际是本地
-/// 00:37:35。上一次只把 CLI 的渲染收了口，App 的日志行漏在外面 —— 说明"每个显示的
-/// 地方各自记得转"这个约定靠不住。现在改成**在边界上归一**：`AwClient` 解析
-/// 时间戳时直接 `ToLocalTime()`，两种偏移量根本不流进核心。
+/// **It happened again on 2026-07-28**: the UI layer's log printed "Focus achieved at
+/// 16:37:35" when local time was actually 00:37:35. The previous fix only funneled the
+/// CLI's rendering through one place, leaving the App's log line uncovered -- proof that
+/// "every display site remembers to convert on its own" isn't a convention that can be
+/// trusted. It's now fixed by **normalizing at the boundary**: `AwClient` calls
+/// `ToLocalTime()` the moment it parses a timestamp, so neither offset ever flows into the
+/// core.
 /// </summary>
 public class ClockDisplayTests
 {
     /// <summary>
-    /// 第二版把这个坑从根上填了：**达成时刻不再从 AW 事件推导**，它就是喂进去的那一拍
-    /// （DESIGN §4.5）。所以它的偏移量来自调用方的时钟，跟事件是 UTC 还是本地无关。
+    /// The second version fills this hole at the root: **the completion moment is no
+    /// longer derived from an ActivityWatch event** -- it's exactly the tick that was fed
+    /// in (DESIGN §4.5). So its offset comes from the caller's clock, unrelated to whether
+    /// the event was UTC or local.
     ///
-    /// 这里钉住这条语义——它同时也是 §15.1 的解药：一个不从账本推导的时刻，
-    /// 不可能因为账本被重写而往回跳。
+    /// This pins down that guarantee -- it's also the cure for §15.1: a moment that isn't
+    /// derived from the ledger can never jump backward just because the ledger got
+    /// rewritten.
     /// </summary>
     [Fact]
-    public void 达成时刻来自调用方的时钟_不再继承AW事件的偏移量()
+    public void TheCompletionMomentComesFromTheCallersClock_NotInheritedFromAnAwEventsOffset()
     {
         var rules = GroupRules.Parse("""
-            { "groups": { "学习经济学": { "rules": [ { "title": "经济学" } ] } } }
+            { "groups": { "Economics": { "rules": [ { "title": "Econ" } ] } } }
             """);
         var localStart = new DateTimeOffset(2026, 7, 27, 14, 35, 0, TimeSpan.FromHours(8));
         var buf = new JudgmentBuffer(localStart, 5);
 
-        // 事件用 UTC 偏移喂进来——AwClient 之外的调用方完全可能这么干
+        // The event is fed in with a UTC offset -- a caller outside AwClient could
+        // perfectly well do this
         var utcStart = localStart.ToUniversalTime();
-        List<AwEvent> win = [new(utcStart.AddMinutes(-3), 1200, "SumatraPDF.exe", "曼昆经济学.pdf", null)];
+        List<AwEvent> win = [new(utcStart.AddMinutes(-3), 1200, "SumatraPDF.exe", "Mankiw Econ.pdf", null)];
 
         TickOutcome outcome = default;
         DateTimeOffset tick = default;
         for (var i = 1; i <= 5 && !outcome.Completed; i++)
         {
             tick = localStart.AddMinutes(i);
-            outcome = buf.Tick(tick, win, [], rules, "学习经济学");
+            outcome = buf.Tick(tick, win, [], rules, "Economics");
         }
 
         Assert.True(outcome.Completed);
-        Assert.Equal(TimeSpan.FromHours(8), tick.Offset);      // 偏移量来自这一拍，不是事件
+        Assert.Equal(TimeSpan.FromHours(8), tick.Offset);      // The offset comes from this tick, not the event
         Assert.Equal(localStart.AddMinutes(5), tick);
     }
 
     [Fact]
-    public void 不同偏移量的同一时刻相等_核算不受影响()
+    public void TheSameMomentWithDifferentOffsetsIsEqual_AccountingIsUnaffected()
     {
         var utc = new DateTimeOffset(2026, 7, 27, 6, 40, 45, TimeSpan.Zero);
         var local = new DateTimeOffset(2026, 7, 27, 14, 40, 45, TimeSpan.FromHours(8));
 
-        Assert.Equal(utc, local);                       // 同一个瞬间
-        Assert.NotEqual(utc.ToString("HH:mm:ss"), local.ToString("HH:mm:ss")); // 但显示出来不一样
+        Assert.Equal(utc, local);                       // The same instant
+        Assert.NotEqual(utc.ToString("HH:mm:ss"), local.ToString("HH:mm:ss")); // But displayed differently
     }
 
     [Fact]
-    public void 边界上归一_AwClient解析出来的时刻是本地偏移()
+    public void NormalizedAtTheBoundary_MomentsParsedByAwClientAreLocalOffset()
     {
-        // 这是现在真正的防线：AwClient 在解析那一步就 ToLocalTime()，
-        // 所以从 AW 来的时刻不会再带着 +00:00 流进核心（见 AwClient.FetchEventsAsync）。
-        // 这里直接钉住那一行的语义，免得将来有人"顺手"把 ToLocalTime 去掉。
+        // This is the real line of defense now: AwClient calls ToLocalTime() right at the
+        // parsing step, so a moment coming from ActivityWatch never flows into the core
+        // still carrying +00:00 (see AwClient.FetchEventsAsync).
+        // This pins down that exact line's guarantee, so nobody "casually" removes the
+        // ToLocalTime() call later.
         var utc = DateTimeOffset.Parse("2026-07-27T16:37:35.000Z");
-        Assert.Equal(TimeSpan.Zero, utc.Offset);                       // 解析出来是 UTC
+        Assert.Equal(TimeSpan.Zero, utc.Offset);                       // Parses as UTC
         Assert.Equal(TimeZoneInfo.Local.GetUtcOffset(utc), utc.ToLocalTime().Offset);
-        Assert.Equal(utc, utc.ToLocalTime());                          // 绝对时刻不变
+        Assert.Equal(utc, utc.ToLocalTime());                          // The absolute instant is unchanged
     }
 }

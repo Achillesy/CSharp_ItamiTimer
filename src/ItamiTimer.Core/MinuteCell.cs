@@ -1,45 +1,55 @@
 namespace ItamiTimer.Core;
 
 /// <summary>
-/// 色环上的一格 = 一分钟（DESIGN.md §4.6）。**判定层和渲染层之间唯一的契约。**
+/// One cell on the coloured ring = one minute. **The one and only
+/// contract between the judgment layer and the rendering layer.**
 ///
-/// <b>这是 buffer 的一个投影，不是一个逐分钟累加的数组</b>（原则 4）。判据：
-/// 关掉界面再打开，每一格的颜色都要能原样重建。所以它没有任何自己的状态——
-/// 每拍从 <see cref="JudgmentBuffer"/> 重新算一遍。
+/// <b>This is a projection of the buffer, not a minute-by-minute accumulating array</b>
+/// (Principle 4). The test: close the UI and reopen it, and every cell's colour must be
+/// reconstructible exactly as before. So it carries no state of its own -- recomputed from
+/// <see cref="JudgmentBuffer"/> on every tick.
 ///
-/// <b>五个计数跟 <see cref="JudgmentCode"/> 一一对应</b>，加起来恒为 60：起点截断到
-/// 整分钟（A6）、`ToMinuteCells` 只吐完整的分钟，所以不存在「末格不足 60 秒」那种情况。
+/// <b>The five counts map one-to-one to <see cref="JudgmentCode"/></b> and always add up to
+/// 60: the start is truncated to a whole minute (A6), and `ToMinuteCells` only ever emits
+/// whole minutes, so there's no such thing as "the last cell is under 60 seconds".
 ///
-/// <b>不给颜色</b>——怎么上色是渲染层的事（§8 第四条纪律）：CLI 渲染成 ANSI 色块、
-/// 表盘渲染成色环。「色块只为好看，不是账」能成立就是靠这一条：判定层从头到尾不知道
-/// 什么是绿什么是红。
+/// <b>Carries no colour</b> -- how to colour it is the rendering layer's job (§8's fourth
+/// rule): the CLI renders it as ANSI colour blocks, the dial renders it as a coloured ring.
+/// "The colour blocks are purely cosmetic, not the ledger" holds precisely because of this:
+/// the judgment layer never knows what green or red even means.
 ///
-/// <b>但给档位</b>（<see cref="Tier"/>，2026-08-02 加）。原来这里写着「也不给档位」，
-/// 结果 §4.6 那套规则在 CLI 和表盘**各写了一遍**——三档阈值、argmax、平局取大值，
-/// 一字不差地重复。两份现在恰好一致，可改一处忘另一处不会报错，跟 `executeCommand`
-/// 两条读取路径是同一个病（§15.4）。
+/// <b>But it does carry a tier</b> (<see cref="Tier"/>, added 2026-08-02). This class used
+/// to say "doesn't carry a tier either", and the result was that §4.6's rules got written
+/// out **twice**, once in the CLI and once for the dial -- the three focus thresholds, the
+/// argmax, the tie-break toward the larger value, repeated word for word. The two happened
+/// to still agree, but changing one and forgetting the other wouldn't raise any error --
+/// the same disease as `executeCommand`'s two parallel read paths (§15.4).
 ///
-/// 分界线是这样划的：**「这一格该读成什么」是判定，「读成这样该画成什么」才是渲染。**
-/// 想回到连续编码的渲染层照样可以无视 <see cref="Tier"/>、直接用原始计数。
+/// The dividing line is drawn like this: **"what this cell should be read as" is judgment;
+/// "what a given reading should be drawn as" is rendering.** A rendering layer that wants
+/// to go back to a continuous encoding can still ignore <see cref="Tier"/> and use the raw
+/// counts directly.
 ///
-/// 保留原始计数而不是只存档位，还有一层意思：表盘将来想回到 D1 那种**连续**的木桶
-/// 编码时，数据还在，不必改判定层。
+/// Keeping the raw counts instead of only storing the tier carries one more implication:
+/// if the dial ever wants to go back to D1's **continuous** barrel-stave encoding, the data
+/// is still there, and the judgment layer wouldn't need to change.
 /// </summary>
 /// <param name="Index">
-/// 从 0 开始，第 i 格覆盖 <c>[任务起点 + i 分钟, +1 分钟)</c>。
-/// **它同时是圈号的来源**（<c>Index / 60</c> → lane 0 或 1，§8.3）。
-/// ⚠️ 归档之后任务起点会往前走一小时（§4.4），`Index` 因此从 0 重来——那是**对的**，
-/// 归档存在的理由就是让盘面永远只画最近的一到两小时。
+/// Zero-based; cell i covers <c>[task start + i minutes, +1 minute)</c>.
+/// **It's also where the lap number comes from** (<c>Index / 60</c> -> lane 0 or 1, §8.3).
+/// ⚠️ After archiving, the task's start moves forward an hour (§4.4), so `Index` restarts
+/// from 0 -- and that's **correct**: the whole reason archiving exists is to keep the dial
+/// always showing only the most recent hour or two.
 /// </param>
 /// <param name="Start">
-/// 这一格的起始时刻，天然落在整分钟上——所以「分针就是写入头」（§8.2.2），
-/// 角度直接从它来。
+/// This cell's start time, which naturally lands on a whole minute -- which is why
+/// "the minute hand IS the write head" (§8.2.2): the angle comes straight from it.
 /// </param>
-/// <param name="FocusSeconds">码 ≥ <see cref="JudgmentCode.Focused"/>，即计入专注的部分。</param>
-/// <param name="OffTaskSeconds">有窗口事件但不命中小目标。红。</param>
-/// <param name="AfkSeconds">afk 说人不在。不计入，但也不怪你——虚线空心框。</param>
-/// <param name="GraySeconds">承诺弧：还没走到、预计还要花的时间。</param>
-/// <param name="InitSeconds">没画过（漏拍留下的洞）。什么都不画。</param>
+/// <param name="FocusSeconds">Code >= <see cref="JudgmentCode.Focused"/>, i.e. the portion counted as focus.</param>
+/// <param name="OffTaskSeconds">A window event exists but doesn't match the goal. Red.</param>
+/// <param name="AfkSeconds">Afk says nobody's there. Not counted, but not your fault either -- a hollow dashed box.</param>
+/// <param name="GraySeconds">The commitment arc: time not reached yet, still expected to be spent.</param>
+/// <param name="InitSeconds">Never painted (a hole left by a missed tick). Draws nothing.</param>
 public readonly record struct MinuteCell(
     int Index,
     DateTimeOffset Start,
@@ -50,15 +60,19 @@ public readonly record struct MinuteCell(
     int InitSeconds)
 {
     /// <summary>
-    /// 这一格该读成什么（DESIGN.md §4.6）。**规则只写在这里一处。**
+    /// What this cell should be read as. **The rule is written in exactly
+    /// this one place.**
     ///
-    /// 有 focus 就按 <c>&gt;40 / &gt;20 / &gt;0</c> 分三档；一秒 focus 都没有时，
-    /// 在其余四类里取<b>计数最大</b>的，平局取<b>码值大</b>的
-    /// （OffTask &gt; Afk &gt; Gray &gt; Init，fail-closed）。
+    /// If there's any focus at all, it's tiered by <c>&gt;40 / &gt;20 / &gt;0</c>; when
+    /// there isn't a single second of focus, the <b>largest count</b> among the other four
+    /// categories wins, ties broken toward the <b>larger code value</b> (OffTask &gt; Afk
+    /// &gt; Gray &gt; Init, fail-closed).
     ///
-    /// argmax 而不是「过半」：三类混合时可能谁都不过半，按阈值写会默认掉进红色，
-    /// 于是「离开 29 秒 + 摸鱼 28 秒」被整格判成全红——<b>把起身离开画成红色等于
-    /// 冤枉自己</b>（§0.4.1）。argmax 没有阈值，也就没有那道悬崖。
+    /// Argmax rather than "majority": when three categories are mixed, none of them might
+    /// reach a majority, and a threshold-based rule would default into red -- so "29
+    /// seconds away + 28 seconds off-task" would get the whole cell judged entirely red --
+    /// <b>painting someone stepping away as red is wronging them</b> (§0.4.1). Argmax has
+    /// no threshold, so it has no such cliff.
     /// </summary>
     public CellTier Tier
     {
@@ -79,29 +93,29 @@ public readonly record struct MinuteCell(
 }
 
 /// <summary>
-/// 一格的读法（§4.6）。**顺序就是「谁盖谁」的顺序**，跟 <see cref="JudgmentCode"/> 一样：
-/// 平局时取靠后的那个。
+/// How a cell is read (§4.6). **The order is the "who covers whom" order**, just like
+/// <see cref="JudgmentCode"/>: ties are broken toward whichever comes later.
 /// </summary>
 public enum CellTier : byte
 {
-    /// <summary>没画过（漏拍留的洞）。什么都不画。</summary>
+    /// <summary>Never painted (a hole left by a missed tick). Draws nothing.</summary>
     NotDrawn,
 
-    /// <summary>承诺弧：还没走到。</summary>
+    /// <summary>The commitment arc: not reached yet.</summary>
     Pending,
 
-    /// <summary>人不在。不计入，也不怪你。</summary>
+    /// <summary>Not present. Not counted, not your fault.</summary>
     Away,
 
-    /// <summary>有窗口事件但不命中。</summary>
+    /// <summary>A window event exists but doesn't match.</summary>
     OffTask,
 
-    /// <summary>1~20 秒专注。</summary>
+    /// <summary>1-20 seconds of focus.</summary>
     FocusLow,
 
-    /// <summary>21~40 秒专注。</summary>
+    /// <summary>21-40 seconds of focus.</summary>
     FocusMid,
 
-    /// <summary>41~60 秒专注。</summary>
+    /// <summary>41-60 seconds of focus.</summary>
     FocusFull,
 }

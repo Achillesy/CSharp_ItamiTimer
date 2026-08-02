@@ -6,24 +6,27 @@ using Avalonia.Media.Imaging;
 namespace ItamiTimer.App;
 
 /// <summary>
-/// DESIGN.md §8.3.2 —— 任务栏按钮上的色环图标。
+/// The coloured-ring icon on the taskbar button.
 ///
-/// **这是重画的聚合投影，不是把表盘缩小。** 16px 图标上一圈的可用弧长约 41px，
-/// 60 格 → 每格 0.68px，逐分钟色块物理上画不出来。所以映射刻意不同：
-///   角度 = 已获得专注 / 承诺专注（完成度，不是钟面时间）
-///   颜色 = 整段任务到此刻的整体纯度
+/// **This is a redrawn aggregate projection, not a shrunken copy of the dial.** A 16px
+/// icon's ring has about 41px of usable arc length; 60 cells means 0.68px each --
+/// minute-by-minute colour blocks are physically impossible to draw. So the mapping is
+/// deliberately different:
+///   angle = focus earned / focus committed (completion ratio, not clock time)
+///   colour = the whole task's overall purity up to this moment
 ///
-/// 必须加对比描边：Windows 任务栏可浅可深，没有描边总有一种主题下糊掉。
+/// A contrasting outline is required: the Windows taskbar can be light or dark, and
+/// without an outline it always smears into a blur under one theme or the other.
 /// </summary>
 public static class RingIcon
 {
-    /// <param name="progress">0~1，画多少圈。</param>
-    /// <param name="impurity">0~1，0 全绿、1 全红，经琥珀过渡（§0.4 选项 B）。</param>
-    /// <param name="size">位图边长。任务栏按钮实际显示 16~32，这里画大一点让缩放好看。</param>
+    /// <param name="progress">0-1, how much of the ring to draw.</param>
+    /// <param name="impurity">0-1, 0 = fully green, 1 = fully red, transitioning through amber (§0.4 option B).</param>
+    /// <param name="size">The bitmap's side length. The taskbar button actually displays 16-32; this draws a bit larger so scaling looks good.</param>
     public static WindowIcon Make(double progress, double impurity, int size = 64)
         => ToIcon(Render(progress, impurity, size));
 
-    /// <summary>WindowIcon 和界面预览共用同一张位图，不重复画两遍。</summary>
+    /// <summary>WindowIcon and the UI preview share the same bitmap, not drawn twice.</summary>
     public static WindowIcon ToIcon(RenderTargetBitmap bmp)
     {
         var ms = new MemoryStream();
@@ -50,10 +53,10 @@ public static class RingIcon
             var r = size * 0.36;
             var thickness = size * 0.18;
 
-            // 底槽：让"还差多少"在任何主题下都看得出
+            // The base track: makes "how much is left" visible under any theme
             ctx.DrawEllipse(null, new Pen(new SolidColorBrush(Color.FromArgb(0x66, 0x8A, 0x94, 0xA0)), thickness), c, r, r);
 
-            // 进度弧，从 12 点顺时针
+            // The progress arc, clockwise from 12 o'clock
             if (progress > 0.001)
             {
                 var geo = new StreamGeometry();
@@ -67,7 +70,7 @@ public static class RingIcon
                     g.ArcTo(end, new Size(r, r), 0, sweep > 180, SweepDirection.Clockwise);
                     g.EndFigure(false);
                 }
-                // 先画一圈深色描边再画色环 —— 浅色任务栏上不至于糊成一团
+                // Draws a dark outline ring first, then the coloured ring -- so it doesn't smear on a light taskbar
                 ctx.DrawGeometry(null, new Pen(new SolidColorBrush(Color.FromArgb(0xAA, 0x12, 0x17, 0x1D)), thickness + size * 0.06, lineCap: PenLineCap.Round), geo);
                 ctx.DrawGeometry(null, new Pen(new SolidColorBrush(ring), thickness, lineCap: PenLineCap.Round), geo);
             }

@@ -56,7 +56,7 @@ CodeCoverage/
 TestResult.xml
 nunit-*.xml
 
-# Visual Studio / Rider 的本地状态与每用户设置
+# Visual Studio / Rider local state and per-user settings
 .vs/
 .idea/
 *.user

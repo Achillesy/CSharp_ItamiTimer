@@ -7,13 +7,15 @@ using Avalonia.Media;
 namespace ItamiTimer.App;
 
 /// <summary>
-/// 一个最小的「是 / 否」确认框。
+/// A minimal "yes / no" confirmation dialog.
 ///
-/// Avalonia 没有内置 MessageBox，而这里只需要问一句话，不值得为它引入一个库或者
-/// 再加一对 axaml。整个窗口在代码里搭出来，二十行。
+/// Avalonia has no built-in MessageBox, and all that's needed here is asking one
+/// question, not worth pulling in a library or adding another axaml file for it. The
+/// whole window is built in code, twenty lines.
 ///
-/// 用在 §9 那一处：**专注中关窗口 = 放弃任务**。收起来该用最小化，两个动作长得像、
-/// 后果差很远，所以必须问一次。
+/// Used at the one spot in §9: **closing the window mid-focus = abandoning the task**.
+/// Minimizing should be the way to tuck it away, but the two actions look alike and lead
+/// to very different consequences, so this has to ask once.
 /// </summary>
 public static class Confirm
 {
@@ -21,8 +23,9 @@ public static class Confirm
     {
         var result = false;
 
-        // ⚠️ Padding=0 + VerticalContentAlignment=Center 必须一起给，否则文字顶着
-        // 上边 —— 跟 MainWindow.axaml 的 Button.start 是同一个坑，理由见那里的注释。
+        // ⚠️ Padding=0 and VerticalContentAlignment=Center must be given together,
+        // otherwise the text sits pinned to the top edge -- the same trap as
+        // MainWindow.axaml's Button.start, see the reasoning there.
         var yes = MakeButton("Yes");
         var no = MakeButton("No");
         no.IsDefault = true;
@@ -35,8 +38,9 @@ public static class Confirm
             CanResize = false,
             ShowInTaskbar = false,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            // 主窗口可能被图钉钉住了（§8.3.7），普通模态窗口会沉到它下面，
-            // 表现成"点了 × 什么都没发生"。模态本来就该压在一切之上。
+            // The main window might be pinned (§8.3.7), and an ordinary modal window would
+            // sink beneath it, showing up as "I clicked X and nothing happened". A modal
+            // should always sit above everything else.
             Topmost = true,
             Background = new SolidColorBrush(Color.FromRgb(0xD7, 0xDB, 0xE0)),
             Content = new StackPanel
@@ -60,12 +64,13 @@ public static class Confirm
         yes.Click += (_, _) => { result = true; dlg.Close(); };
         no.Click += (_, _) => { result = false; dlg.Close(); };
 
-        // 确认框上的最小化按钮是没有意义的（它是模态的，缩起来只会让人找不到），
-        // 所以把它禁掉。Avalonia 没有对应属性，清掉 WS_MINIMIZEBOX 即可 ——
-        // 系统会把按钮画成灰的，而不是整个抹掉，正是"disable"。
+        // A minimize button on a confirmation dialog is meaningless (it's modal, and
+        // minimizing it would just make it impossible to find), so it's disabled. Avalonia
+        // has no property for this, so clearing WS_MINIMIZEBOX does it -- the system draws
+        // the button greyed-out rather than removing it entirely, which is exactly "disable".
         //
-        // **macOS 上不用做**：那边的模态窗口本来就不给最小化按钮 —— 系统自己就把
-        // 这件事办了，没有什么可禁的。
+        // **Not needed on macOS**: a modal window there doesn't get a minimize button to
+        // begin with -- the system already handles it, nothing to disable.
         dlg.Opened += (_, _) => { if (OperatingSystem.IsWindows()) DisableMinimize(dlg); };
 
         await dlg.ShowDialog(owner);

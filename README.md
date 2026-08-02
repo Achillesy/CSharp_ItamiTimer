@@ -8,8 +8,22 @@ you *provably* spent inside the goal you committed to — with you actually at t
 Wander off to a browser, a chat app, or away from the desk, and those minutes silently don't
 count: the grey deadline arc on the clock face slides further away, and you watch it go.
 
-The name (window title 「一袋米要扛几楼」) is a meme about pain. **All the pain comes from the
-dial** — no popups, no sounds on violation, no report card, no numbers. You look, you guess.
+![ItamiTimer main window](screenshots/ItamiTimer.png)
+![ItamiTimer settings window](screenshots/Settings.png)
+
+**All the pain comes from the dial**
+```
+痛みを感じろ，
+痛みを考えろ，
+痛みを受け取れ，
+痛みを知れ，
+痛みを知らぬ者（もの）に，
+本当の平和はわからん，
+俺は弥彦（やひこ）の痛みを忘れない，
+ここより，
+世界に痛みを，
+神罗天征（しんらてんせい）。
+```
 
 ## The pomodoro technique, and how this differs
 
@@ -32,14 +46,6 @@ replaces the honor system with an audit:
 | Long break every 4 rounds | Yes | No — one task = one focus + one rest, then the program **stops and waits** |
 | Auto-start next round | Common | **Never.** Starting a task is always your act |
 | Report | Varies | None on screen, ever. The dial's coloured cells are the whole story |
-
-There is **no degraded mode**. If ActivityWatch can't be reached the program keeps running in
-constrained mode and the judgment model absorbs it: seconds with no ActivityWatch record at
-all are counted as focus, on the grounds that ActivityWatch's own outages shouldn't be
-charged to you. The cost of that choice is documented in `DESIGN.md` §3.1.
-
-Because the dial is derived — not accumulated — polling frequency never affects accuracy, and
-the whole accounting engine is a pure function you can unit-test with synthetic events.
 
 ## Requirements
 
@@ -75,62 +81,6 @@ environment for Finder-launched apps):
 
 The focus-length slider is **10–50 minutes in Release** and **3–10 minutes in Debug**, so a
 development build doesn't make you sit through 25 real minutes to see the completion moment.
-
-## Defining your goals: `rules.json`
-
-A goal is a small, tight whitelist — a few apps or a title pattern, not a broad category.
-Goals appear as radio buttons; **pick exactly one** before you start, and it's locked for the
-round.
-
-```json
-{
-  "groups": {
-    "Economics": {
-      "rules": [
-        { "title": "(?i)econom|mankiw" },
-        { "app": "EconReader\\.exe" }
-      ]
-    },
-    "Coding": {
-      "rules": [
-        { "app": "devenv\\.exe|Code\\.exe|^Code$" }
-      ]
-    },
-    "Last quarter": { "disabled": true, "rules": [ { "title": "Blender" } ] }
-  },
-
-  "executeCommand": {
-    "windows": [ "explorer", "rundll32.exe user32.dll,LockWorkStation", "shutdown /s /t 0" ],
-    "macos":   [ "open -a TextEdit", "pmset displaysleepnow", "osascript -e 'tell application \"System Events\" to shut down'" ]
-  }
-}
-```
-
-- Rules within a goal are **OR**; `app` and `title` inside one rule are **AND**.
-  A title-only rule means "doing this thing counts, whatever the tool".
-- Anything that isn't a match is **off-task** (fail-closed). There is no neutral list —
-  add a rule rather than loosening the model.
-- `"disabled": true` hides a stale goal without deleting it.
-- Windows and macOS app names live in the same file; a pattern that can't match on the
-  other platform is harmless.
-- `executeCommand` is optional — it's what the alarm's **Execute** switch runs when the
-  yellow hand comes due (see below). **Only the first entry ever runs**: keep your
-  collection there and move one to the top to use it. Without it, nothing runs.
-- Comments and trailing commas are allowed (JSONC). **The program never writes this file**,
-  so your comments survive.
-- Lookup order: `%LOCALAPPDATA%\ItamiTimer\rules.json` (yours, survives republish) →
-  next to the exe → working directory.
-
-## The alarm
-
-Scroll the mouse wheel **on the clock face** — there is no button. A yellow hand appears and
-the ring time is fixed the moment you stop turning. Slow scrolling moves one minute per
-notch; keep scrolling and it accelerates up to 30 minutes per notch, so a full 12-hour sweep
-takes about twenty flicks. It's one-shot: once it rings, it's gone.
-
-In Settings you can switch the alarm from **a sound** to **Execute**, which runs
-`executeCommand` for the current OS. The two are mutually exclusive, and Execute is
-force-reset to off at every launch — a shutdown command must never survive a restart.
 
 ## Project layout
 
@@ -188,14 +138,7 @@ ItamiTimer --export-icon <path.ico>  # export the vector icon as the exe icon
 ItamiTimer --export-iconset <dir>    # same, as .iconset for macOS iconutil
 ```
 
-## Design documentation
-
-- [`DESIGN.md`](./DESIGN.md) — the full system design: judgment model, covering algorithm,
-  archiving, dial rendering spec, alarm model, cross-platform notes, known bugs, backlog.
-- [`DECISIONS.md`](./DECISIONS.md) — the guardrail list: decisions that were made
-  deliberately, with their known costs, and must not be casually reversed.
-
-Both are written in Chinese; the code comments are too.
+A Chinese version of this file is available as [`README_ZH.md`](./README_ZH.md).
 
 ## License
 

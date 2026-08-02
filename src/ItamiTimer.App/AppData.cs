@@ -4,27 +4,28 @@ using System.Text.Json;
 namespace ItamiTimer.App;
 
 /// <summary>
-/// 程序自己那点东西放哪儿。
+/// Where the program's own stuff lives.
 ///
-/// 单独拎出来是因为 <see cref="Log"/> 在 Release 下整个是空操作（用户 2026-07-28），
-/// 而 <see cref="Settings"/> 仍然要往同一个目录写 settings.json —— 让配置去依赖
-/// 一个已经不干活的日志类，是等着以后踩的坑。
+/// Pulled out on its own because <see cref="Log"/> is a complete no-op in Release (user,
+/// 2026-07-28), while <see cref="Settings"/> still needs to write settings.json to the
+/// same directory -- making config depend on a logging class that's already inert is a
+/// trap waiting to be stepped on later.
 /// </summary>
 public static class AppData
 {
     /// <summary>
-    /// settings.json 和（仅 Debug 的）日志放哪儿。
+    /// Where settings.json and the (Debug-only) log live.
     ///
     /// <code>
     /// Windows   %LOCALAPPDATA%\ItamiTimer
     /// macOS     ~/Library/Application Support/ItamiTimer
     /// </code>
     ///
-    /// **macOS 上不能直接用 <c>SpecialFolder.LocalApplicationData</c>**：.NET 在
-    /// 类 Unix 系统上把它映射到 XDG 的 <c>~/.local/share</c>，那是个从 Finder 里
-    /// 根本看不见的隐藏目录。用户要去改自己那份 rules.json 时得先会按 ⇧⌘. ——
-    /// 这个程序的配置本来就指望用户自己去编辑（§8.1 那条链子只读不写），
-    /// 藏起来等于把那条路堵死。
+    /// **Can't use <c>SpecialFolder.LocalApplicationData</c> directly on macOS**: .NET maps
+    /// it to XDG's <c>~/.local/share</c> on Unix-like systems, a hidden directory Finder
+    /// won't show at all. When a user wants to edit their own rules.json, they'd first need
+    /// to know ⇧⌘. -- this program's config is meant to be hand-edited by the user in the
+    /// first place (§8.1's chain is read-only), so hiding it would block that path entirely.
     /// </summary>
     public static string Dir { get; } = OperatingSystem.IsMacOS()
         ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
@@ -33,22 +34,26 @@ public static class AppData
                        "ItamiTimer");
 
     /// <summary>
-    /// 规则文件按三级找，**绝不只看当前工作目录**。
+    /// The rules file is looked up in three tiers, **never just the current working
+    /// directory**.
     ///
     /// <code>
-    /// 1. %LOCALAPPDATA%\ItamiTimer\rules.json   ← 用户自己的，跟 settings.json 放一起
-    /// 2. &lt;exe 所在目录&gt;\rules.json             ← 随程序发布的默认
-    /// 3. .\rules.json                            ← 开发时从仓库根目录跑
+    /// 1. %LOCALAPPDATA%\ItamiTimer\rules.json   <- the user's own, next to settings.json
+    /// 2. &lt;exe's directory&gt;\rules.json           <- the default shipped with the program
+    /// 3. .\rules.json                            <- for running from the repo root during development
     /// </code>
     ///
-    /// **第 1 级存在的理由**：重新发布会覆盖 exe 旁边那份，用户加的小目标就没了。
-    /// 把他那份放在这里，发布多少次都碰不到。删掉它就自动退回默认规则，很温和。
+    /// **Why tier 1 exists**: republishing overwrites the copy next to the exe, which
+    /// would wipe out any goals the user added. Keeping their copy here means any number of
+    /// republishes never touch it. Deleting it gently falls back to the default rules.
     ///
-    /// **不看工作目录优先**：桌面快捷方式的"起始位置"可以是任何东西，按工作目录
-    /// 找的话程序会时灵时不灵。2026-07-28 建 Release 快捷方式时才发现这个坑 ——
-    /// 此前所有测试都恰好从仓库根目录启动，工作目录一直正好是对的。
+    /// **Doesn't prioritize the working directory**: a desktop shortcut's "start in" folder
+    /// can be anything, so looking up by working directory would make the program work
+    /// sometimes and not others. This trap only surfaced on 2026-07-28 when building the
+    /// Release shortcut -- every test up to that point happened to launch from the repo
+    /// root, so the working directory always happened to be right.
     ///
-    /// **这一级链条只读不写**，程序不会自己去铺第 1 级那份文件（§8.1）。
+    /// **This tier chain is read-only**, the program never lays down tier 1's file itself (§8.1).
     /// </summary>
     public static string RulesPath()
     {
@@ -60,18 +65,23 @@ public static class AppData
     }
 
     /// <summary>
-    /// **程序自己那两个文件**（settings.json / during.json）怎么写。
+    /// How **the program's own two files** (settings.json / during.json) get written.
     ///
-    /// 一份，不是两份——原来 `Settings` 和 `During` 各写了一套一模一样的（连注释都一样），
-    /// 那正是「同一件事写两遍、改一处忘另一处」的种子（§15.4 的 `executeCommand` 就是
-    /// 那么长出来的）。
+    /// One options object, not two -- `Settings` and `During` used to each write their own
+    /// identical copy (even the comments matched), which is exactly the seed of "the same
+    /// thing written twice, change one and forget the other" (§15.4's `executeCommand` grew
+    /// out of exactly that).
     ///
-    /// 不转义非 ASCII：这两个是**给人看**的文件，小目标名是中文，默认编码器会把
-    /// 「学习经济学」写成 学习...，想手动清零都认不出是哪一行。
-    /// （`Unsafe` 指的是不为 HTML 上下文转义；这两份文件只被自己读写，不进任何网页。）
+    /// Doesn't escape non-ASCII: these two files are meant **to be read by a human**, and
+    /// goal names can be in any language -- the default encoder would turn a name into a
+    /// string of `\uXXXX` escapes, making it unrecognizable if someone wants to manually
+    /// reset an entry to zero.
+    /// (`Unsafe` refers to not escaping for an HTML context; these two files are only ever
+    /// read and written by the program itself, never embedded in a web page.)
     ///
-    /// ⚠️ 这**不能**用来读写 `rules.json`——那是用户手写的，程序只读不写，
-    /// 而且它的解析设置在 `GroupRules` 里（注释、结尾逗号、大小写不敏感）。
+    /// ⚠️ This **must not** be used to read or write `rules.json` -- that file is
+    /// hand-written by the user, the program only reads it, and its own parsing settings
+    /// (comments, trailing commas, case-insensitivity) live in `GroupRules`.
     /// </summary>
     public static readonly JsonSerializerOptions JsonOptions = new()
     {

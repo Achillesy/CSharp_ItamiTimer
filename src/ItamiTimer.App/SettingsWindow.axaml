@@ -9,14 +9,16 @@
         WindowStartupLocation="CenterOwner"
         Topmost="True"
         Background="#D7DBE0">
-  <!-- Topmost：主窗口可能被用户用图钉钉住了（§8.3.7），那时普通的模态窗口会
-       整个沉到它下面 —— 屏幕上什么都不出现，点了齿轮像没反应。模态窗口本来
-       就该压在一切之上，直接钉死。2026-07-28 实测撞到。 -->
+  <!-- Topmost: the main window might be pinned by the user (§8.3.7), and an ordinary
+       modal window would sink entirely beneath it — nothing shows up on screen, and
+       clicking the gear looks like it did nothing. A modal window should sit above
+       everything else to begin with, so it's pinned outright. Hit in practice on 2026-07-28. -->
 
   <Window.Styles>
-    <!-- 一张卡片 = 一条设置。照 Windows 时钟应用的设置页排。
-         **一个字的说明都没有**（用户 2026-07-28）：标题 + 控件，剩下的自己猜 ——
-         跟主界面分割线以下不给提示字、不给数字是同一条。 -->
+    <!-- One card = one setting. Laid out after the Windows Clock app's settings page.
+         **Not a single word of explanation** (user, 2026-07-28): a title plus the
+         controls, the rest is left to guess — the same approach as nothing below the
+         main window's divider explaining itself or showing numbers. -->
     <Style Selector="Border.card">
       <Setter Property="Background" Value="#E8EBEE"/>
       <Setter Property="CornerRadius" Value="8"/>
@@ -89,6 +91,11 @@
                 IsSnapToTickEnabled="True" HorizontalAlignment="Stretch"/>
       </StackPanel>
     </Border>
+
+    <Grid ColumnDefinitions="*,Auto">
+      <TextBlock Text="©️2026 Achilles.Newman" HorizontalAlignment="Center" FontSize="11" Opacity="0.4"/>
+      <TextBlock x:Name="VersionLabel" Grid.Column="1" HorizontalAlignment="Right" FontSize="11" Opacity="0.4"/>
+    </Grid>
 
   </StackPanel>
 </Window>

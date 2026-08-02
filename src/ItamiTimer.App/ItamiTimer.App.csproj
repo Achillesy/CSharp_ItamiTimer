@@ -1,20 +1,25 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!--
-    界面层（DESIGN.md §8 模块 8、9）。Avalonia 12。
+    The UI layer. Avalonia 12.
 
-    ⚠️ AssemblyName 必须钉死成 ItamiTimer：AW 上报的 data.app 就是 exe 名，
-    而 §5.3 第 1 步靠它硬编码自身豁免。改了这里，程序会把自己判成 OffTask，
-    陷入「提醒 → 用户看提醒 → 又违规 → 再提醒」死循环。
-    §8.5 专门提醒过：换 csproj 正是最容易把这行弄丢的时刻。
+    ⚠️ AssemblyName must be pinned to ItamiTimer: it's exactly the exe name that
+    ActivityWatch reports as data.app, and the default rules.json matches an
+    "ItamiTimer" goal against it so the app itself can be recognized as on-task. Change
+    this and the program starts judging itself as OffTask, falling into a "nudge -> the
+    user looks at the nudge -> off-task again -> nudge again" loop. Changing the csproj is
+    exactly the moment this line is most likely to get lost.
 
-    net10.0（2026-07-28 去掉 -windows）：本层是唯一允许出现平台调用的地方
-    （置顶、读键鼠空闲时间、放音）。Core 保持 net10.0 且不含 P/Invoke。
+    net10.0 (the -windows suffix was dropped on 2026-07-28): this is the only layer allowed
+    to contain platform calls (pinning, reading keyboard/mouse idle time, playing sound).
+    Core stays net10.0 and contains no P/Invoke.
 
-    ⚠️ **为什么去掉 -windows**：那个后缀对本项目其实没起作用 —— Core 的 csproj 里
-    自己写着「net10.0 挡不住 P/Invoke」，所以 -windows 换来的只有平台分析器上下文。
-    去掉之后 CA1416 反而会**真的开始报**没守住的平台调用，是净收益。平台专属代码
-    一律 [SupportedOSPlatform] 标注 + OperatingSystem.IsXxx() 守住，两边都编得过。
+    ⚠️ **Why the -windows suffix was dropped**: it never actually did anything for this
+    project — Core's own csproj says outright that "net10.0 doesn't block P/Invoke", so all
+    -windows bought was a platform-analyzer context. Dropping it means CA1416 actually
+    **starts reporting** unguarded platform calls, a net win. Platform-specific code is
+    uniformly guarded with [SupportedOSPlatform] attributes plus OperatingSystem.IsXxx()
+    checks, so both sides compile.
   -->
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
@@ -25,12 +30,13 @@
     <RootNamespace>ItamiTimer.App</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <!--
-      exe 的文件图标（桌面快捷方式、资源管理器、Alt-Tab 都看它）。
-      窗口里那个图标是运行时画的，跟这个是同一份美术。
+      The exe's file icon (seen by the desktop shortcut, Explorer, Alt-Tab). The icon shown
+      in the window is drawn at runtime, using the same artwork as this one.
 
-      tomato.ico 由 IconExport 从 TomatoIcon 导出（命令行开关见 Program.cs），
-      仓库里那个 .ico 只是导出结果 —— 位图不是手画的，是代码画的。
-      番茄的形状要改就去改 TomatoIcon.cs，然后重新导一次。
+      tomato.ico is exported from TomatoIcon by IconExport (see the command-line switches
+      in Program.cs); the .ico in the repository is only the export's output — the bitmap
+      isn't hand-drawn, it's drawn in code. To change the tomato's shape, edit TomatoIcon.cs
+      and re-export.
     -->
     <ApplicationIcon>tomato.ico</ApplicationIcon>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
@@ -41,11 +47,13 @@
     <PackageReference Include="Avalonia.Desktop" Version="12.1.0" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.0" />
     <!--
-      三个调试出口（dial-specimens / export-icon / export-iconset）用它，
-      正常启动那条路径不碰。它们只往 RenderTargetBitmap 上画，不需要窗口平台；
-      UsePlatformDetect 会去初始化原生窗口系统，在没有图形会话的环境（CI、
-      纯 ssh 会话）上直接崩。详见 Program.cs 里 HeadlessBuilder 的注释。
-      注意 pack-macos.sh 依赖 export-iconset，所以这条直接关系到能不能在 CI 上打包。
+      Used by the three debug exits (dial-specimens / export-icon / export-iconset); the
+      normal startup path never touches it. They only draw onto a RenderTargetBitmap and
+      don't need a windowing platform; UsePlatformDetect would go initialize the native
+      windowing system and crash outright in an environment with no graphical session (CI,
+      a plain SSH session). See the HeadlessBuilder comment in Program.cs for details.
+      Note that pack-macos.sh depends on export-iconset, so this directly determines
+      whether packaging can run on CI.
     -->
     <PackageReference Include="Avalonia.Headless" Version="12.1.0" />
   </ItemGroup>
@@ -55,10 +63,12 @@
   </ItemGroup>
 
   <!--
-    规则文件要跟着 exe 走，否则发布出去的程序找不到它（见 AppData.RulesPath）。
+    The rules file needs to travel with the exe, otherwise the published program can't find
+    it (see AppData.RulesPath).
 
-    这份是**随程序发布的默认规则**。用户自己那份在 %LOCALAPPDATA%\ItamiTimer\，
-    优先级更高，所以重新发布不会冲掉他加的小目标。
+    This copy is the **default rules shipped with the program**. The user's own copy lives
+    at %LOCALAPPDATA%\ItamiTimer\ and takes priority, so republishing never overwrites any
+    goals they've added.
   -->
   <ItemGroup>
     <Content Include="$(MSBuildThisFileDirectory)..\..\rules.json"
@@ -66,29 +76,33 @@
   </ItemGroup>
 
   <!--
-    发布产物里剔掉调试符号：127MB -> 27MB（DESIGN.md §8.3.8）。
+    Strips debug symbols from the publish output: 127MB -> 27MB.
 
-    那 100MB 的差额就两个文件 —— libSkiaSharp.pdb 80MB + libHarfBuzzSharp.pdb 20MB。
-    它们由 SkiaSharp / HarfBuzzSharp 的原生 NuGet 包带进来，`dotnet publish` 只负责
-    把包里的内容照搬到输出目录，**不会剔除任何东西**。
+    That 100MB gap comes down to exactly two files — libSkiaSharp.pdb at 80MB and
+    libHarfBuzzSharp.pdb at 20MB. They're pulled in by the SkiaSharp / HarfBuzzSharp native
+    NuGet packages, and `dotnet publish` just copies a package's contents to the output
+    directory as-is — **it strips nothing on its own**.
 
-    为什么做进 csproj 而不是写进文档让人记得删：这一步已经被忘过一次了。原来
-    README / CLAUDE 里只有一条 publish 命令，照着跑拿到的是 127MB，而且没有任何
-    提示 —— 一个"必须记得做"的手工步骤，就是迟早会被忘掉的步骤。放在这里之后
-    27MB 成了发布命令的自然产物，Windows 和 macOS 两条线一起受益。
+    Why this lives in the csproj instead of a documented step to remember: that step was
+    already forgotten once. The README used to have a single publish command,
+    and running it as written produced 127MB with no hint anything was wrong — a manual
+    step that "must be remembered" is a step that eventually gets forgotten. With this here,
+    27MB is simply what the publish command produces, benefiting both the Windows and macOS
+    lines at once.
 
-    连本项目自己那两个 pdb 也一并删掉（各几十 KB，删不删无所谓）：Log.Error 记的是
-    异常类型和消息、不记堆栈，所以现在没有任何东西会去读它们。哪天想在 Release 的
-    日志里带上行号，要改的是 Log.Error，并在这里把自家的 pdb 排除掉。
+    This project's own two pdbs get deleted too (a few dozen KB each, doesn't matter either
+    way): Log.Error records the exception's type and message, not a stack trace, so nothing
+    currently reads them. If line numbers are ever wanted in the Release log, that's a
+    change to Log.Error, and this project's own pdb should be excluded from the strip then.
 
-    只在 Publish 之后跑，不影响 `dotnet build` 和调试。
+    Only runs after Publish, doesn't affect `dotnet build` or debugging.
   -->
   <Target Name="StripPdbFromPublish" AfterTargets="Publish">
     <ItemGroup>
       <_PdbToStrip Include="$(PublishDir)**\*.pdb" />
     </ItemGroup>
     <Delete Files="@(_PdbToStrip)" ContinueOnError="true" />
-    <Message Importance="high" Text="已剔除 @(_PdbToStrip->Count()) 个 .pdb（见 csproj 的 StripPdbFromPublish）" />
+    <Message Importance="high" Text="Stripped @(_PdbToStrip->Count()) .pdb file(s) (see StripPdbFromPublish in the csproj)" />
   </Target>
 
 </Project>

@@ -4,48 +4,54 @@ using System.Text.RegularExpressions;
 
 namespace ItamiTimer.Core;
 
-/// <summary>rules.json 里的一条匹配规则（DESIGN.md §5.2）。app 和 title 至少要有一个。</summary>
+/// <summary>One match rule in rules.json. At least one of app or title must be set.</summary>
 public sealed class MatchRule
 {
     public string? App { get; init; }
     public string? Title { get; init; }
 }
 
-/// <summary>一个小目标。组内**任一**条规则命中即算命中（§5.2）。</summary>
+/// <summary>One goal. Matching **any** rule within the group counts as a match (§5.2).</summary>
 public sealed class GoalGroup
 {
-    /// <summary>过期的小目标屏蔽而不是删掉（§5.2.1）。缺省即启用。</summary>
+    /// <summary>A stale goal is disabled rather than deleted (§5.2.1). Enabled by default.</summary>
     public bool Disabled { get; init; }
 
     public IReadOnlyList<MatchRule> Rules { get; init; } = [];
 
-    // 累计专注时长曾经在这里，2026-08-02 移到 App 的 during.json（§11.2）。
-    // rules.json 是**用户手写**的，程序只读不写——写一次注释就全没了。
+    // Accumulated focus time used to live here; moved to the App's during.json on
+    // 2026-08-02 (§11.2). rules.json is **hand-written by the user**, the program only
+    // reads it, never writes -- write to it once and every comment is gone.
 }
 
 /// <summary>
-/// rules.json 的原始形状。**整个文件的唯一类型模型**——文件里有什么，这里就得有什么。
+/// The raw shape of rules.json. **The one and only type model for the entire file** --
+/// whatever the file can contain, this class must have a field for.
 ///
-/// ⚠️ 2026-08-02 之前 <c>executeCommand</c> 不在这儿，由 App 的 <c>Command</c> 用裸
-/// <c>JsonDocument</c> 另读一遍。**同一个文件两条读取路径、两套解析设置，只能靠人手动
-/// 保持一致**，而且咬过两次：一次是那边没开 `Skip`（写了注释 → 小目标正常、Execute
-/// 静默失效），一次是 `TryGetProperty` 区分大小写而这边不区分（同样的症状）。
-/// 两次都是「文件的一半好用、另一半安静地不工作，程序照常启动」。
+/// ⚠️ Before 2026-08-02, <c>executeCommand</c> wasn't here; the App's <c>Command</c> read
+/// it again separately using a bare <c>JsonDocument</c>. **One file, two read paths, two
+/// sets of parsing options, kept in sync only by a human remembering to** -- and it bit
+/// twice: once because that path didn't turn on `Skip` (writing a comment made goals work
+/// fine while Execute silently failed), once because `TryGetProperty` is case-sensitive
+/// while this path isn't (the same symptom). Both times: "half the file works, the other
+/// half silently doesn't, and the program starts up as if nothing were wrong".
 ///
-/// 现在一次解析出全部。**往这个文件里加新的节，就往这个类里加字段**，别再另起一条路。
+/// Now everything is parsed in one pass. **Adding a new section to this file means adding
+/// a field to this class**, not starting a second read path.
 /// </summary>
 public sealed class RulesFile
 {
     public Dictionary<string, GoalGroup> Groups { get; init; } = [];
 
-    /// <summary>闹钟 Execute 用的命令表，按 OS 分（§9）。值可以是一条字符串，也可以是列表。</summary>
+    /// <summary>The command table the alarm's Execute uses, keyed by OS (§9). A value can be a single string or a list.</summary>
     [JsonConverter(typeof(CommandTableConverter))]
     public Dictionary<string, IReadOnlyList<string>>? ExecuteCommand { get; init; }
 }
 
 /// <summary>
-/// <c>executeCommand</c> 的读法：值**既接受一条字符串、也接受一个列表**，
-/// 统一成列表。OS 名（windows / macos）大小写不敏感——跟这个文件其余部分一致。
+/// How <c>executeCommand</c> is read: a value **accepts either a single string or a
+/// list**, normalized into a list. OS names (windows / macos) are case-insensitive --
+/// matching the rest of this file.
 /// </summary>
 internal sealed class CommandTableConverter : JsonConverter<Dictionary<string, IReadOnlyList<string>>>
 {
@@ -83,13 +89,15 @@ internal sealed class CommandTableConverter : JsonConverter<Dictionary<string, I
 }
 
 /// <summary>
-/// 编译好的规则（DESIGN.md §5）。纯逻辑，不碰时间也不碰网络。
+/// Compiled rules. Pure logic, touches neither time nor the network.
 ///
-/// 只回答一个问题：<b>这个 (app, title) 命中那个小目标吗？</b>
-/// 判定的其余部分（命中算 <c>Focused</c>、其余一律 <c>OffTask</c>、afk 盖住一切）
-/// 在 <see cref="Judgment.Paint"/> 里，靠覆盖顺序表达，这里不掺和。
+/// Answers exactly one question: <b>does this (app, title) match that goal?</b>
+/// The rest of judgment (a match counts as <c>Focused</c>, everything else is
+/// <c>OffTask</c>, afk overrides everything) lives in <see cref="Judgment.Paint"/>,
+/// expressed through covering order -- this class stays out of it.
 ///
-/// `Neutral` / `ignore` 名单 / 自身豁免全部已删除——**其余一律 OffTask，fail-closed**。
+/// The `Neutral` category / `ignore` list / self-exemption have all been removed --
+/// **everything else is OffTask, fail-closed**.
 /// </summary>
 public sealed class GroupRules
 {
@@ -114,8 +122,9 @@ public sealed class GroupRules
     }
 
     /// <summary>
-    /// 某个 OS 的命令表（§9）。**调用方只该用第 0 条**——这儿是个常用命令的收藏夹，
-    /// 换命令靠重排，不靠界面（DECISIONS E9）。没配就是空列表。
+    /// The command table for one OS (§9). **Callers should only ever use entry 0** -- this
+    /// is a collection of frequently-used commands, and switching commands is done by
+    /// reordering the list, not through the UI (DECISIONS E9). An empty list if nothing's configured.
     /// </summary>
     public IReadOnlyList<string> CommandsFor(string os)
         => _commands.TryGetValue(os, out var list) ? list : [];
@@ -157,16 +166,16 @@ public sealed class GroupRules
         }
     }
 
-    /// <summary>界面上勾选列表要显示的小目标（已屏蔽的不出现）。</summary>
+    /// <summary>The goals shown in the UI's selectable list (disabled ones don't appear).</summary>
     public IReadOnlyList<string> SelectableGroups
         => _groups.Where(g => !g.Disabled).Select(g => g.Name).ToList();
 
-    /// <summary>单条规则：app 和 title 都写则求与；缺省的那一边不做限制（§5.2）。</summary>
+    /// <summary>One rule: if both app and title are set, both must match; whichever side is unset places no constraint (§5.2).</summary>
     private static bool RuleMatches(CompiledRule r, string app, string title)
         => (r.App is null || r.App.IsMatch(app))
         && (r.Title is null || r.Title.IsMatch(title));
 
-    /// <summary>组内**任一**条规则命中即命中。已屏蔽的组永不命中（§5.2.1）。</summary>
+    /// <summary>Matching **any** rule within the group is a match. A disabled group never matches (§5.2.1).</summary>
     public bool GroupMatches(string groupName, string app, string title)
     {
         var g = _groups.FirstOrDefault(x => x.Name == groupName);
@@ -174,7 +183,8 @@ public sealed class GroupRules
         return g.Rules.Any(r => RuleMatches(r, app, title));
     }
 
-    // `Classify` 和 `IntervalKind` 曾经在这里——那是 `Replay` 区间模型的接口。
-    // 2026-08-02 删除：生产路径只用 GroupMatches（Judgment.Paint 分层覆盖时调），
-    // 而 Classify 到最后只剩测试在用——**护栏守着一段不跑的代码**，跟 Replay 同一个毛病。
+    // `Classify` and `IntervalKind` used to live here -- the interface for the `Replay`
+    // interval model. Removed 2026-08-02: the production path only uses GroupMatches
+    // (called by Judgment.Paint's layered covering), and Classify had ended up used only
+    // by tests -- **a guardrail watching over code that never runs**, the same disease as Replay.
 }

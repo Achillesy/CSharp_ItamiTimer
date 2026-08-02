@@ -3,31 +3,37 @@ using Avalonia.Media.Imaging;
 namespace ItamiTimer.App;
 
 /// <summary>
-/// 把番茄图标导成两个平台各自要的格式：Windows 的 <c>.ico</c>（装进 exe 的资源，
-/// 见 csproj 的 ApplicationIcon）、macOS 的 <c>.iconset</c> 目录（再由系统的
-/// <c>iconutil</c> 压成 .icns 放进 .app）。
+/// Exports the tomato icon into the format each platform needs: Windows's <c>.ico</c>
+/// (embedded into the exe's resources, see the csproj's ApplicationIcon), macOS's
+/// <c>.iconset</c> directory (then compressed into a .icns by the system's
+/// <c>iconutil</c> and dropped into the .app).
 ///
-/// **图标仍然是代码画出来的**，仓库里不放位图 —— 这条纪律从表盘一路贯到这里。
-/// 这个文件的作用只是"把画好的东西按各家的格式排一遍"，不含任何美术信息，
-/// 美术信息全在 <see cref="TomatoIcon"/>。番茄的形状要改就去改那个文件，重导一次。
+/// **The icon is still drawn in code**, no bitmap in the repository -- that rule runs all
+/// the way from the dial down to here. This file's only job is "lay out the already-drawn
+/// artwork in each platform's format"; it carries no art information of its own, all of
+/// which lives in <see cref="TomatoIcon"/>. Changing the tomato's shape means editing that
+/// file and re-exporting once.
 ///
-/// 用法（都是**调试出口，不是产品功能**，正常启动路径一个字节都没碰）：
+/// Usage (both are **debug exits, not product features** -- the normal startup path isn't
+/// touched at all):
 /// <code>
-/// ItamiTimer --export-icon    &lt;输出路径.ico&gt;     Windows
-/// ItamiTimer --export-iconset &lt;输出目录.iconset&gt;  macOS，之后 iconutil -c icns
+/// ItamiTimer --export-icon    &lt;output path.ico&gt;     Windows
+/// ItamiTimer --export-iconset &lt;output dir.iconset&gt;  macOS, then iconutil -c icns
 /// </code>
 ///
-/// ICO 里塞的是 PNG 而不是 BMP：Vista 之后的 Windows 认 PNG 负载，省掉手写
-/// DIB 头和 AND 掩码那一堆东西，256×256 那一档也只有 PNG 才装得下。
+/// The ICO holds PNG payloads, not BMP: Windows since Vista accepts PNG payloads, which
+/// skips hand-writing a DIB header and an AND mask, and the 256x256 tier only fits in a PNG
+/// anyway.
 /// </summary>
 internal static class IconExport
 {
-    /// <summary>Windows 会从这几档里挑最合适的：任务栏 32、桌面大图标 48、超大 256。</summary>
+    /// <summary>Windows picks whichever of these tiers fits: 32 for the taskbar, 48 for large desktop icons, 256 for extra-large.</summary>
     private static readonly int[] Sizes = [16, 20, 24, 32, 40, 48, 64, 128, 256];
 
     /// <summary>
-    /// macOS 的 iconset 档位。**文件名是硬约定**，<c>iconutil</c> 只认这些名字：
-    /// 每一档都有 1x 和 2x（@2x 就是下一档的像素数），Dock、访达、Cmd-Tab 各取所需。
+    /// macOS's iconset tiers. **The filenames are a hard convention** -- <c>iconutil</c>
+    /// only recognizes these exact names: each tier has a 1x and a 2x (@2x is just the next
+    /// tier's pixel count), and the Dock, Finder, and Cmd-Tab each pick whichever they need.
     /// </summary>
     private static readonly (string Name, int Px)[] IconsetSizes =
     [
@@ -38,7 +44,7 @@ internal static class IconExport
         ("icon_512x512.png", 512),   ("icon_512x512@2x.png", 1024),
     ];
 
-    /// <summary>把十档 PNG 铺进一个 .iconset 目录。压成 .icns 是 iconutil 的事（见 pack-macos.sh）。</summary>
+    /// <summary>Lays out ten tiers of PNG into a .iconset directory. Compressing into .icns is iconutil's job (see pack-macos.sh).</summary>
     public static void WriteIconset(string dir)
     {
         Directory.CreateDirectory(dir);
@@ -46,7 +52,7 @@ internal static class IconExport
         {
             using var bmp = TomatoIcon.Render(px);
             using var f = File.Create(Path.Combine(dir, name));
-#pragma warning disable CS0618 // Avalonia 12 标了过时，新重载要编码器选项对象；默认 PNG 就够
+#pragma warning disable CS0618 // Avalonia 12 marks this obsolete; the new overload wants an encoder-options object, and default PNG is good enough
             bmp.Save(f);
 #pragma warning restore CS0618
         }
@@ -60,7 +66,7 @@ internal static class IconExport
         {
             using var bmp = TomatoIcon.Render(s);
             using var ms = new MemoryStream();
-#pragma warning disable CS0618 // Avalonia 12 标了过时，新重载要编码器选项对象；默认 PNG 就够
+#pragma warning disable CS0618 // Avalonia 12 marks this obsolete; the new overload wants an encoder-options object, and default PNG is good enough
             bmp.Save(ms);
 #pragma warning restore CS0618
             pngs.Add(ms.ToArray());
@@ -70,21 +76,21 @@ internal static class IconExport
         using var w = new BinaryWriter(f);
 
         // ICONDIR
-        w.Write((short)0);                 // 保留
-        w.Write((short)1);                 // 1 = 图标（2 才是光标）
+        w.Write((short)0);                 // Reserved
+        w.Write((short)1);                 // 1 = icon (2 would be a cursor)
         w.Write((short)Sizes.Length);
 
-        // ICONDIRENTRY ×N。数据从目录结束处开始往后排。
+        // ICONDIRENTRY x N. Data is laid out starting right after the directory ends.
         var offset = 6 + Sizes.Length * 16;
         for (var i = 0; i < Sizes.Length; i++)
         {
-            // 256 在这个字节字段里写 0 —— 一个字节存不下 256，规范就是这么定的
+            // 256 is written as 0 in this byte field -- a single byte can't hold 256, that's just how the spec defines it
             w.Write((byte)(Sizes[i] >= 256 ? 0 : Sizes[i]));
             w.Write((byte)(Sizes[i] >= 256 ? 0 : Sizes[i]));
-            w.Write((byte)0);              // 调色板数，真彩色写 0
-            w.Write((byte)0);              // 保留
-            w.Write((short)1);             // 颜色平面
-            w.Write((short)32);            // 位深
+            w.Write((byte)0);              // Palette count, 0 for true colour
+            w.Write((byte)0);              // Reserved
+            w.Write((short)1);             // Colour planes
+            w.Write((short)32);            // Bit depth
             w.Write(pngs[i].Length);
             w.Write(offset);
             offset += pngs[i].Length;

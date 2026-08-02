@@ -18,8 +18,9 @@
     <Using Include="Xunit" />
   </ItemGroup>
 
-  <!-- 引用的是 App 项目本身（WinExe 也可以被测试项目引用）。
-       这里只测 App 层里的纯逻辑（AlarmClock 等），不初始化 Avalonia。 -->
+  <!-- References the App project itself (a WinExe can still be referenced by a test
+       project). This only tests the pure logic living in the App layer (AlarmClock, etc.),
+       Avalonia is never initialized. -->
   <ItemGroup>
     <ProjectReference Include="..\..\src\ItamiTimer.App\ItamiTimer.App.csproj" />
   </ItemGroup>

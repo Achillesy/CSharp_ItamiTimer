@@ -1,9 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!--
-    命令行原子层：无 UI、可独立运行、每分钟输出一个色块。
-    同时是 Core 的测试夹具和 App 渲染层的数据源（UI 与逻辑分离——
-    逻辑先于 UI 存在，且能脱离 UI 独立运行）。
+    The command-line layer: no UI, can run standalone, prints one colour block per minute.
+    Doubles as a test fixture for Core and a data source for the App rendering layer (UI
+    and logic are kept separate — the logic exists before the UI does, and can run
+    independently of it).
   -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -19,8 +20,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- 键鼠空闲读数（§8.3.6）App 和 Cli 都要用。源码放在 App（§8.5：平台特定
-         代码归那一层），这里链接过来 —— 同一份文件两边编译，不复制。 -->
+    <!-- Keyboard/mouse idle reading (§8.3.6) is needed by both App and Cli. The source
+         lives in App (§8.5: platform-specific code belongs to that layer), and is linked
+         in here — the same file compiled on both sides, not copied. -->
   </ItemGroup>
 
 </Project>

@@ -10,15 +10,19 @@
         Background="#D7DBE0">
 
   <Window.Styles>
-    <!-- 「开始」既是按钮也是分割线：它以上是给眼睛的，以下是给手的。
+    <!-- "Start" is both a button and the dividing line: above it is for the eyes, below it
+         is for the hand.
 
-         ⚠️ Padding=0 + VerticalContentAlignment=Center 这两条【必须一起写】，
-         否则文字会顶着上边（2026-07-28 改英文后暴露）。Fluent 主题给 Button 的
-         默认 Padding 上下不对称，配上固定 Height 就把内容挤上去了。
+         ⚠️ Padding=0 and VerticalContentAlignment=Center MUST be set together, otherwise
+         the text sits pinned to the top edge (surfaced 2026-07-28 after switching to
+         English). Fluent's default Button padding is asymmetric top/bottom, and combined
+         with a fixed Height that pushes the content upward.
 
-         为什么中文时期没人发现：汉字字形占满整个 em 框，视觉重心本来就在行盒
-         中间，偏移被吃掉了；换成英文，大写字母偏上、底下的降部空间又空着，
-         同样的偏移立刻看得出来。gear 和 chrome 两个样式一直是对的，照它们写。 -->
+         Why nobody noticed while the text was Chinese: CJK glyphs fill their entire em box
+         and their visual centre already sits in the middle of the line box, so the offset
+         got absorbed; switch to English and capital letters sit high with empty descender
+         space below, and the same offset becomes immediately visible. The gear and chrome
+         styles were always correct — copy them. -->
     <Style Selector="Button.start">
       <Setter Property="Height" Value="42"/>
       <Setter Property="Padding" Value="0"/>
@@ -42,17 +46,20 @@
       <Setter Property="Foreground" Value="#E4E8EC"/>
     </Style>
 
-    <!-- 「放弃」是危险动作，单独染红（用户 2026-07-28 傍晚要的）。
+    <!-- "Give up" is a dangerous action, coloured red on its own (requested by the user on the evening of 2026-07-28).
 
-         ⚠️ 这几条【必须排在上面那组 .start 之后】：Avalonia 同优先级的样式按声明
-         顺序生效，后来者赢。挪到前面去就会被绿色盖掉，而且不报任何错。
+         ⚠️ These rules MUST come after the .start group above: Avalonia styles of equal
+         priority apply in declaration order, and the later one wins. Moving this earlier
+         would get overridden by the green style, with no error raised at all.
 
-         只有「放弃」染红，「开始新一轮」不染 —— 后者是奖励结束、开下一轮，不是
-         危险动作。切换在 RefreshStartButton() 里，一行 Classes.Set。
+         Only "Give up" is red; "New round" isn't — the latter follows a reward ending and
+         starting the next one, not a dangerous action. The switch happens in
+         RefreshStartButton(), one line, Classes.Set.
 
-         色值取自表盘的 slack 红（§8.2.3）。这是这个红唯一一次离开表盘：它在盘上
-         的意思是"这一分钟偷懒了"，在这里是"这一下会作废整轮"—— 两处都是"这不
-         是你想要的结果"，语义对得上。 -->
+         The colour value is taken from the dial's slack red (§8.2.3). This is the only
+         place that red ever leaves the dial: on the dial it means "this minute was
+         off-task", here it means "this click voids the whole round" — both are "this
+         isn't the outcome you wanted", so the meaning still lines up. -->
     <Style Selector="Button.start.danger /template/ ContentPresenter">
       <Setter Property="Background" Value="#D6453F"/>
       <Setter Property="Foreground" Value="#FFFFFF"/>
@@ -63,10 +70,11 @@
     </Style>
 
 
-    <!-- 右上角那两个即时开关：喇叭（滴答声）、图钉（置顶）。
-         图形是【矢量画的】（ChromeIcons.cs），不打包图片、也不依赖任何图标字体——
-         原来用的 Segoe Fluent Icons 只有 Windows 有，macOS 上是豆腐块。
-         关着的时候淡、开着的时候实 —— 状态一眼就看得出来。 -->
+    <!-- The two instant toggles in the top-right corner: the speaker (tick), the pin
+         (always on top). The shapes are drawn as vectors (ChromeIcons.cs), no bundled
+         images and no dependency on any icon font — the previous Segoe Fluent Icons only
+         exist on Windows and render as tofu boxes on macOS. Faint when off, solid when on
+         — the state is legible at a glance. -->
     <Style Selector="Button.chrome">
       <Setter Property="Width" Value="28"/>
       <Setter Property="Height" Value="28"/>
@@ -93,9 +101,10 @@
 
   <StackPanel Margin="18,14,18,16">
 
-    <!-- 表盘。任务进行中它是全部；空盘时它就是下一轮的邀请（§8.4.5a）。
-         右上角压两个即时开关：先喇叭后图钉（用户 2026-07-28 指定的顺序）。
-         钟是圆的，右上角那块是空的，正好摆。 -->
+    <!-- The dial. While a task is running, it's the whole story; an empty dial is the
+         invitation for the next round (§8.4.5a). Two instant toggles sit in the top-right
+         corner: speaker first, then pin (the order the user specified on 2026-07-28). The
+         clock is round, so its top-right corner is empty space that fits them perfectly. -->
     <Grid>
       <app:DialControl x:Name="Dial" Height="330"/>
       <StackPanel Orientation="Horizontal" Spacing="2"
@@ -105,42 +114,47 @@
       </StackPanel>
     </Grid>
 
-    <!-- 七块骨牌 = 星期几。倒下几块就是周几，一个字都没有。
-         齿轮压在这一行的右端、**图钉正下方**（用户 2026-07-28）。理由不是省地方，
-         是**增加迷惑性**：把一个功能按钮塞进骨牌这一行，骨牌就更像某种控件的
-         一部分，"这七块东西到底是什么"就更猜不出来了 —— 跟滑块不给数字、
-         分割线以下不给提示字是同一条（§8.4.2a）。 -->
+    <!-- Seven dominoes = the day of the week. However many have fallen is the day, not a
+         single word of it. The gear sits at this row's right end, **directly below the
+         pin** (user, 2026-07-28). The reason isn't saving space, it's **adding to the
+         mystery**: tucking a function button into the domino row makes the dominoes read
+         more like part of some control, making "what on earth are these seven things"
+         even harder to guess — the same philosophy as the slider giving no numbers and
+         nothing below the divider explaining itself (§8.4.2a). -->
     <Grid Margin="0,2,0,10">
       <app:DominoRow x:Name="Dominoes" Height="76"/>
-      <!-- 右边距 26（DIP）让齿轮正落在**喇叭**的正下方，也正落在倒下那几块骨牌的
-           上方 —— 看起来就像是它把骨牌推倒的（用户 2026-07-28 晚）。
-           数字是量出来的，不是算出来的：屏幕缩放会把 DIP 和物理像素岔开，
-           所以按实测调到对齐为止。 -->
-      <!-- 原来这里还有个 AlarmBtn（2026-07-30 撤掉，见下方 XAML 之外的说明）：
-           闹钟的按压交互直接挪到钟面本身（DialControl）上了，不再单独占一个图标。 -->
+      <!-- A right margin of 26 (DIP) lands the gear directly below the **speaker**, and
+           also directly above the fallen dominoes — so it looks like the gear is what
+           knocked them down (user, evening of 2026-07-28). The number was measured, not
+           computed: screen scaling separates DIPs from physical pixels, so it was tuned by
+           eye until it lined up. -->
+      <!-- There used to be an AlarmBtn here (removed 2026-07-30, see the note outside this
+           XAML): the alarm's press interaction moved directly onto the clock face itself
+           (DialControl), no longer occupying its own icon. -->
       <Button x:Name="SettingsBtn" Classes="chrome"
               HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-6,30,0"
               ToolTip.Tip="Settings"/>
     </Grid>
 
-    <!-- ↓↓↓ 分割线以下：连不上 AW 时整块变灰，这个程序就只是一个钟（§6.2） -->
+    <!-- vvv Below the divider: if ActivityWatch can't be reached, this whole block turns
+         grey and the program is just a clock (§6.2) -->
     <StackPanel x:Name="Controls" Spacing="10">
 
       <Button x:Name="StartBtn" Classes="start" Click="OnStart" Content="Start"/>
 
-      <!-- 取值控件。不解释、不说明、连数字都不给（用户 2026-07-27：主打一个猜）。
-           只有九个刻度，自己拖去。
+      <!-- The value control. No explanation, no label, not even a number (user,
+           2026-07-27: the whole point is guessing). Just nine tick marks, drag it yourself.
 
-           §8.4.2a 的正式量程：10~50 分钟、步进 5、默认 25。
-           （2026-07-27~28 期间这里临时是 2~10 分钟，为了不用每次真坐 25 分钟
-           才看到达成那一刻；核心循环跑通后已经改回来了。） -->
+           §8.4.2a's real range: 10-50 minutes, step 5, default 25.
+           (Between 2026-07-27 and 07-28 this was temporarily 2-10 minutes, so you didn't
+           have to sit through a real 25 minutes every time just to see the completion
+           moment — changed back once the core loop was working.) -->
       <Slider x:Name="Minutes" Margin="2,4,2,0"
               Minimum="10" Maximum="50" TickFrequency="5"
               IsSnapToTickEnabled="True" TickPlacement="BottomRight" Value="25"/>
 
-      <!-- 小目标列表。rules.json 有几个就排几行，窗口高度跟着变。
-           任务进行中仍然可点：补勾一个小目标是【追溯生效】的（§5.4）。
-           番茄钟模式下整个隐藏（§11.1 第 3 条）。 -->
+      <!-- The goal list. As many rows as rules.json has goals, and the window height
+           follows along. -->
       <ItemsControl x:Name="Goals">
         <ItemsControl.Styles>
           <Style Selector="ItemsControl#Goals ContentPresenter">

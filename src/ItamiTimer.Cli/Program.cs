@@ -7,11 +7,13 @@ Console.OutputEncoding = System.Text.Encoding.UTF8;
 var cmd = args.Length > 0 ? args[0] : "help";
 var opt = ParseOptions(args);
 
-// §8.3.5：整个程序只有这一个节拍。
+// §8.3.5: the whole program has exactly one tick.
 const int TickSeconds = 60;
-// §8.3.6：必须【小于】aw-watcher-afk 的 timeout（默认 180 秒）。那个值在另一个
-// 程序的配置文件里，API 读不到，改了这边不会有任何报错。
-// 刚走完那一分钟里偏离超过这个数才提醒，滤掉通知抢焦点之类的噪音。
+// §8.3.6: must be **less than** aw-watcher-afk's timeout (180 seconds by default). That
+// value lives in another program's config file, unreadable from this API -- changing it
+// there won't raise any error here.
+// Only nudge if the deviation over the minute just past exceeds this floor, filtering out
+// noise like a notification briefly stealing focus.
 const int NudgeFloorSeconds = 5;
 
 try
@@ -26,7 +28,7 @@ try
 }
 catch (AwUnavailableException e)
 {
-    // §6.2：AW 访问不了就直接说无法工作，不显示任何编造的进度数字。
+    // §6.2: if ActivityWatch can't be reached, say so plainly and don't show any made-up progress numbers.
     Console.Error.WriteLine($"\n{e.Message}\n");
     return 2;
 }
@@ -36,14 +38,15 @@ catch (Exception e)
     return 1;
 }
 
-// ---------------------------------------------------------------- 命令
+// ---------------------------------------------------------------- Commands
 
 /// <summary>
-/// 提交任务并一直跑到结束。
+/// Submits a task and runs it to completion.
 ///
-/// **任务只活在这个进程里，不落盘（§2）。** 所以没有 watch / status / stop 这些
-/// 子命令——退出这个进程就等于放弃任务。Ctrl+C 会先给账单再退出，对应 §9 里
-/// GUI 版本"退出前弹窗确认"那条。
+/// **A task only lives in this process, never written to disk (§2).** So there's no
+/// watch / status / stop subcommand -- quitting this process is exactly abandoning the
+/// task. Ctrl+C prints the report before exiting, matching the GUI's "confirm before
+/// quitting" in §9.
 /// </summary>
 async Task<int> StartAsync()
 {
@@ -59,7 +62,7 @@ async Task<int> StartAsync()
     var winId = await aw.FindBucketIdAsync(AwClient.WindowBucketType);
     var afkId = await aw.FindBucketIdAsync(AwClient.AfkBucketType);
 
-    // §14.1：截断到当前整分钟
+    // §14.1: truncated to the current whole minute
     var task = new TaskRecord
     {
         StartedAt = TimeGrid.FloorToMinute(DateTimeOffset.Now),
@@ -77,7 +80,7 @@ async Task<int> StartAsync()
     var buf = new JudgmentBuffer(task.StartedAt, minutes);
     var settled = 0;
 
-    // Ctrl+C 对应 GUI 的"点关闭"：§9 要求退出前把账摆出来，不能默默丢掉。
+    // Ctrl+C corresponds to the GUI's "click close": §9 requires showing the report before quitting, not silently dropping it.
     Console.CancelKeyPress += (_, e) =>
     {
         e.Cancel = true;
@@ -87,12 +90,12 @@ async Task<int> StartAsync()
         Environment.Exit(130);
     };
 
-    // ---- §8.3.5 的单循环。节拍锚在整分钟（§4.2），不锚在启动时刻。
+    // ---- The single loop from §8.3.5. The tick is anchored to a whole minute (§4.2), not to the moment it started.
     while (true)
     {
         var minute = TimeGrid.FloorToMinute(DateTimeOffset.Now);
 
-        // 查询区间的两端都是整分钟，写入偏移因此恒为整数（DECISIONS H9）
+        // Both ends of the query interval are whole minutes, so the write offset is always an integer (DECISIONS H9)
         var queryStart = minute.AddSeconds(-JudgmentBuffer.QueryWindowSeconds);
         var win = await aw.FetchEventsAsync(winId, queryStart, minute);
         var afk = await aw.FetchEventsAsync(afkId, queryStart, minute);
@@ -105,19 +108,24 @@ async Task<int> StartAsync()
 
         var cells = buf.ToMinuteCells();
 
-        // 节拍是 60 秒，所以每轮单独打一行，不用 \r 原地覆盖——覆盖是为 3 秒节拍设计
-        // 的，跟穿插的警告混在一起会糊成一团。一分钟一行正好是一份可读的日志。
+        // The tick is 60 seconds, so each round gets its own line rather than overwriting
+        // in place with \r -- overwriting is designed for the 3-second tick, and mixing it
+        // with interleaved warnings would smear together. One line per minute is a
+        // readable log as-is.
         Console.WriteLine($"{Renderer.Clock(minute, "HH:mm")}  {Renderer.Cells(cells)}  " +
                           $"{(settled + buf.FocusedSeconds) / 60.0:F1}/{task.FocusMinutes} min");
 
-        // 用【刚走完的那一格】当触发条件，不是【此刻在干什么】。否则 10:00:10 切走、
-        // 10:00:50 切回这种短切换会整个从提醒里溜掉——而它在色块上明明是红的。
+        // Uses **the minute that just finished** as the trigger condition, not **what's
+        // happening right now**. Otherwise a brief switch-away-and-back like 10:00:10 to
+        // 10:00:50 would slip through the notification entirely -- even though it's
+        // plainly red on the coloured cells.
         var last = cells.LastOrDefault(c => c.FocusSeconds + c.OffTaskSeconds + c.AfkSeconds > 0);
         if (last.OffTaskSeconds >= NudgeFloorSeconds)
             Console.WriteLine($"       ⚠ The minute just past had {last.OffTaskSeconds}s off-task.");
 
-        // 达成就是这一拍（§4.5）：不回头去账本里推一个更早的时刻，
-        // 所以休息永远不会被追溯消费掉（§15.1 就是这么来的）。
+        // Completion is this very tick (§4.5): never derived retroactively from an earlier
+        // moment in the ledger, so rest can never be retroactively eaten into (that's
+        // exactly how §15.1 happened).
         if (outcome.Completed) return Rest(task, buf, settled, minute);
 
         await Task.Delay(TickSeconds * 1000);
@@ -125,13 +133,13 @@ async Task<int> StartAsync()
 }
 
 /// <summary>
-/// 休息阶段（§8.4.4a）：**纯本地计时，零 AW 访问**。
-/// 一个任务对 AW 的最后一次查询就发生在专注达成那一刻。
+/// The rest phase (§8.4.4a): **purely local timing, zero ActivityWatch access**.
+/// A task's last query to ActivityWatch happens at the exact moment focus is achieved.
 /// </summary>
 int Rest(TaskRecord task, JudgmentBuffer buf, double settled, DateTimeOffset completedAt)
 {
     Console.WriteLine("\n");
-    Console.WriteLine(Renderer.Bill(task, buf, settled, completedAt, completedAt));   // 账单在【达成】这一刻给
+    Console.WriteLine(Renderer.Bill(task, buf, settled, completedAt, completedAt));   // The report is shown at the moment of **completion**
 
     var rest = TimeSpan.FromMinutes(task.RestMinutes);
     var restEnds = completedAt + rest;
@@ -139,8 +147,9 @@ int Rest(TaskRecord task, JudgmentBuffer buf, double settled, DateTimeOffset com
 
     while (DateTimeOffset.Now < restEnds)
     {
-        // 每分钟淡掉 100%/休息分钟数（§8.4.4）。不是固定 10%——那样 25 分钟的任务
-        // 休息结束时盘上还挂着半个色环，跟「没有色环就是邀请」打架。
+        // Fades by 100%/rest-minutes each minute (§8.4.4). Not a fixed 10% -- that would
+        // leave half a ring still hanging around when a 25-minute task's rest ends, which
+        // conflicts with "no ring means invitation".
         var left = rest > TimeSpan.Zero ? 1 - (DateTimeOffset.Now - completedAt) / rest : 0;
         Console.Write($"\r☕ On a break — {Math.Max(0, left) * 100:F0}% of the ring left   ");
         Thread.Sleep(1000);
@@ -151,8 +160,8 @@ int Rest(TaskRecord task, JudgmentBuffer buf, double settled, DateTimeOffset com
 }
 
 /// <summary>
-/// 拿过去的真实历史干跑一遍，不写盘、不需要等。
-/// 这是验证规则写得对不对最快的办法。
+/// Dry-runs real past history, no writing to disk, no waiting.
+/// This is the fastest way to check whether your rules are written correctly.
 /// </summary>
 async Task<int> ReplayPastAsync()
 {
@@ -175,8 +184,9 @@ async Task<int> ReplayPastAsync()
         Group = group,
     };
 
-    // 拿真实历史把在线那套循环原样跑一遍——**同一个引擎、同一个节拍**，
-    // 只是 now 是喂进去的。这样 CLI 干跑出来的账才等于实机会算出来的账（§15.7）。
+    // Runs the live loop unchanged against real history -- **the same engine, the same
+    // tick**, just with `now` fed in from outside. This way the report the CLI dry-run
+    // produces matches exactly what the real machine would compute (§15.7).
     var buf = new JudgmentBuffer(task.StartedAt, minutes);
     var settled = 0;
     DateTimeOffset? completedAt = null;
@@ -208,7 +218,7 @@ int Help()
           itami bench  --minutes 25 [--pattern focused|mixed|slack]
 
         A task lives only in this process and is never written to disk: quitting itami
-        abandons the current task (DESIGN.md §2).
+        abandons the current task.
         The rules file defaults to ./rules.json; override it with --rules <path>.
 
         """);
@@ -218,8 +228,9 @@ int Help()
 // ---------------------------------------------------------------- bench
 
 /// <summary>
-/// 用合成数据干跑新判定模型（JudgmentBuffer + Judgment）。
-/// 不碰 AW，不写盘——纯验证 buffer 初始化和状态转换。
+/// Dry-runs the judgment model (JudgmentBuffer + Judgment) against synthetic data.
+/// Doesn't touch ActivityWatch, doesn't write to disk -- purely verifies buffer
+/// initialization and state transitions.
 /// </summary>
 int Bench()
 {
@@ -230,7 +241,7 @@ int Bench()
     Console.WriteLine($"  Judgment Buffer Bench — {minutes} min focus, pattern: {pattern}");
     Console.WriteLine($"══════════════════════════════════════════════\n");
 
-    // 1. 初始化
+    // 1. Initialization
     var now = new DateTimeOffset(2026, 7, 31, 9, 1, 0, TimeSpan.FromHours(8));
     var taskStart = TimeGrid.FloorToMinute(now); // 09:01:00
     var buf = new JudgmentBuffer(taskStart, minutes);
@@ -243,8 +254,8 @@ int Bench()
     Console.WriteLine($"Focus: {minutes} min ({buf.RemainingTargetSeconds}s)\n");
     Renderer.BufferSummary(buf);
 
-    // 2. 每分钟喂一次合成的 AW 事件（上限: 目标分钟数 + 1h 的 slack + 归档预留）
-    // 跑到「目标时长 + 一小时的余量」，或者至少跨过一次归档（2h + 10min）
+    // 2. Feed a synthetic ActivityWatch event once a minute (cap: target minutes + 1h of slack + archiving headroom)
+    // Runs until "target length + one hour of slack", or at least crosses one archive (2h + 10min)
     var maxElapsed = Math.Max(JudgmentBuffer.DrawSeconds + 600, minutes * 60 + 3600);
     var elapsed = 0;
     var tick = 0;
@@ -271,7 +282,7 @@ int Bench()
             Renderer.BufferSummary(buf);
     }
 
-    // 3. 终局
+    // 3. Final results
     Console.WriteLine($"\n══════════════════════════════════════════════");
     Console.WriteLine($"  Done. Ticks: {tick}  Elapsed: {elapsed}s ({elapsed / 60}min)");
     Console.WriteLine($"  Settled into during: {settled}s ({settled / 3600.0:F2} hours)");
@@ -282,11 +293,13 @@ int Bench()
 }
 
 /// <summary>
-/// 合成一个 4 分钟查询窗口的 AW 事件，模拟 AW 的返回。
+/// Synthesizes ActivityWatch events for one 4-minute query window, imitating what
+/// ActivityWatch would return.
 ///
-/// 三种模式：focused（全在目标应用）、mixed（穿插偷懒和 AFK）、slack（大量偷懒）。
-/// 事件切成 10 秒一条，最后 10 秒<b>故意不给</b>——模拟 T3 那 6~12 秒滞后，
-/// 看它会不会被判成 AwOffline（应该会，而且下一拍自愈）。
+/// Three patterns: focused (entirely on the goal app), mixed (interleaved off-task and
+/// AFK stretches), slack (mostly off-task). Events are chopped into 10-second pieces, and
+/// the last 10 seconds are <b>deliberately left empty</b> -- simulating T3's 6-12 second
+/// lag, to see whether it gets judged AwOffline (it should, and self-heals next tick).
 /// </summary>
 static (List<AwEvent> Win, List<AwEvent> Afk) SyntheticEvents(
     DateTimeOffset qStart, DateTimeOffset qEnd, DateTimeOffset taskStart, string pattern)
@@ -298,15 +311,15 @@ static (List<AwEvent> Win, List<AwEvent> Afk) SyntheticEvents(
     for (var i = 0; i + 10 <= n - 10; i += 10)
     {
         var t = qStart.AddSeconds(i);
-        if (t < taskStart) continue;               // 任务开始前不造数据
+        if (t < taskStart) continue;               // Don't fabricate data before the task started
 
         var slot = (int)(t - taskStart).TotalSeconds / 10;
         var (app, isAfk) = pattern switch
         {
             "focused" => ("goal", false),
             "slack" => (slot % 3 == 0 ? "goal" : "chrome", false),
-            _ => slot % 15 == 3 ? ("goal", true)   // 偶尔起身走开
-               : slot % 5 == 0 ? ("chrome", false) // 每 50 秒偷懒一组
+            _ => slot % 15 == 3 ? ("goal", true)   // Occasionally step away
+               : slot % 5 == 0 ? ("chrome", false) // A stretch of off-task every 50 seconds
                : ("goal", false),
         };
 
@@ -316,7 +329,7 @@ static (List<AwEvent> Win, List<AwEvent> Afk) SyntheticEvents(
     return (win, afk);
 }
 
-// ---------------------------------------------------------------- 杂项
+// ---------------------------------------------------------------- Misc
 
 GroupRules LoadRules()
 {

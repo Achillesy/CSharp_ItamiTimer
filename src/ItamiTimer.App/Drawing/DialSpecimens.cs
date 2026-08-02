@@ -7,14 +7,17 @@ using ItamiTimer.Core;
 namespace ItamiTimer.App;
 
 /// <summary>
-/// 把表盘在几个关键状态下**离屏**渲染成 PNG，供人眼核对几何。
+/// Renders the dial **off-screen** into PNGs across a handful of key states, for a human
+/// to eyeball the geometry.
 ///
-/// 存在的理由：表盘在 App 层，Core 那套测试碰不到它 —— 2026-07-28 的"承诺弧跨整点
-/// 跳圈"就是这么漏出去的，最后是用户在真实运行里肉眼发现的。有些几何错误（半径、
-/// 角度、叠放次序）也确实只有看图才发现得了。
+/// Why this exists: the dial lives in the App layer, out of reach of Core's test suite --
+/// that's exactly how the 2026-07-28 "commitment arc jumps a lap across a whole hour" bug
+/// slipped through, ultimately spotted by the user during a real run. Some geometry bugs
+/// (radius, angle, layering order) really can only be caught by looking at the picture.
 ///
-/// 用法：<c>ItamiTimer.exe --dial-specimens &lt;输出目录&gt;</c>，渲染完直接退出，不开窗口。
-/// 这是**调试出口，不是产品功能**：正常启动的路径一个字节都没碰。
+/// Usage: <c>ItamiTimer.exe --dial-specimens &lt;output dir&gt;</c>, renders and exits
+/// immediately, no window. This is a **debug exit, not a product feature**: the normal
+/// startup path isn't touched at all.
 /// </summary>
 internal static class DialSpecimens
 {
@@ -24,7 +27,7 @@ internal static class DialSpecimens
     {
         Directory.CreateDirectory(outDir);
 
-        // 用户报的那个 bug 的现场：23:59:00 起算，走过 00:00
+        // The scene of the bug the user reported: starting at 23:59:00, crossing past 00:00
         var t2359 = new DateTimeOffset(2026, 7, 27, 23, 59, 0, TimeSpan.FromHours(8));
         var t1010 = new DateTimeOffset(2026, 7, 28, 10, 10, 0, TimeSpan.FromHours(8));
 
@@ -37,17 +40,17 @@ internal static class DialSpecimens
         Save(outDir, "03-just-started-zero-cells-full-grey-arc", t2359, [], remaining: 5);
 
         Save(outDir, "04-one-cell-of-each-outcome", t1010, [
-            Cell(0, t1010, 60, 0),            // 全绿
-            Cell(1, t1010, 30, 30),           // 一半偷懒
-            Cell(2, t1010, 0, 60),            // 全红
-            Cell(3, t1010, 0, 0, absent: 60), // 离开：虚线空心框（2026-08-02 起不再是「什么都不画」）
-            Cell(4, t1010, 0, 0, init: 60),   // 没画过：什么都不画（虚线已经让给 Afk 了）
+            Cell(0, t1010, 60, 0),            // fully green
+            Cell(1, t1010, 30, 30),           // half off-task
+            Cell(2, t1010, 0, 60),            // fully red
+            Cell(3, t1010, 0, 0, absent: 60), // away: a hollow dashed box (no longer "draws nothing" since 2026-08-02)
+            Cell(4, t1010, 0, 0, init: 60),   // never painted: draws nothing (the dashes were handed off to Afk)
         ], remaining: 8);
 
-        // 跨圈：58 格已走完，承诺弧还剩 6 分钟 —— 必须在第 58→60 分钟处切到内圈
+        // Crossing a lap: 58 cells elapsed, 6 minutes still left in the commitment arc -- must cut to the inner lap right at minute 58->60
         var many = new List<MinuteCell>();
         for (var i = 0; i < 58; i++) many.Add(Cell(i, t1010, i % 7 == 0 ? 20 : 60, i % 7 == 0 ? 40 : 0));
-        // 木桶：纯度从满到零连续变化，看"短板"这个读法成不成立（§8.2.3a）
+        // Barrel: purity varies continuously from full to zero, checking whether the "short plank" reading holds up (§8.2.3a)
         var barrel = new List<MinuteCell>();
         for (var i = 0; i < 20; i++)
         {
@@ -56,7 +59,7 @@ internal static class DialSpecimens
         }
         Save(outDir, "09-barrel-purity-from-full-to-zero", t1010, barrel, remaining: 6);
 
-        // 真实一点的样子：多数分钟满格，偶尔几块短板
+        // A more realistic look: most minutes full, a few short planks scattered in
         var real = new List<MinuteCell>();
         double[] mix = [60, 60, 60, 31, 60, 60, 60, 60, 12, 60, 60, 47, 60, 60, 60, 0, 60, 60];
         for (var i = 0; i < mix.Length; i++) real.Add(Cell(i, t1010, mix[i], 60 - mix[i]));
@@ -64,8 +67,9 @@ internal static class DialSpecimens
 
         Save(outDir, "05-arc-wraps-past-full-circle-tail-spirals-inward", t1010, many, remaining: 6);
 
-        // 休息：**色环已经撤掉**（用户 2026-07-28：任务结束就不查 AW 了，不用画），
-        // 盘面上只剩一块扇形 = 你挣来的时间（§8.4.4）
+        // Rest: **the coloured ring is already gone** (user, 2026-07-28: once the task
+        // ends, ActivityWatch isn't queried anymore, so there's nothing to draw), leaving
+        // only a wedge on the dial = the time you earned (§8.4.4)
         Save(outDir, "06-on-break-only-the-rest-wedge-remains", t1010,
             [], remaining: 0, restFrom: t1010.AddMinutes(25), restMinutes: 5);
 
@@ -76,10 +80,13 @@ internal static class DialSpecimens
             [], remaining: 0, restFrom: t1010.AddMinutes(25), restMinutes: 5,
             palette: DialPalette.Dark);
 
-        // 休息扇形 2026-08-02 起不等达成才画：起点是承诺弧末端对应的墙钟时刻，
-        // 任务一开始就有预告，拖延时跟着灰弧一起往后退（§8.2 / TaskSession.RestFrom）。
-        // 两张对照：20 分钟过去，一个几乎全专注（灰弧只剩 2 分钟），一个几乎全偷懒
-        // （灰弧还有 18 分钟）——起点、也就是扇形，被推得老远。
+        // Since 2026-08-02 the rest wedge no longer waits for completion to be drawn: its
+        // starting point is the wall-clock moment corresponding to the commitment arc's
+        // end, previewed from the very start of the task, retreating along with the grey
+        // arc while procrastinating (§8.2 / TaskSession.RestFrom). Two comparison shots:
+        // 20 minutes in, one is almost entirely focused (the grey arc has only 2 minutes
+        // left), the other almost entirely off-task (the grey arc still has 18 minutes) --
+        // the starting point, i.e. the wedge, gets pushed far out.
         var focused20 = new List<MinuteCell>();
         for (var i = 0; i < 20; i++) focused20.Add(Cell(i, t1010, 60, 0));
         Save(outDir, "12-rest-wedge-projected-nearly-on-time", t1010, focused20, remaining: 2,
@@ -96,8 +103,9 @@ internal static class DialSpecimens
     }
 
     /// <summary>
-    /// 骨牌一周七天叠在一张图上（Fallen 1~7），核对 §16.1 亮面递减：
-    /// 表盘的 `--dial-specimens` 从不覆盖 <see cref="DominoRow"/>，几何错误只能靠这个看出来。
+    /// Stacks the dominoes for all seven days of the week onto one image (Fallen 1-7), to
+    /// check §16.1's shrinking lit face: the dial's `--dial-specimens` never covers
+    /// <see cref="DominoRow"/>, so its geometry bugs can only be spotted this way.
     /// </summary>
     private static void RenderDominoProgression(string dir)
     {
@@ -126,8 +134,9 @@ internal static class DialSpecimens
                              DateTimeOffset? restFrom = null, double restMinutes = 0,
                              DialPalette? palette = null)
     {
-        // 承诺弧不再是一个标量——它就是 buffer 里那段 Gray 格子（§4.5），
-        // 所以样张也照着接：已走过的格子后面再挂 remaining 个满格 Gray。
+        // The commitment arc is no longer a scalar -- it's just the span of Gray cells in
+        // the buffer (§4.5), so the specimens follow the same convention: whatever's
+        // elapsed, followed by `remaining` full Gray cells.
         var all = new List<MinuteCell>(cells);
         for (var i = 0; i < (int)remaining; i++)
         {
@@ -150,8 +159,9 @@ internal static class DialSpecimens
 
         using var bmp = new RenderTargetBitmap(new PixelSize(Size, Size), new Vector(96, 96));
         bmp.Render(dial);
-        // Avalonia 12 把无参 Save 标了过时，新重载要一个编码器选项对象。
-        // 这里是调试出口，默认 PNG 就够，不值得为它引一层。
+        // Avalonia 12 marks the parameterless Save as obsolete; the new overload wants an
+        // encoder-options object. This is a debug exit, and default PNG is good enough --
+        // not worth bringing in another layer for it.
 #pragma warning disable CS0618
         bmp.Save(Path.Combine(dir, name + ".png"));
 #pragma warning restore CS0618
