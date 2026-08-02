@@ -45,17 +45,21 @@ dotnet build ItamiTimer.slnx
 dotnet test ItamiTimer.slnx
 ```
 
-发布（**必须限定 RID**，否则 560MB；pdb 由 csproj 的 `StripPdbFromPublish` 自动剔除）：
+**本地调试验证就在项目目录内跑 Debug 或 Release 的编译产物**（`bin/Debug`、
+`bin/Release`，或直接 IDE 里跑）——**不要**执行 `dotnet publish` 把东西发到项目外部
+（比如 `%LOCALAPPDATA%\Programs\ItamiTimer`）去测试，也不要用不带 `--dmg` 的
+`pack-macos.sh` 把 `.app` 装到 `~/Applications` 去测试。`rules.json` 已经通过 csproj
+的 `Content Include`（`CopyToOutputDirectory`）跟着编译产物走，`bin/` 下的产物本身就能
+独立跑起来。
 
-```bash
-dotnet publish src/ItamiTimer.App -c Release -r win-x64 --self-contained false -o "$LOCALAPPDATA/Programs/ItamiTimer"
-```
+**对外发布只有一条路**：`dist/` 目录里的成品——`./pack-macos.sh --dmg` 产出的 `.dmg`，
+`.\pack-windows.ps1` 产出的 `ItamiTimer-<版本>-win-x64.exe`。这两个脚本**只负责产出
+这一份最终安装包**，不再兼任"发一份能跑的本地测试版"这个角色。
 
-发布目标被正在运行的 ItamiTimer 锁住时会重试 10 次然后失败——先让用户关程序。
-用户从桌面快捷方式启动 `%LOCALAPPDATA%\Programs\ItamiTimer\ItamiTimer.exe`，
-要用户实机验证就得先发布。
-
-macOS 打包必须走 `./pack-macos.sh`（bundle 承载图标 + DOTNET_ROOT）。
+Windows 安装包装机不需要预装 .NET——`installer/ItamiTimer.iss` 会检测、提示、下载官方
+运行时安装器。依赖 Inno Setup 6 的 `ISCC.exe`（`winget install --id JRSoftware.InnoSetup
+-e`，只是构建工具）。两个脚本的版本号都读同一处 `Directory.Build.props`。详见
+DESIGN.md §14。
 
 调试出口（headless，不开窗口）：`--dial-specimens <目录>` / `--export-icon <路径>` /
 `--export-iconset <目录>`。

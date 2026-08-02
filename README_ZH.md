@@ -72,7 +72,15 @@ macOS——必须打成 `.app` bundle（图标、Dock、以及 Finder 启动时�
 环境变量）：
 
 ```bash
-./pack-macos.sh
+./pack-macos.sh --dmg
+```
+
+Windows——要给别人用而不是本机开发调试时，打一个安装包（`dist/ItamiTimer-<版本>-win-x64.exe`）。
+装机时会检测 .NET Desktop Runtime，没有就提示下载安装，目标机器不需要预装 .NET。需要
+Inno Setup 6（`winget install --id JRSoftware.InnoSetup -e`）作为构建工具：
+
+```powershell
+.\pack-windows.ps1
 ```
 
 专注时长滑块在 Release 版是 **10–50 分钟**，Debug 版是 **3–10 分钟**——这样开发时不用真的

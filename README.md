@@ -76,7 +76,17 @@ macOS — must be packed as a `.app` bundle (icon, Dock, and the `DOTNET_ROOT`
 environment for Finder-launched apps):
 
 ```bash
-./pack-macos.sh
+./pack-macos.sh --dmg
+```
+
+Windows — for handing to other people rather than a local dev build, pack an installer
+(`dist/ItamiTimer-<version>-win-x64.exe`). It checks for the .NET Desktop Runtime at
+install time and offers to download + install it if missing, so the target machine
+doesn't need .NET preinstalled. Requires Inno Setup 6 (`winget install --id
+JRSoftware.InnoSetup -e`) as a build-time tool:
+
+```powershell
+.\pack-windows.ps1
 ```
 
 The focus-length slider is **10–50 minutes in Release** and **3–10 minutes in Debug**, so a

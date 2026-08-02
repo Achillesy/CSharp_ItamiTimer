@@ -748,13 +748,36 @@ csproj 的 `AssemblyName=ItamiTimer`。macOS 上 AW 报的 `data.app` 就是前�
 ```bash
 dotnet build ItamiTimer.slnx
 dotnet test  ItamiTimer.slnx
-dotnet publish src/ItamiTimer.App -c Release -r win-x64 --self-contained false -o "$LOCALAPPDATA/Programs/ItamiTimer"
-./pack-macos.sh
+./pack-macos.sh --dmg
+.\pack-windows.ps1
 ```
 
 - **必须限定 RID**：否则所有平台的 Skia/HarfBuzz 原生库全进来（实测 560MB）。
 - csproj 的 `StripPdbFromPublish` 自动删掉两个巨型 pdb：127MB → 27MB。**别删这个 target。**
-- 发布目标被正在运行的程序锁住时会重试 10 次然后失败——先关程序。
+- 版本号唯一来源是 `Directory.Build.props` 的 `<Version>`：`pack-macos.sh`/`pack-windows.ps1`
+  和运行时的 `SettingsWindow` 都读它，改版本只改这一处。
+
+**2026-08-03 起，本地调试验证和对外发布彻底分开**：本地验证就用项目目录内 `bin/Debug`/
+`bin/Release` 的编译产物直接跑（`rules.json` 已经通过 csproj 的 `Content Include` 跟着
+编译产物走，能独立跑起来），**不再**用 `dotnet publish -o "$LOCALAPPDATA/Programs/
+ItamiTimer"` 或不带 `--dmg` 的 `pack-macos.sh` 把东西发到项目目录外面去测试。对外发布
+只有一条路：`dist/` 目录里的成品——`pack-macos.sh --dmg` 的 `.dmg`、`pack-windows.ps1`
+的 `.exe`，这两个脚本只负责产出这一份最终安装包。
+
+**`pack-windows.ps1`**（2026-08-03 新增）：对应 `pack-macos.sh --dmg` 的 Windows 版本，
+产物是 `dist/ItamiTimer-<版本>-win-x64.exe`。跟 macOS 的 `.dmg`（只在 Read Me 里让用户
+自己去装 .NET）不一样——这个安装包会**主动检测**：装机时扫 `Program Files\dotnet\shared\
+Microsoft.WindowsDesktop.App` 有没有 `10.*` 子目录，没有就提示用户、从
+`https://aka.ms/dotnet/10.0/windowsdesktop-runtime-win-x64.exe`（官方 evergreen 链接，
+实测能正确 302 到 builds.dotnet.microsoft.com）下载运行时安装器并帮忙装上（见
+`installer/ItamiTimer.iss` 的 `[Code]` 段）。整个安装包用 `PrivilegesRequired=admin`
+——运行时安装器本身需要提权，让外层安装包一起提权，省得嵌套再弹一次 UAC。构建这一步
+需要 Inno Setup 6 的 `ISCC.exe`（`winget install --id JRSoftware.InnoSetup -e`，纯开发机
+工具，不影响最终用户）。
+- 安装包的发布目标（`dist/`）被正在运行的程序锁住时会重试 10 次然后失败——先关程序。
+- `%LOCALAPPDATA%\ItamiTimer\`（settings.json/rules.json/log）和机器级单实例 Mutex
+  都不认安装位置——装好的版本、项目内的 Debug/Release 编译产物，读写的是同一份配置，
+  也不能同时运行（后启动的会把先启动的窗口拉到前台然后自己退出）。
 
 ---
 
