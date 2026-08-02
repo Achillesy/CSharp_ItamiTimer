@@ -238,12 +238,14 @@ int Bench()
 
     Console.WriteLine($"Task start: {Renderer.Clock(taskStart)}");
     Console.WriteLine($"WallClock:  {Renderer.Clock(buf.WallClock)}  (buffer[0])");
-    Console.WriteLine($"Buffer[0..180) = padding, [180..7380) = draw zone");
+    Console.WriteLine($"Buffer[0..{JudgmentBuffer.PaddingSeconds}) = padding, "
+                    + $"[{JudgmentBuffer.PaddingSeconds}..{JudgmentBuffer.TotalSize}) = draw zone");
     Console.WriteLine($"Focus: {minutes} min ({buf.RemainingTargetSeconds}s)\n");
     Renderer.BufferSummary(buf);
 
     // 2. 每分钟喂一次合成的 AW 事件（上限: 目标分钟数 + 1h 的 slack + 归档预留）
-    var maxElapsed = Math.Max(7800, minutes * 60 + 3600);
+    // 跑到「目标时长 + 一小时的余量」，或者至少跨过一次归档（2h + 10min）
+    var maxElapsed = Math.Max(JudgmentBuffer.DrawSeconds + 600, minutes * 60 + 3600);
     var elapsed = 0;
     var tick = 0;
     var settled = 0;

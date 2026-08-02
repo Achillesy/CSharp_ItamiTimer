@@ -399,8 +399,8 @@ CLI 账单里的 `off / 60` 变成了**整数除法**，`52.6 min` 悄悄打成 
     "上季度目标": { "disabled": true, "rules": [ { "title": "Blender" } ] }
   },
   "executeCommand": {
-    "windows": "shutdown /s /t 0",
-    "macos":   "osascript -e 'tell application \"System Events\" to shut down'"
+    "windows": [ "explorer", "shutdown /s /t 0" ],
+    "macos":   [ "open -a TextEdit", "osascript -e 'tell application \"System Events\" to shut down'" ]
   }
 }
 ```
@@ -411,10 +411,14 @@ CLI 账单里的 `off / 60` 变成了**整数除法**，`52.6 min` 悄悄打成 
 - 空规则 / 空组是**加载期错误**（匹配一切 = 关掉约束）。
 - `disabled: true` 屏蔽旧目标而不删除。
 - 两个平台的 app 名写在同一份文件里，永不匹配的正则无害。
-- `executeCommand` 供闹钟的 Execute 用（§9），按当前 OS 取一条。
+- `executeCommand` 供闹钟的 Execute 用（§9）。按当前 OS 取那一项，**如果是数组就只执行
+  第 0 条**（用户 2026-08-02）：这里是一个常用命令的收藏夹，想换用哪条就把它挪到第一位，
+  或者把上面几条用 `//` 注释掉——注释在解析时被 Skip 掉，等于从数组里消失，
+  下一条自然变成第一条。**没有界面去选**，跟这个程序其余地方一样（D6）。
+  单条字符串也仍然认，省得逼老配置改格式。
 
-> ⚠️ **两条读取路径**：判定走类型模型 `RulesFile`（只认 `groups`），
-> `Shutdown.cs` 用裸 `JsonDocument` 另读一遍 `executeCommand`。见 §15.4。
+> **整个文件只有一个类型模型 `RulesFile`、一个解析器**（2026-08-02 统一，见 §15.4）。
+> 加新的节就往 `RulesFile` 加字段——别再另起一条读取路径。
 
 ## 6. 任务生命周期
 
@@ -648,8 +652,29 @@ macOS 三级枚举 `*.aiff` 走 AudioToolbox。找不到、放不出一律安静
 **存哪儿：独立的 `during.json`**（用户 2026-08-02 定）。字段名沿用 `accumulatedSeconds`。
 
 ```json
-{ "accumulatedSeconds": { "学习经济学": 12345.0 } }
+{ "accumulatedSeconds": { "ItamiTimer": 38258 } }
 ```
+
+**秒数是整数**（2026-08-02）：统计的是 buffer 里的格子数，不是 AW 事件的 `duration`，
+所以永远不会有小数。类型从 `double` 收成 `long`——顺带提醒，**改完要把每一处
+`/ 60` 检查一遍**，整数除法会把小数位悄悄吃掉（DECISIONS G 里那条，这一轮已经栽过一次）。
+老文件里如果还留着小数，`Load` 会四舍五入救回来并写一句 WARN，**不会归零**——
+这是唯一一个丢了就补不回来的数据。
+
+**没有随程序发布的默认版本，也没有 rules.json 那套三级查找**：它是程序自己的状态，
+不是配置。但**文件不存在时，启动会按当前的小目标名建一份全 0 的**：
+
+```json
+{ "accumulatedSeconds": { "ItamiTimer": 0 } }
+```
+
+界面上那个数字没有单位、不解释（D6），用户只能去数据目录里翻。翻到 `{}` 什么也学不到，
+翻到 `{ "ItamiTimer": 0 }` 一眼就明白这表是按小目标名索引的秒数——跟 rules.json
+「给例子不给注释」同一条思路。
+
+⚠️ **只在创建那一次播种，之后绝不再同步。** 状态文件不该去镜像配置文件：后来改了目标名，
+这儿留一条对不上的零就留着——它不显示、不参与任何判定；而为了清掉它去跟 rules.json
+对账，才是真把两个文件绑死。
 
 - 程序**启动时读入**，任务**完成或 ignore 时 `+=` 并写盘**。
 - `rules.json` 因此保持**纯只读**——程序一旦写它，用户手写的注释就全部消失
@@ -693,10 +718,14 @@ csproj 的 `AssemblyName=ItamiTimer`。macOS 上 AW 报的 `data.app` 就是前�
 ## 13. 跨平台
 
 判定层平台无关，工作量全在 App 层。平台差异收口于：`Sound` / `Tick` / `MacAudio` /
-`InputIdle` / `WindowPin` / `AppData` / `Shutdown`。
+`InputIdle` / `WindowPin` / `AppData` / `Command`。
 
 - macOS **必须打成 `.app`**（`pack-macos.sh`）：bundle 用 `LSEnvironment` 写
   `DOTNET_ROOT`——双击启动的 GUI 不继承 shell 环境变量。
+- ⚠️ **`--dial-specimens` 的输出不可复现**：`DrawHands` 读 `DateTime.Now`，样张上画着
+  实时指针，所以同一份代码相隔几秒渲染两次字节就不同（2026-08-02 实测）。
+  **它不能用来做回归的逐字节对比**——G 组里 headless 改造那次用的 SHA-256 对比在这儿
+  不成立，只能用眼睛看。想让它可比，得给渲染注入一个固定时刻，目前没做。
 - 调试出口 `--dial-specimens` 走 **headless**，不初始化窗口平台（构建不该依赖
   有没有人登录着桌面）。
 - 未验证风险：macOS 的 `localizedName` 随系统语言变（中文系统 `Finder`→`访达`）。
@@ -789,18 +818,23 @@ to add it as a child of DockPanel.`
 **已按 §11.2 重做**：独立的 `during.json`、`+=`、归档当场入账、三条终结路径都记账，
 `Settings.DuringByGroup` 删除。
 
-## 15.4 三处遗留的不一致（低优先级，顺手记下）
+## 15.4 遗留的不一致
 
-- ~~`GoalGroup.AccumulatedSeconds` 死字段~~ —— 2026-08-02 删除，累计时长搬到
-  `during.json`（§11.2）。
-- `executeCommand` 不在 `RulesFile` 类型模型里，`Shutdown.cs` 用裸 `JsonDocument`
-  另读一遍——同一个文件两条读取路径。**这条已经咬人了**：那边没开
-  `JsonCommentHandling.Skip`，而文档明确鼓励在 `rules.json` 里写注释，所以只要写了注释
-  Execute 就必然解析失败。2026-08-02 已让两边的解析设置对齐，但**两条读取路径本身还在**。
-- `MainWindow.axaml` 的 `Slider Value="25"` 超出了 `Minimum=3 Maximum=10`（会被
-  静默钳到 10）。
-- `Shutdown.cs` 按 ISSUE_FIX 的说法应改名 `Command.cs`，实际没改名。
-- `MainWindow.axaml` 里滑块上方那段注释还在说「10~50、步进 5、默认 25」，跟实际属性不符。
+- ~~`GoalGroup.AccumulatedSeconds` 死字段~~ —— 2026-08-02 删除（§11.2）。
+- ~~`Slider Value="25"` 超出量程~~ —— 2026-08-02 修复：axaml 回到正式量程 10~50，
+  Debug 由代码覆盖（§6.2）。上方那段注释也跟实际属性对上了。
+- ~~`Shutdown.cs` 应改名 `Command.cs`~~ —— 2026-08-02 改了。
+- ~~`executeCommand` 两条读取路径~~ —— **2026-08-02 根治**。它现在在 `RulesFile`
+  类型模型里，`GroupRules.Parse` 一次解析出全部；`Command` 从 `GroupRules.CommandsFor(os)`
+  取，**不再自己读文件**。整个 rules.json 只剩一个类型模型、一个解析器。
+
+  来龙去脉值得记：这两条路径是**不同时间、不同 AI 各写一半**造出来的（Visual Studio 里
+  一次、Claude 一次），谁也不知道对方那套设置。它咬过两次，症状一模一样——
+  **文件的一半好用、另一半安静地不工作，而程序照常启动**：一次是那边没开
+  `JsonCommentHandling.Skip`（文档鼓励写注释 → 写了就失效），一次是 `TryGetProperty`
+  永远区分大小写而这边不区分。
+
+  **往 rules.json 里加新的节，就往 `RulesFile` 加字段，别再另起一条路。**
 
 ## 15.5 ⚠️ 归档的结算范围偏了 180 秒（2026-08-02 发现）
 

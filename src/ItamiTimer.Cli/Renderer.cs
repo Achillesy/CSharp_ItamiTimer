@@ -36,31 +36,19 @@ public static class Renderer
     public static string Clock(DateTimeOffset t, string fmt = "HH:mm:ss") => t.ToLocalTime().ToString(fmt);
 
     /// <summary>
-    /// 一格（一分钟）→ 一个字符，规则见 DESIGN.md §4.6。
-    ///
-    /// 有 focus 就按 <c>&gt;40 / &gt;20 / &gt;0</c> 分三档；一秒 focus 都没有时，在
-    /// Init/Gray/Afk/OffTask 里取<b>计数最大</b>的那个，平局取<b>码值大</b>的（fail-closed）。
+    /// 一格 → 一个字符。**只做「档位 → 字符」的映射**——「这一格该读成什么」
+    /// 是判定层的事（<see cref="MinuteCell.Tier"/>，§4.6），不在这里重写一遍。
     /// </summary>
-    public static string CellChar(MinuteCell c)
+    public static string CellChar(MinuteCell c) => c.Tier switch
     {
-        if (c.FocusSeconds > 40) return $"{Fg(FocusC)}█{Reset}";
-        if (c.FocusSeconds > 20) return $"{Fg(AmberC)}█{Reset}";
-        if (c.FocusSeconds > 0) return $"{Fg(AmberC)}▒{Reset}";
-
-        // argmax；平局取码值大的 → OffTask(3) > Afk(2) > Gray(1) > Init(0)
-        var best = c.InitSeconds; var pick = JudgmentCode.Init;
-        if (c.GraySeconds >= best) { best = c.GraySeconds; pick = JudgmentCode.Gray; }
-        if (c.AfkSeconds >= best) { best = c.AfkSeconds; pick = JudgmentCode.Afk; }
-        if (c.OffTaskSeconds >= best) pick = JudgmentCode.OffTask;
-
-        return pick switch
-        {
-            JudgmentCode.OffTask => $"{Fg(SlackC)}█{Reset}",
-            JudgmentCode.Afk => $"{Dim}□{Reset}",
-            JudgmentCode.Gray => $"{Fg(GrayC)}█{Reset}",
-            _ => $"{Dim}·{Reset}",
-        };
-    }
+        CellTier.FocusFull => $"{Fg(FocusC)}█{Reset}",
+        CellTier.FocusMid => $"{Fg(AmberC)}█{Reset}",
+        CellTier.FocusLow => $"{Fg(AmberC)}▒{Reset}",
+        CellTier.OffTask => $"{Fg(SlackC)}█{Reset}",
+        CellTier.Away => $"{Dim}□{Reset}",
+        CellTier.Pending => $"{Fg(GrayC)}█{Reset}",
+        _ => $"{Dim}·{Reset}",
+    };
 
     /// <summary>一分钟一个字符，60 个换一行（正好一圈）。</summary>
     public static string Cells(IReadOnlyList<MinuteCell> cells)

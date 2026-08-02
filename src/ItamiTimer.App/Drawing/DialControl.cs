@@ -216,65 +216,40 @@ public class DialControl : Control
             var d0 = (m0 + cell.Index) * 6;
             var d1 = d0 + 6;
 
-            // ---- §4.6 染色。**色块只为好看，不是账**（用户 2026-08-02）：
-            //      真正参与判定的只有 §4.5 那个缺口，怎么分档都不影响任务什么时候完成。
+            // ---- §4.6 染色。**只做「档位 → 怎么画」的映射**：一格该读成什么由
+            //      cell.Tier 定（判定层，规则只写一处），这里只管长什么样。
+            //      色块只为好看，不是账——真正参与判定的是 §4.5 那个缺口。
             //
-            // 有 focus 就按 >40 / >20 / >0 分三档。高度跟着颜色走，编的是同一个量：
-            // 一个给正常视觉，一个给所有人（D1 的木桶短板，只是从连续换成了离散）。
-            if (cell.FocusSeconds > 0)
+            // 高度跟着颜色走，编的是同一个量：一个给正常视觉，一个给所有人
+            // （D1 的木桶短板，只是从连续换成了离散）。下限 1/2 绝不取 0（D2）——
+            // 零高度会跟「不画」撞车，而那是最不该混淆的一对。
+            switch (cell.Tier)
             {
-                var (tint, height) = cell.FocusSeconds switch
-                {
-                    > 40 => (p.Focus, 1.00),
-                    > 20 => (p.Ramp(0.5), 0.80),
-                    _ => (p.Ramp(0.8), 0.60),
-                };
-                Stave(ctx, c, R, rIn, rOut, d0, d1, tint, height);
-                continue;
-            }
+                case CellTier.FocusFull: Stave(ctx, c, R, rIn, rOut, d0, d1, p.Focus, 1.00); break;
+                case CellTier.FocusMid: Stave(ctx, c, R, rIn, rOut, d0, d1, p.Ramp(0.5), 0.80); break;
+                case CellTier.FocusLow: Stave(ctx, c, R, rIn, rOut, d0, d1, p.Ramp(0.8), 0.60); break;
+                case CellTier.OffTask: Stave(ctx, c, R, rIn, rOut, d0, d1, p.Slack, 0.50); break;
 
-            // ---- 一秒 focus 都没有：在 Init/Gray/Afk/OffTask 里取【计数最大】的那个，
-            //      平局取【码值大】的 —— OffTask(3) > Afk(2) > Gray(1) > Init(0)，fail-closed。
-            //
-            // argmax 而不是"过半"：三类混合时可能谁都不过半，按阈值写会默认掉进红色，
-            // 于是「离开 29 秒 + 摸鱼 28 秒」被整格判成全红。**把起身离开画成红色等于
-            // 冤枉自己**（§0.4.1），而 argmax 没有阈值，也就没有那道悬崖。
-            var best = cell.InitSeconds;
-            var pick = 0;
-            if (cell.GraySeconds >= best) { best = cell.GraySeconds; pick = 1; }
-            if (cell.AfkSeconds >= best) { best = cell.AfkSeconds; pick = 2; }
-            if (cell.OffTaskSeconds >= best) pick = 3;
-
-            switch (pick)
-            {
-                case 3:     // OffTask：红，半高。下限 1/2 绝不取 0（D2）——
-                            // 零高度会跟「不画」撞车，而那是最不该混淆的一对。
-                    Stave(ctx, c, R, rIn, rOut, d0, d1, p.Slack, 0.50);
-                    break;
-
-                case 2:     // Afk：虚线空心框，满高。
-                            //
-                            // 2026-08-02 起「人不在」重新画出来了（D3 翻案）：原来什么都不画，
-                            // 现在给它一个**空心**的框——有形状、没实体，读起来是「这段时间
-                            // 存在，但不属于任何一边」。`Absent` 这个 token 从 07-28 起就
-                            // 一直留着当语义占位，等的就是今天。
+                // 人不在：虚线空心框，满高。2026-08-02 起重新画出来了（D3 翻案）——
+                // 原来什么都不画，现在给它一个**空心**的框：有形状、没实体，读起来是
+                // 「这段时间存在，但不属于任何一边」。`Absent` 这个 token 从 07-28 起
+                // 就一直留着当语义占位，等的就是今天。
+                case CellTier.Away:
                     ctx.DrawGeometry(null,
                         new Pen(new SolidColorBrush(p.Absent), R(0.012))
                         { DashStyle = new DashStyle([2, 2], 0) },
                         Annulus(c, R(rIn), R(rOut), d0 + 0.4, d1 - 0.4));
                     break;
 
-                case 1:     // Gray：承诺弧。**它不再单独计算**——就是 buffer 里那段 Gray
-                            // （§4.5），跟色块走同一条投影、同一套坐标。
-                            //
-                            // 满高的灰正好成了「这一分钟满格」的参照线：绿板齐了它就是满的，
-                            // 短了一眼看得见。
+                // 承诺弧：**不再单独计算**，就是 buffer 里那段 Gray（§4.5），跟色块走
+                // 同一条投影、同一套坐标。满高的灰正好成了「这一分钟满格」的参照线。
+                case CellTier.Pending:
                     using (ctx.PushOpacity(0.30))
                         ctx.DrawGeometry(new SolidColorBrush(p.Tick), null,
                             Annulus(c, R(rIn), R(rOut), d0, d1));
                     break;
 
-                    // case 0 Init：什么都不画。到这里只有两种可能——漏拍留下的洞，
+                    // CellTier.NotDrawn：什么都不画。到这里只有两种可能——漏拍留下的洞，
                     // 或者承诺弧之后的空白。两个都不该占版面。
             }
         }
