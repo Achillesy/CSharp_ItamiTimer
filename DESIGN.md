@@ -936,10 +936,15 @@ return，`ElapsedSeconds` 不再前进 → `TryArchive` 的条件永远不成立
 
 唯一可能要加回来的是提交前探活——见 §16.5。
 
-## 16.4 单实例限制（原 ISSUE #12 的另一条，**放到最后**）
+## 16.4 ✅ 单实例限制（原 ISSUE #12 的另一条，2026-08-02 实现）
 
-方案已设计：`Mutex` + Windows `FindWindow`/`SetForegroundWindow`——第二个实例启动时
-把已有窗口激活到前台然后自己退出。用户要求**放在所有需求之后**，也可能不做。
+`SingleInstance.TryAcquire()`（[SingleInstance.cs](src/ItamiTimer.App/Platform/SingleInstance.cs)）：
+命名 `Mutex` 判活——不扫进程名，操作系统保证进程退出必然释放，不会有僵尸占用。
+第二个实例抢不到锁时，Windows 上 `FindWindow`（按窗口标题「一袋米要扛几楼」）+
+`ShowWindow(SW_RESTORE)` + `SetForegroundWindow` 把已有窗口拉到前台，自己安静退出；
+macOS 没有零依赖的等价 API，退化成**静默拒绝**（单实例仍然成立，只是不会把老窗口
+自动调出来）。只挡 `BuildAvaloniaApp().StartWithClassicDesktopLifetime` 这条正常启动
+路径，`--dial-specimens` 等一次性调试出口不受影响（见 [Program.cs](src/ItamiTimer.App/Program.cs)）。
 
 ## 16.5 ✅ AW 异常检测（2026-08-02 定稿：仅日志，不改判定）
 

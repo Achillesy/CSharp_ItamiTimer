@@ -30,6 +30,14 @@ internal static class Program
                 return;
             }
 
+            // 单实例限制（DESIGN §16.4）：只挡正常启动这条路径。调试出口是一次性跑完
+            // 就退出的命令行工具，跟"已经在跑的那个窗口"不冲突，不用挡。
+            if (!SingleInstance.TryAcquire())
+            {
+                Log.Info("Another instance is already running; activated it and exiting.");
+                return;
+            }
+
             BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
         }
         catch (Exception ex)
