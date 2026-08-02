@@ -27,6 +27,13 @@ public sealed class TaskSession : IDisposable
     public const int IdleNudgeSeconds = 60;
     private const int AwAfkTimeoutSeconds = 180;
 
+    /// <summary>
+    /// 诊断阈值，不参与判定（DESIGN §16.5）：某个 bucket 心跳只要活着就会持续推进，
+    /// 一拍里连一条贴近 <c>now</c> 的事件都没有，多半是 watcher 死了（也可能是机器刚睡醒——
+    /// 两者在这个信号下看着一样，不去猜，只记日志，用户自己去查）。
+    /// </summary>
+    private const int AwStaleSeconds = 60;
+
     private readonly GroupRules _rules;
     private readonly AwClient _aw;
     private readonly DispatcherTimer _tick = new();
@@ -149,6 +156,13 @@ public sealed class TaskSession : IDisposable
 
             // AW 连不上不会走到这里（上面已经抛了）—— 那条路在 catch 里，
             // 事件列表为空即可，判定模型自己会把这一分钟填成 AwOffline。
+            //
+            // 这里只做诊断日志，不改判定：watcher 悄悄死掉时 AwOffline 计入专注，
+            // §3.1 的知情 fail-open，代价用户 2026-08-02 明确接受——出问题让用户自己查日志。
+            if (!HasRecentEvent(win, queryEnd))
+                Log.Warn($"No fresh window events in the last {AwStaleSeconds}s — aw-watcher-window may be stuck (or the machine just woke up)");
+            if (!HasRecentEvent(afk, queryEnd))
+                Log.Warn($"No fresh afk events in the last {AwStaleSeconds}s — aw-watcher-afk may be stuck (or the machine just woke up)");
             var outcome = _buffer.Tick(minute, win, afk, _rules, Task.Group);
             _deficitSeconds = outcome.DeficitSeconds;
             if (outcome.SettledSeconds > 0)
@@ -191,6 +205,16 @@ public sealed class TaskSession : IDisposable
 
         if (focusDone) Interrupted?.Invoke(Interrupt.FocusDone);
         else if (idleNudge) Interrupted?.Invoke(Interrupt.Idle);
+    }
+
+    /// <summary>watcher 只要活着就会持续心跳，事件的 End 会一直贴着 now 往前挪——
+    /// 不管窗口切不切换、人在不在。查这个就不用另外去问 AW 的 bucket 元数据。</summary>
+    private static bool HasRecentEvent(IReadOnlyList<AwEvent> events, DateTimeOffset now)
+    {
+        var cutoff = now.AddSeconds(-AwStaleSeconds);
+        foreach (var e in events)
+            if (e.End >= cutoff) return true;
+        return false;
     }
 
     public void Abandon()
