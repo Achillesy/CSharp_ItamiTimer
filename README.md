@@ -199,4 +199,5 @@ Both are written in Chinese; the code comments are too.
 
 ## License
 
-Apache 2.0 — see [`LICENSE`](./LICENSE).
+[PolyForm Noncommercial 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0) — see [`LICENSE`](./LICENSE).
+Source-available, free for any noncommercial use; commercial use requires the copyright holder's permission.
