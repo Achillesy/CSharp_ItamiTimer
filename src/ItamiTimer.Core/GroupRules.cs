@@ -19,8 +19,8 @@ public sealed class GoalGroup
 
     public IReadOnlyList<MatchRule> Rules { get; init; } = [];
 
-    /// <summary>该组历史上累计的专注总时长（秒）。跨任务持久化，每次任务结束时更新。</summary>
-    public double AccumulatedSeconds { get; set; }
+    // 累计专注时长曾经在这里，2026-08-02 移到 App 的 during.json（§11.2）。
+    // rules.json 是**用户手写**的，程序只读不写——写一次注释就全没了。
 }
 
 /// <summary>rules.json 的原始形状。</summary>
@@ -30,13 +30,13 @@ public sealed class RulesFile
 }
 
 /// <summary>
-/// 编译好的规则（ISSUE_FIX.md §7）。纯逻辑，不碰时间也不碰网络。
+/// 编译好的规则（DESIGN.md §5）。纯逻辑，不碰时间也不碰网络。
 ///
-/// 分类逻辑（简化自旧 §5.3，去掉了 Neutral / ignore / 自身豁免）：
-/// <list type="number">
-///   <item>匹配选中 group → OnTask</item>
-///   <item>其余 → OffTask（fail-closed）</item>
-/// </list>
+/// 只回答一个问题：<b>这个 (app, title) 命中那个小目标吗？</b>
+/// 判定的其余部分（命中算 <c>Focused</c>、其余一律 <c>OffTask</c>、afk 盖住一切）
+/// 在 <see cref="Judgment.Paint"/> 里，靠覆盖顺序表达，这里不掺和。
+///
+/// `Neutral` / `ignore` 名单 / 自身豁免全部已删除——**其余一律 OffTask，fail-closed**。
 /// </summary>
 public sealed class GroupRules
 {
@@ -110,20 +110,7 @@ public sealed class GroupRules
         return g.Rules.Any(r => RuleMatches(r, app, title));
     }
 
-    /// <summary>
-    /// 两步判定：
-    ///   1. 命中选中 group → OnTask
-    ///   2. 其余 → OffTask（fail-closed）
-    /// </summary>
-    public IntervalKind Classify(string app, string title, string? selectedGroup, out string? groupName)
-    {
-        if (selectedGroup is not null && GroupMatches(selectedGroup, app, title))
-        {
-            groupName = selectedGroup;
-            return IntervalKind.OnTask;
-        }
-
-        groupName = null;
-        return IntervalKind.OffTask;
-    }
+    // `Classify` 和 `IntervalKind` 曾经在这里——那是 `Replay` 区间模型的接口。
+    // 2026-08-02 删除：生产路径只用 GroupMatches（Judgment.Paint 分层覆盖时调），
+    // 而 Classify 到最后只剩测试在用——**护栏守着一段不跑的代码**，跟 Replay 同一个毛病。
 }

@@ -25,13 +25,13 @@ public class GroupRulesTests
     [InlineData("vlc.exe", "曼昆经济学 第03讲.mp4")]
     public void 标题含经济学就算_不管用什么应用(string app, string title)
     {
-        Assert.Equal(IntervalKind.OnTask, Real().Classify(app, title, Econ, out _));
+        Assert.True(Real().GroupMatches(Econ, app, title));
     }
 
     [Fact]
     public void 同一个应用_标题不含关键词就是偷懒()
     {
-        Assert.Equal(IntervalKind.OffTask, Real().Classify("chrome.exe", "斗破苍穹 第1章 - 起点中文网", Econ, out _));
+        Assert.False(Real().GroupMatches(Econ, "chrome.exe", "斗破苍穹 第1章 - 起点中文网"));
     }
 
     // ---- fail-closed
@@ -39,13 +39,17 @@ public class GroupRulesTests
     [Fact]
     public void 规则文件里没有的应用算偷懒_fail_closed()
     {
-        Assert.Equal(IntervalKind.OffTask, Real().Classify("Weixin.exe", "微信", Econ, out _));
+        Assert.False(Real().GroupMatches(Econ, "Weixin.exe", "微信"));
     }
 
+    /// <summary>
+    /// 规则文件里没有的组名永不命中。「一个都没选」那种情况在上一层挡掉——
+    /// <see cref="Judgment.Paint"/> 在 `selectedGroup is null` 时根本不画 Focused。
+    /// </summary>
     [Fact]
-    public void 没选任何小目标时_经济学也不算数()
+    public void 不存在的组名永不命中()
     {
-        Assert.Equal(IntervalKind.OffTask, Real().Classify("SumatraPDF.exe", "曼昆经济学.pdf", null, out _));
+        Assert.False(Real().GroupMatches("查无此组", "SumatraPDF.exe", "曼昆经济学.pdf"));
     }
 
     // ---- 组内是「或」，不是「与」（§5.2）
@@ -63,9 +67,9 @@ public class GroupRulesTests
               }
             }
             """);
-        Assert.Equal(IntervalKind.OnTask, rules.Classify("SumatraPDF.exe", "曼昆经济学.pdf", Econ, out _));
-        Assert.Equal(IntervalKind.OnTask, rules.Classify("EconReader.exe", "未命名文档", Econ, out _));
-        Assert.Equal(IntervalKind.OffTask, rules.Classify("notepad.exe", "购物清单", Econ, out _));
+        Assert.True(rules.GroupMatches(Econ, "SumatraPDF.exe", "曼昆经济学.pdf"));
+        Assert.True(rules.GroupMatches(Econ, "EconReader.exe", "未命名文档"));
+        Assert.False(rules.GroupMatches(Econ, "notepad.exe", "购物清单"));
     }
 
     [Fact]
@@ -75,9 +79,9 @@ public class GroupRulesTests
             { "groups": { "网页学习": { "rules": [ { "app": "^chrome\\.exe$", "title": "教程" } ] } } }
             """);
         const string g = "网页学习";
-        Assert.Equal(IntervalKind.OnTask, rules.Classify("chrome.exe", "Blender 教程", g, out _));
-        Assert.Equal(IntervalKind.OffTask, rules.Classify("chrome.exe", "微博热搜", g, out _));
-        Assert.Equal(IntervalKind.OffTask, rules.Classify("msedge.exe", "Blender 教程", g, out _));
+        Assert.True(rules.GroupMatches(g, "chrome.exe", "Blender 教程"));
+        Assert.False(rules.GroupMatches(g, "chrome.exe", "微博热搜"));
+        Assert.False(rules.GroupMatches(g, "msedge.exe", "Blender 教程"));
     }
 
     // ---- fail-closed：宁可拒绝加载，也不要静默放行（§5.2）
@@ -119,7 +123,7 @@ public class GroupRulesTests
             }
             """);
         Assert.Equal(["学习经济学"], rules.SelectableGroups);
-        Assert.Equal(IntervalKind.OffTask, rules.Classify("blender.exe", "Blender 教程", "上季度的目标", out _));
+        Assert.False(rules.GroupMatches("Blender 教程", "上季度的目标", "blender.exe"));
     }
 
     [Fact]
@@ -131,6 +135,6 @@ public class GroupRulesTests
               "groups": { "学习经济学": { "rules": [ { "title": "经济学" }, ] }, },
             }
             """);
-        Assert.Equal(IntervalKind.OnTask, rules.Classify("SumatraPDF.exe", "经济学.pdf", Econ, out _));
+        Assert.True(rules.GroupMatches(Econ, "SumatraPDF.exe", "经济学.pdf"));
     }
 }

@@ -7,7 +7,7 @@
 ItamiTimer（一袋米要扛几楼）：桌面端带强制约束的专注计时器（Windows + macOS，
 Avalonia 12 / .NET 10）。勾选允许的小目标后提交任务，程序拿开始时刻查 ActivityWatch
 的事件历史重放整段——只有命中规则且人在座的时间计入。偷懒不弹窗不出声，只有表盘上
-的红格和越滑越远的截止弧。没装 AW 时退化成纯番茄钟。
+的红格和越滑越远的截止弧。**没有退化模式**——AW 不可用由判定模型自己吸收（DESIGN §3.1）。
 
 **功能已完整，真机验证过多轮。当前工作模式是改进和修 bug**，不是从设计推进实现。
 
@@ -28,7 +28,13 @@ DECISIONS.md 有没有这条；有，就先跟用户确认再动；没有，也�
   ——自身豁免的依据，改了不报错，只是安静把账算错（DECISIONS F1/F2）。
 - Core 保持 `net10.0`、零 UI 引用；App 的 TFM 也是 `net10.0`，`-windows` 别加回去。
 - 不落盘任务状态；不做缓存；不自动降级模式；不自动开始下一轮。
-- `Neutral` 计入、`SelfApps` 硬编码——动之前看 `PomodoroFallbackTests`。
+- **UI 是 Avalonia，不是 WPF / WinForms / Win32。** API 名字像，语义未必一样，而且
+  这类错**不报错**，只是安静失效。搬任何「WPF 那边是这么写的」之前先查 Avalonia 的
+  实际语义。已经栽过一次：滚轮 `PointerWheelEventArgs.Delta.Y` 在 Avalonia 里
+  **一格就是 1.0**，不是 Win32 `WM_MOUSEWHEEL` 的 `WHEEL_DELTA = 120`——照搬那个
+  120 去做除法，加速档位整整两天一次都没生效过（DECISIONS H12）。
+  同理：别引 `System.Windows.*`、别用只有 Windows 装机自带的字体图标（D5）、
+  平台调用一律收口在 `App/Platform/` 的单个文件里。
 - 仓库不放位图和音频；界面文字英文（窗口标题中文是产品名）；`rules.json` 是用户数据
   不翻译。
 
