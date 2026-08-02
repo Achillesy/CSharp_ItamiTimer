@@ -897,6 +897,28 @@ return，`ElapsedSeconds` 不再前进 → `TryArchive` 的条件永远不成立
 都不在了，明确写着 "no degraded mode"、滑块量程也是当前的 10–50（Release）。
 它是**唯一对外可见**的文档，以后用户看见的行为变了要继续同步（CLAUDE.md 的规矩）。
 
+## 15.9 ✅ `IconExport` 被 #6 清理误删，`pack-macos.sh` 曾经跑不通（2026-08-02 发现并修复）
+
+2026-07-31 commit `085a474`（删 Pomodoro 退化路径）把 `TomatoIcon.cs`（番茄美术，删得对，
+产品早就不是番茄钟了）和 `IconExport.cs`（把美术导成 `.ico` / `.iconset` 的**通用**导出
+工具）绑在一起删了，连带删掉 `Program.cs` 的 `--export-icon` / `--export-iconset` 两个
+调试出口。`IconExport` 本身跟番茄无关，是任何图标美术都要用的格式转换器——这次清理把
+不该删的工具当成番茄的附属品一起清掉了。
+
+**留下的烂摊子，一直没人发现**：`ItamiTimer.App.csproj` 的 `ApplicationIcon=tomato.ico`
+和它的注释仍然指向已删除的 `IconExport`/`TomatoIcon`；`pack-macos.sh` 仍然调用
+`--export-iconset`，但 `Program.cs` 不再认这个参数，命令会直接落进正常启动分支——
+**`pack-macos.sh` 从那次提交之后其实一直是坏的**，只是没人在这之间真正跑过它。
+
+**已修复**：从 `085a474^` 原样取回 `IconExport.cs` / `TomatoIcon.cs`，`Program.cs` 补回
+两个开关。macOS 上实测过完整链路：`--export-icon` 出合法 `.ico`（9 档）、
+`--export-iconset` 出合法 `.iconset`（10 档 PNG），`iconutil -c icns` 能正常压出 `.icns`。
+图标美术暂时仍是旧番茄占位——**产品身份早改成骨牌+表盘，番茄图案跟当前身份不符，
+但这次只修复"能不能导出"，画什么图标是另一个待定项**，见 §16.6。
+
+**教训**：清理"一整块过时功能"时，工具类代码（能被任何美术复用）跟它当次唯一的调用方
+（这次是过时的番茄美术）要分开判断，别因为"现在只有它在用"就把工具本身也当成过时的一部分删掉。
+
 ---
 
 # 第三部分 · 待办需求
@@ -1003,6 +1025,13 @@ macOS 没有零依赖的等价 API，退化成**静默拒绝**（单实例仍然
 `AwClient.ProbeAsync`（[AwClient.cs:70](src/ItamiTimer.Core/AwClient.cs:70)）就是为
 这个准备的（§6.2 原本就要求"连不上就拒绝提交"），但全仓库没有调用点。要不要在
 提交按钮那里加一次探活，还没拍板。
+
+## 16.6 还开着：exe / app 图标该画什么（§15.9 修复导出机制之后留下的）
+
+`IconExport` 的导出机制已经修好（§15.9），但它导出的美术源仍然是 `TomatoIcon`——一颗
+番茄。产品已经从「番茄钟」改名成骨牌+表盘的 ItamiTimer，继续用番茄形状做 exe 图标
+跟当前身份对不上了。要不要重新设计一版跟骨牌/表盘视觉语言一致的图标（沿用矢量绘制、
+不进仓库位图这条纪律不变，见 D5），还没拍板，取决于用户想画什么。
 
 ---
 

@@ -30,6 +30,24 @@ internal static class Program
                 return;
             }
 
+            // 同上，把番茄图标导成 .ico 装进 exe 的资源。图标仍然是代码画的，
+            // 仓库里不放位图 —— 这条纪律从表盘一路贯到这里。
+            if (args is ["--export-icon", var icoPath, ..])
+            {
+                HeadlessBuilder().SetupWithoutStarting();
+                IconExport.Write(icoPath);
+                return;
+            }
+
+            // 同上，macOS 那一侧：铺一个 .iconset 目录出来，交给 iconutil 压成 .icns
+            // 装进 .app（见 pack-macos.sh）。同一份美术，两种容器。
+            if (args is ["--export-iconset", var iconsetDir, ..])
+            {
+                HeadlessBuilder().SetupWithoutStarting();
+                IconExport.WriteIconset(iconsetDir);
+                return;
+            }
+
             // 单实例限制（DESIGN §16.4）：只挡正常启动这条路径。调试出口是一次性跑完
             // 就退出的命令行工具，跟"已经在跑的那个窗口"不冲突，不用挡。
             if (!SingleInstance.TryAcquire())
