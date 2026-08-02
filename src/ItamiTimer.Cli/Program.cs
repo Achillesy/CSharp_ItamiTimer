@@ -74,41 +74,51 @@ async Task<int> StartAsync()
     Console.WriteLine($"Tick every {TickSeconds}s");
     Console.WriteLine("Ctrl+C = abandon the task\n");
 
+    var buf = new JudgmentBuffer(task.StartedAt, minutes);
+    var settled = 0;
+
     // Ctrl+C 对应 GUI 的"点关闭"：§9 要求退出前把账摆出来，不能默默丢掉。
-    TaskState? last = null;
     Console.CancelKeyPress += (_, e) =>
     {
         e.Cancel = true;
         Console.WriteLine("\n\n=== Task abandoned ===\n");
-        if (last is not null) Console.WriteLine(Renderer.Bill(task, last));
+        Console.WriteLine(Renderer.Bill(task, buf, settled, DateTimeOffset.Now, null));
         Console.WriteLine("This round is void.\n");
         Environment.Exit(130);
     };
 
-    // ---- §8.3.5 的单循环
+    // ---- §8.3.5 的单循环。节拍锚在整分钟（§4.2），不锚在启动时刻。
     while (true)
     {
-        var now = DateTimeOffset.Now;
+        var minute = TimeGrid.FloorToMinute(DateTimeOffset.Now);
 
-        // 3：查 AW、重放
-        var win = await aw.FetchEventsAsync(winId, task.StartedAt, now);
-        var afk = await aw.FetchEventsAsync(afkId, task.StartedAt, now);
-        var state = Replay.Run(task, rules, win, afk, now);
-        last = state;
-        var cells = Replay.ToMinuteCells(task, state);
+        // 查询区间的两端都是整分钟，写入偏移因此恒为整数（DECISIONS H9）
+        var queryStart = minute.AddSeconds(-JudgmentBuffer.QueryWindowSeconds);
+        var win = await aw.FetchEventsAsync(winId, queryStart, minute);
+        var afk = await aw.FetchEventsAsync(afkId, queryStart, minute);
+
+        var outcome = buf.Tick(minute, win, afk, rules, group);
+        settled += outcome.SettledSeconds;
+        if (outcome.SettledSeconds > 0)
+            Console.WriteLine($"       ⏳ Two hours in — banked {outcome.SettledSeconds / 60} min "
+                            + $"and rolled the ring over.");
+
+        var cells = buf.ToMinuteCells();
 
         // 节拍是 60 秒，所以每轮单独打一行，不用 \r 原地覆盖——覆盖是为 3 秒节拍设计
         // 的，跟穿插的警告混在一起会糊成一团。一分钟一行正好是一份可读的日志。
-        Console.WriteLine($"{Renderer.Clock(now, "HH:mm")}  {Renderer.Cells(cells)}  " +
-                          $"{Renderer.PhaseText(state.Phase)}  " +
-                          $"{state.FocusedSeconds / 60:F1}/{task.FocusMinutes} min");
+        Console.WriteLine($"{Renderer.Clock(minute, "HH:mm")}  {Renderer.Cells(cells)}  " +
+                          $"{(settled + buf.FocusedSeconds) / 60.0:F1}/{task.FocusMinutes} min");
 
         // 用【刚走完的那一格】当触发条件，不是【此刻在干什么】。否则 10:00:10 切走、
         // 10:00:50 切回这种短切换会整个从提醒里溜掉——而它在色块上明明是红的。
-        if (cells.Count > 0 && cells[^1].OffTaskSeconds >= NudgeFloorSeconds)
-            Console.WriteLine($"       ⚠ The minute just past had {cells[^1].OffTaskSeconds:F0}s off-task.");
+        var last = cells.LastOrDefault(c => c.FocusSeconds + c.OffTaskSeconds + c.AfkSeconds > 0);
+        if (last.OffTaskSeconds >= NudgeFloorSeconds)
+            Console.WriteLine($"       ⚠ The minute just past had {last.OffTaskSeconds}s off-task.");
 
-        if (state.FocusCompletedAt is { } done) return Rest(task, state, done);
+        // 达成就是这一拍（§4.5）：不回头去账本里推一个更早的时刻，
+        // 所以休息永远不会被追溯消费掉（§15.1 就是这么来的）。
+        if (outcome.Completed) return Rest(task, buf, settled, minute);
 
         await Task.Delay(TickSeconds * 1000);
     }
@@ -118,10 +128,10 @@ async Task<int> StartAsync()
 /// 休息阶段（§8.4.4a）：**纯本地计时，零 AW 访问**。
 /// 一个任务对 AW 的最后一次查询就发生在专注达成那一刻。
 /// </summary>
-int Rest(TaskRecord task, TaskState state, DateTimeOffset completedAt)
+int Rest(TaskRecord task, JudgmentBuffer buf, double settled, DateTimeOffset completedAt)
 {
     Console.WriteLine("\n");
-    Console.WriteLine(Renderer.Bill(task, state));   // 账单在【达成】这一刻给，不在休息结束时给
+    Console.WriteLine(Renderer.Bill(task, buf, settled, completedAt, completedAt));   // 账单在【达成】这一刻给
 
     var rest = TimeSpan.FromMinutes(task.RestMinutes);
     var restEnds = completedAt + rest;
@@ -160,18 +170,30 @@ async Task<int> ReplayPastAsync()
 
     var task = new TaskRecord
     {
-        StartedAt = TimeGrid.CeilToMinute(since),
+        StartedAt = TimeGrid.FloorToMinute(since),
         FocusMinutes = minutes,
         Group = group,
     };
-    var state = Replay.Run(task, rules, win, afk, until);
+
+    // 拿真实历史把在线那套循环原样跑一遍——**同一个引擎、同一个节拍**，
+    // 只是 now 是喂进去的。这样 CLI 干跑出来的账才等于实机会算出来的账（§15.7）。
+    var buf = new JudgmentBuffer(task.StartedAt, minutes);
+    var settled = 0;
+    DateTimeOffset? completedAt = null;
+
+    for (var minute = task.StartedAt.AddMinutes(1); minute <= until; minute = minute.AddMinutes(1))
+    {
+        var outcome = buf.Tick(minute, win, afk, rules, group);
+        settled += outcome.SettledSeconds;
+        if (outcome.Completed) { completedAt = minute; break; }
+    }
 
     Console.WriteLine($"\nDry run: {Renderer.Clock(task.StartedAt, "MM-dd HH:mm")} → {Renderer.Clock(until, "HH:mm")}   goal: {group}");
     Console.WriteLine($"{win.Count} window events, {afk.Count} afk events\n");
     Console.WriteLine(Renderer.Legend());
-    Console.WriteLine(Renderer.Cells(Replay.ToMinuteCells(task, state)));
+    Console.WriteLine(Renderer.Cells(buf.ToMinuteCells()));
     Console.WriteLine();
-    Console.WriteLine(Renderer.Bill(task, state));
+    Console.WriteLine(Renderer.Bill(task, buf, settled, completedAt ?? until, completedAt));
     return 0;
 }
 
@@ -212,46 +234,45 @@ int Bench()
     var now = new DateTimeOffset(2026, 7, 31, 9, 1, 0, TimeSpan.FromHours(8));
     var taskStart = TimeGrid.FloorToMinute(now); // 09:01:00
     var buf = new JudgmentBuffer(taskStart, minutes);
+    var rules = GroupRules.Parse("""{ "groups": { "bench": { "rules": [ { "app": "^goal$" } ] } } }""");
 
     Console.WriteLine($"Task start: {Renderer.Clock(taskStart)}");
     Console.WriteLine($"WallClock:  {Renderer.Clock(buf.WallClock)}  (buffer[0])");
     Console.WriteLine($"Buffer[0..180) = padding, [180..7380) = draw zone");
-    Console.WriteLine($"Focus: {minutes} min ({buf.FocusSeconds}s)\n");
+    Console.WriteLine($"Focus: {minutes} min ({buf.RemainingTargetSeconds}s)\n");
     Renderer.BufferSummary(buf);
 
-    // 2. 每分钟喂数据（上限: 目标分钟数 + 1h 的 slack + 归档预留）
+    // 2. 每分钟喂一次合成的 AW 事件（上限: 目标分钟数 + 1h 的 slack + 归档预留）
     var maxElapsed = Math.Max(7800, minutes * 60 + 3600);
     var elapsed = 0;
     var tick = 0;
+    var settled = 0;
     while (elapsed < maxElapsed && !buf.IsFocusComplete)
     {
         tick++;
         elapsed += 60;
-        var queryNow = taskStart.AddSeconds(elapsed);
+        var queryEnd = taskStart.AddSeconds(elapsed);
+        var queryStart = queryEnd.AddSeconds(-JudgmentBuffer.QueryWindowSeconds);
 
-        // 合成 240 秒的分类数据
-        var queryStart = queryNow.AddSeconds(-240);
-        var classified = SyntheticClassify(queryStart, queryNow, taskStart, pattern, tick);
-        var bufferOffset = (int)(queryStart - buf.WallClock).TotalSeconds;
-        buf.Write(bufferOffset, classified);
+        var (win, afk) = SyntheticEvents(queryStart, queryEnd, taskStart, pattern);
+        var outcome = buf.Tick(queryEnd, win, afk, rules, "bench");
+        settled += outcome.SettledSeconds;
 
-        // 检查归档
-        var archived = buf.TryArchive();
-        if (archived)
+        if (outcome.SettledSeconds > 0)
         {
             Console.WriteLine($"\n--- ARCHIVE at tick {tick} (elapsed {elapsed}s = {elapsed / 60}min) ---");
-            Console.WriteLine($"  during += {buf.DuringSeconds:F0}s, StartedAt → {Renderer.Clock(taskStart.AddSeconds(buf.ArchivedSeconds))}");
+            Console.WriteLine($"  settled += {outcome.SettledSeconds}s  remaining target → {buf.RemainingTargetSeconds}s");
+            Console.WriteLine($"  task start → {Renderer.Clock(buf.TaskStart)}");
         }
 
-        // 每 5 分钟打印一次状态
-        if (tick % 5 == 0 || archived || buf.IsFocusComplete)
+        if (tick % 5 == 0 || outcome.SettledSeconds > 0 || outcome.Completed)
             Renderer.BufferSummary(buf);
     }
 
     // 3. 终局
     Console.WriteLine($"\n══════════════════════════════════════════════");
     Console.WriteLine($"  Done. Ticks: {tick}  Elapsed: {elapsed}s ({elapsed / 60}min)");
-    Console.WriteLine($"  During: {buf.DuringSeconds:F0}s ({buf.DuringSeconds / 3600:F2} hours)");
+    Console.WriteLine($"  Settled into during: {settled}s ({settled / 3600.0:F2} hours)");
     Console.WriteLine($"  Focus complete: {buf.IsFocusComplete}");
     Console.WriteLine($"══════════════════════════════════════════════\n");
 
@@ -259,36 +280,38 @@ int Bench()
 }
 
 /// <summary>
-/// 合成 240 秒的分类数据，模拟 AW 查询的返回结果。
-/// 三种模式：focused（全绿）、mixed（80% 专注穿插偷懒）、slack（大量偷懒）。
+/// 合成一个 4 分钟查询窗口的 AW 事件，模拟 AW 的返回。
+///
+/// 三种模式：focused（全在目标应用）、mixed（穿插偷懒和 AFK）、slack（大量偷懒）。
+/// 事件切成 10 秒一条，最后 10 秒<b>故意不给</b>——模拟 T3 那 6~12 秒滞后，
+/// 看它会不会被判成 AwOffline（应该会，而且下一拍自愈）。
 /// </summary>
-static byte[] SyntheticClassify(DateTimeOffset qStart, DateTimeOffset qEnd, DateTimeOffset taskStart, string pattern, int tick)
+static (List<AwEvent> Win, List<AwEvent> Afk) SyntheticEvents(
+    DateTimeOffset qStart, DateTimeOffset qEnd, DateTimeOffset taskStart, string pattern)
 {
+    var win = new List<AwEvent>();
+    var afk = new List<AwEvent>();
     var n = (int)(qEnd - qStart).TotalSeconds;
-    var result = new byte[n];
 
-    for (var i = 0; i < n; i++)
+    for (var i = 0; i + 10 <= n - 10; i += 10)
     {
         var t = qStart.AddSeconds(i);
-        if (t < taskStart)
-        {
-            // 任务开始前：保持当前值（Init 或已覆盖）
-            result[i] = JudgmentBuffer.Init;
-            continue;
-        }
+        if (t < taskStart) continue;               // 任务开始前不造数据
 
-        result[i] = pattern switch
+        var slot = (int)(t - taskStart).TotalSeconds / 10;
+        var (app, isAfk) = pattern switch
         {
-            "focused" => JudgmentBuffer.Focused,
-            "slack" => (i / 10) % 3 == 0 ? JudgmentBuffer.Focused : JudgmentBuffer.OffTask,
-            _ => // mixed: 80% focused, occasional off-task bursts
-                (i / 30) % 5 == 0 ? JudgmentBuffer.OffTask      // 每 30 秒偷懒一组
-                : (i / 60) % 7 == 3 ? JudgmentBuffer.Afk         // 偶尔 AFK
-                : JudgmentBuffer.Focused,
+            "focused" => ("goal", false),
+            "slack" => (slot % 3 == 0 ? "goal" : "chrome", false),
+            _ => slot % 15 == 3 ? ("goal", true)   // 偶尔起身走开
+               : slot % 5 == 0 ? ("chrome", false) // 每 50 秒偷懒一组
+               : ("goal", false),
         };
-    }
 
-    return result;
+        win.Add(new AwEvent(t, 10, app, $"{app} window", null));
+        if (isAfk) afk.Add(new AwEvent(t, 10, null, null, "afk"));
+    }
+    return (win, afk);
 }
 
 // ---------------------------------------------------------------- 杂项

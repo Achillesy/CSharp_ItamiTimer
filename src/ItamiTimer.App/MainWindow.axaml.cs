@@ -14,23 +14,26 @@ namespace ItamiTimer.App;
 /// <summary>
 /// 主窗口（DESIGN.md §8 模块 8）。
 ///
-/// **这一层只负责把 <see cref="TaskState"/> 渲染出来 + 收集用户的提交**，判定和核算
-/// 全在 Core，节拍在 <see cref="TaskSession"/>。
+/// **这一层只负责把 <see cref="MinuteCell"/> 列表渲染出来 + 收集用户的提交**，
+/// 判定和核算全在 Core，节拍在 <see cref="TaskSession"/>。
 ///
 /// 版面：**「开始」按钮就是那条分割线**——它以上是表盘和骨牌，给眼睛的；它以下是
 /// 取值控件和小目标列表，给手的。分割线以下一个提示字都没有（§8.6），出错的原因
 /// 只进日志（§8.1a）。
 ///
-/// 可见状态（§8.3.1）：
+/// 可见状态：
 /// <code>
-/// 空闲                正常显示，空盘就是下一轮的邀请
-/// 进行中·守规矩       收进任务栏，只剩色环图标
-/// 进行中·偏离         置顶弹出，不抢焦点；回到正轨后自动缩回
-/// 超过 60 秒没动键鼠  同上，赶在 AW 判 afk 之前叫醒
-/// 专注达成            弹出【不置顶】，进入休息。不给账单——盘面自己会说话
-/// 休息中              色环按分钟淡出，纯本地计时
-/// 休息结束            弹出【不置顶】，纯提示，停在这里等用户
+/// 空闲                空盘就是下一轮的邀请
+/// 进行中              窗口留在原地（用户 2026-07-27 改），色块一分钟长一格
+/// 超过 60 秒没动键鼠  响一声，赶在 AW 判 afk 之前叫醒（C3）
+/// 专注达成            响一声，进入休息。不给账单——盘面自己会说话（B4）
+/// 休息中              蓝色扇形，分针扫出它即结束
+/// 休息结束            响一声，回到空盘，停在这里等用户（B2：绝不自动开下一轮）
 /// </code>
+///
+/// ⚠️ 这张表里**没有任何「置顶 / 弹出 / 收进任务栏」**——整套自动置顶 2026-07-28
+/// 已废弃（C1：「弹出来」和「绝不抢焦点」这两条约束本身矛盾）。右上角图钉是手动开关，
+/// 跟被砍掉的那套不是一回事。
 /// </summary>
 public partial class MainWindow : Window
 {
@@ -41,6 +44,9 @@ public partial class MainWindow : Window
     private readonly List<RadioButton> _goalRadios = [];
     private readonly List<TextBlock> _duringLabels = [];
     private readonly Settings _settings = Settings.Load();
+
+    /// <summary>每个小目标的累计专注时长（§11.2）。启动时读入，每次入账立刻落盘。</summary>
+    private readonly During _during = During.Load();
 
     private TaskSession? _session;
 
@@ -59,6 +65,7 @@ public partial class MainWindow : Window
         ApplyTheme();
         Icon = RingIcon.Make(0, 0);   // 空闲时灰环；任务进行中换成进度色环
 
+        ApplySliderRange();
         LoadRules();
         RefreshStartButton();
         var gear = F<Button>("SettingsBtn");
@@ -79,6 +86,31 @@ public partial class MainWindow : Window
     }
 
     private void InitializeComponent() => AvaloniaXamlLoader.Load(this);
+
+    /// <summary>
+    /// 时长滑块的量程随构建配置变（DESIGN.md §6.2）。
+    ///
+    /// **axaml 里写的是正式量程**（10~50 / 步进 5 / 默认 25），Debug 在这里覆盖成
+    /// 3~10 / 步进 1。方向是有意的：忘了改也只会把**正式**量程发出去。
+    ///
+    /// 反过来（axaml 写测试量程、Release 覆盖）已经出过事——2026-07-31 那次改动
+    /// 就是无条件写死 3~10，`Value="25"` 还被静默钳到 10，而没有人发现 Release
+    /// 也跟着变了。
+    ///
+    /// Core 不设范围（`TaskRecord` 接受任意时长），而且 `RestMinutes = ⌈f/5⌉` 对
+    /// **所有整数**都成立——否则在 Debug 里验证的就不是 Release 的行为，
+    /// 测试量程等于白设。
+    /// </summary>
+    private void ApplySliderRange()
+    {
+#if DEBUG
+        var s = F<Slider>("Minutes");
+        s.Minimum = 3;
+        s.Maximum = 10;
+        s.TickFrequency = 1;
+        s.Value = 3;
+#endif
+    }
 
     private T F<T>(string name) where T : Control => this.FindControl<T>(name)!;
 
@@ -171,19 +203,38 @@ public partial class MainWindow : Window
         try
         {
             _rules = GroupRules.Load(AppData.RulesPath());
+
+            // 控件**一次性**建好，之后永不重建（§15.2）。rules.json 只在启动时读一次，
+            // 小目标列表在一次运行里根本不会变——每次任务结束重建一遍布局既没必要，
+            // 又正是那个 bug 的来源。
+            var rows = new List<DockPanel>();
             foreach (var name in _rules.SelectableGroups)
             {
-                var radio = new RadioButton { Content = name, GroupName = "Goals" };
+                var radio = new RadioButton
+                {
+                    Content = name,
+                    GroupName = "Goals",
+                    [DockPanel.DockProperty] = Avalonia.Controls.Dock.Left,
+                };
                 radio.IsCheckedChanged += OnGoalToggled;
                 _goalRadios.Add(radio);
-                _duringLabels.Add(new TextBlock
+
+                var label = new TextBlock
                 {
                     FontSize = 14,
                     VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
                     Opacity = 0.6,
                     [DockPanel.DockProperty] = Avalonia.Controls.Dock.Right,
+                };
+                _duringLabels.Add(label);
+
+                rows.Add(new DockPanel
+                {
+                    LastChildFill = true,
+                    Children = { radio, label, new TextBlock() },
                 });
             }
+            F<ItemsControl>("Goals").ItemsSource = rows;   // 也只设这一次
             RefreshGoalItems();
             // 恢复上次选中的 goal，找不到就选第一个
             var saved = _goalRadios.FirstOrDefault(r =>
@@ -213,35 +264,26 @@ public partial class MainWindow : Window
     private string? Picked()
         => _goalRadios.FirstOrDefault(r => r.IsChecked == true)?.Content?.ToString();
 
-    /// <summary>把 _goalRadios + 累计时间 喂给 ItemsControl。</summary>
+    /// <summary>
+    /// 刷新累计时长那几个数字。**只改 Text，绝不碰控件树**（§15.2）。
+    ///
+    /// 原来这里每次都新建一批 `DockPanel` 再把同一批 `RadioButton` / `TextBlock`
+    /// 塞进去，然后整份换掉 `ItemsSource`。Avalonia 不允许一个控件有两个视觉父，于是
+    /// 抛 `already has a visual parent DockPanel`——而它是在 `EndSession` 里抛的，
+    /// 后面的 `RefreshStartButton()` 被整段跳过，**按钮就永远停在 "Give up" 上**。
+    ///
+    /// 当时试过「加入前先从旧父 Remove」，只对 RadioButton 做了、漏了 TextBlock，
+    /// 所以看起来「试过没生效」。但那本来就是在补一个不该存在的洞：
+    /// **拿活控件当 `ItemsSource` 就是错的**。列表在一次运行里根本不会变
+    /// （`rules.json` 只在启动时读一次），一次建好就完了。
+    /// </summary>
     private void RefreshGoalItems()
     {
-        // 先更新标签文字
         for (var i = 0; i < _goalRadios.Count && i < _duringLabels.Count; i++)
         {
             var name = (string)_goalRadios[i].Content!;
-            var secs = _settings.DuringByGroup.GetValueOrDefault(name, 0);
-            _duringLabels[i].Text = (secs / 3600.0).ToString("F2");
+            _duringLabels[i].Text = (_during[name] / 3600.0).ToString("F2");
         }
-
-        // 重建布局——先把 Radio 从旧父移除，否则 Avalonia 报 "already has a visual parent"
-        var items = new List<DockPanel>();
-        for (var i = 0; i < _goalRadios.Count; i++)
-        {
-            if (_goalRadios[i].Parent is Panel oldP) oldP.Children.Remove(_goalRadios[i]);
-            DockPanel.SetDock(_goalRadios[i], Avalonia.Controls.Dock.Left);
-            items.Add(new DockPanel
-            {
-                LastChildFill = true,
-                Children =
-                {
-                    _goalRadios[i],
-                    _duringLabels[i],
-                    new TextBlock(),
-                },
-            });
-        }
-        F<ItemsControl>("Goals").ItemsSource = items;
     }
 
     private void RefreshStartButton()
@@ -295,13 +337,14 @@ public partial class MainWindow : Window
         _session = new TaskSession(task, _rules!, _settings.AwBaseUrl);
         _session.Updated += OnSessionUpdated;
         _session.Interrupted += OnInterrupted;
+        // 归档 = 一次 ignore（§11.2）：那一小时马上要被移出 buffer，当场入账
+        _session.Settled += seconds => Bank(task.Group, seconds);
         foreach (var r in _goalRadios) r.IsEnabled = false;   // Start 后锁定选择
 
         // 点下按钮的那一刻盘面就要有东西：整段灰弧立刻摆上去，不等第一次 AW 回来
         var dial = F<DialControl>("Dial");
         dial.StartedAt = task.StartedAt;
-        dial.Cells = [];
-        dial.RemainingMinutes = task.FocusMinutes;
+        dial.Cells = _session.Cells;   // 承诺弧就是 buffer 里那段 Gray，构造时就有了（§4.5）
         dial.RestFrom = null;
         dial.InvalidateVisual();
 
@@ -317,7 +360,6 @@ public partial class MainWindow : Window
         var dial = F<DialControl>("Dial");
         dial.StartedAt = s.Task.StartedAt;
         dial.Cells = s.Cells;
-        dial.RemainingMinutes = s.RemainingMinutes;
         dial.RestFrom = s.RestFrom;
         dial.RestMinutes = s.Task.RestMinutes;
         dial.InvalidateVisual();
@@ -363,15 +405,27 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>
+    /// 把一段专注时间记到小目标名下（§11.2）。<b>每一秒只入账一次</b>：归档那一小时在
+    /// <see cref="TaskSession.Settled"/> 里当场入账，剩下的由
+    /// <see cref="TaskSession.TakeUnbankedSeconds"/> 幂等地取走。
+    /// </summary>
+    private void Bank(string? goal, double seconds)
+    {
+        if (goal is null || seconds <= 0) return;
+        _during.Add(goal, seconds);
+    }
+
+    /// <summary>任务终结（完成 / 放弃 / 关窗口）：把还没入账的那部分记上。</summary>
+    private void BankRemainder()
+    {
+        if (_session is { } s) Bank(s.Task.Group, s.TakeUnbankedSeconds());
+    }
+
     /// <summary>任务终结：回到空盘。</summary>
     private void EndSession()
     {
-        // #9：during 落盘
-        if (_session is { } s && s.Task.Group is { } g)
-        {
-            _settings.DuringByGroup[g] = s.FocusedSeconds();
-            _settings.Save();
-        }
+        BankRemainder();
 
         var old = _session;
         _session = null;
@@ -387,7 +441,6 @@ public partial class MainWindow : Window
         var dial = F<DialControl>("Dial");
         dial.Cells = [];
         dial.StartedAt = null;
-        dial.RemainingMinutes = 0;
         dial.RestFrom = null;
         dial.InvalidateVisual();
 
@@ -412,7 +465,8 @@ public partial class MainWindow : Window
     {
         if (_closeApproved) return;
 
-        if (_session is { Finished: false, InRest: true }) return;
+        // 休息中关窗口不问——专注已经达成了。但**账要记**（§11.2：关掉程序也是一次 ignore）。
+        if (_session is { Finished: false, InRest: true }) { BankRemainder(); return; }
         if (_session is not { Finished: false }) return;
 
         e.Cancel = true;
@@ -420,6 +474,7 @@ public partial class MainWindow : Window
         if (await Confirm.AskAsync(this, "The task isn't finished. Quit anyway?"))
         {
             _session?.Abandon();
+            BankRemainder();     // 放弃了，但花掉的时间是事实
             _closeApproved = true;
             Close();
         }
@@ -461,21 +516,54 @@ public partial class MainWindow : Window
         _settings.Save();
     }
 
-    /// <summary>滚轮拨针：前滚（远离自己）逆时针，后滚顺时针。1 分钟/格，连续快滚加速。</summary>
+    /// <summary>连续滚动的计数与上一次滚动的时刻。见 <see cref="OnAlarmWheel"/>。</summary>
+    private DateTime _lastWheelAt = DateTime.MinValue;
+    private int _wheelStreak;
+
+    /// <summary>滚轮连成一串的最大间隔。超过这个数就重新从 1 格算起。</summary>
+    private const int WheelStreakGapMs = 300;
+
+    /// <summary>
+    /// 滚轮拨针：前滚（远离自己）逆时针，后滚顺时针。慢滚 1 分钟/格，**连续快滚加速**。
+    ///
+    /// ⚠️ **加速依据是滚动的节奏，不是单次幅度**（2026-08-02 改）。原来写的是
+    /// <c>Math.Abs(e.Delta.Y) / 120</c>——120 是 <b>Win32 `WM_MOUSEWHEEL` 的单位</b>，
+    /// 而 Avalonia 的 <c>Delta.Y</c> **一格就是 1.0**。于是那个除法恒等于 0.008、
+    /// 被 `Math.Max(1, …)` 拉回 1，档位 switch 永远落在第一档：**E3 记的那套加速
+    /// 一次都没跑起来过**，每次滚轮恒定走 1 分钟。
+    ///
+    /// 而且快滚在 Avalonia 里表现为**事件更密**而不是 Delta 更大，所以正确的做法是
+    /// 数「连续多少格」——间隔超过 <see cref="WheelStreakGapMs"/> 毫秒就断串、
+    /// 重新从 1 分钟/格开始。这样慢滚仍然能一分钟一分钟地微调，快滚能一口气跨小时。
+    /// </summary>
     private void OnAlarmWheel(object? sender, PointerWheelEventArgs e)
     {
         if (e.Delta.Y == 0) return;
-        var notches = Math.Max(1, Math.Abs(e.Delta.Y) / 120);  // 120 = 一个滚轮刻度
-        var direction = e.Delta.Y > 0 ? -1 : +1;
-        var multiplier = notches switch
+
+        var now = DateTime.Now;
+        _wheelStreak = (now - _lastWheelAt).TotalMilliseconds <= WheelStreakGapMs
+            ? _wheelStreak + 1
+            : 1;
+        _lastWheelAt = now;
+
+        // 一串滚下来：1 → 3 → 8 → 15 → 30 分钟/格。
+        // 12 小时一圈 = 720 格，靠 30 分钟/格大约二十几下能跨完，而松手一停就回到
+        // 1 分钟/格，微调不受影响。
+        var step = _wheelStreak switch
         {
             <= 2 => 1,
-            <= 5 => 2,
-            <= 10 => 3,
-            _ => 5,
+            <= 5 => 3,
+            <= 10 => 8,
+            <= 20 => 15,
+            _ => 30,
         };
-        Bump(direction * notches * multiplier * AlarmClock.SlotMinutes);
-        _alarmQuietUntil = DateTime.Now.AddSeconds(2);
+
+        // 高精度触控板可能一次报多格，照样乘进去
+        var notches = Math.Max(1, (int)Math.Round(Math.Abs(e.Delta.Y)));
+        var direction = e.Delta.Y > 0 ? -1 : +1;
+
+        Bump(direction * notches * step * AlarmClock.SlotMinutes);
+        _alarmQuietUntil = now.AddSeconds(2);
         e.Handled = true;
     }
 

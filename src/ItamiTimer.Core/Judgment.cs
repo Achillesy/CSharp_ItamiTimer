@@ -1,109 +1,96 @@
 namespace ItamiTimer.Core;
 
 /// <summary>
-/// 判定模型（ISSUE_FIX.md §7）。
+/// 覆盖算法（DESIGN.md §4.3）：<b>分层画，不逐秒查</b>。
 ///
-/// 纯函数，无 I/O、无时钟。输入：AW 窗口事件 + afk 事件 + 选中的 group + 当前时刻。
-/// 输出：一段 240 秒的分类结果（逐秒状态码），由调用方写入 <see cref="JudgmentBuffer"/>。
+/// 纯函数，无 I/O、无时钟。调用方给一段秒级切片和它的起始时刻，这里按码值从大到小
+/// 逐层覆盖，后画的盖前面的：
 ///
-/// 分类逻辑（简化自 §5.3，去掉了 Neutral / ignore / 自身豁免）：
-/// <list type="number">
-///   <item>afk 事件覆盖的秒 → <see cref="JudgmentBuffer.Afk"/></item>
-///   <item>匹配选中 group → <see cref="JudgmentBuffer.Focused"/></item>
-///   <item>其余 → <see cref="JudgmentBuffer.OffTask"/></item>
+/// <code>
+/// ② 画 4   命中小目标的窗口事件 → Focused
+/// ③ 画 3   其余窗口事件         → OffTask
+/// ④ 画 2   status == "afk"      → Afk
+/// </code>
+/// （① 初始化成 <see cref="JudgmentCode.AwOffline"/> 由 <see cref="JudgmentBuffer"/> 按水位线做，
+/// 见 §4.3 第 3 条——它有边界和水位线信息，这里没有。）
+///
+/// 这四条规则一次办了好几件事，都不用单独写规则：
+/// <list type="bullet">
+///   <item><b>一秒里有多条事件</b>（alt-tab）→ 后画的赢 → OffTask 压过 Focused → fail-closed。</item>
+///   <item><b>afk 优先于一切</b> → 它画在最后，天然盖住所有窗口判定。</item>
+///   <item><b>AW 整拍连不上 = 事件列表为空</b> → 没东西可画，切片保持初始化的 AwOffline。
+///         不需要单独的兜底代码路径。</item>
 /// </list>
+///
+/// <b>为什么不再需要 T4 的桥接</b>（旧 <c>Replay.Bridge</c>）：旧的逐秒查找问「哪条事件
+/// <b>盖住</b>了这一秒」，零时长事件的 <c>[start, start)</c> 是空区间，答案永远是「没有」，
+/// 于是标题每秒都在变的窗口（播放器时间码、编译进度、Claude Code 的转圈动画）整段变成
+/// 「无记录」。这里问的是「这一秒里<b>出现过</b>什么事件」——零时长事件的时间戳实实在在
+/// 落在某一秒里，照样能画。同一份数据换个问法，洞就没了。
 /// </summary>
 public static class Judgment
 {
     /// <summary>
-    /// 查询 AW 并分类的结果。调用方负责写入 buffer。
+    /// 把事件画进 <paramref name="window"/>。<paramref name="windowStart"/> 是
+    /// <c>window[0]</c> 对应的绝对时刻，之后每个元素 +1 秒。
     /// </summary>
-    /// <param name="windowEvents">窗口事件列表（从 AW 取回，已按 Start 排序）。</param>
-    /// <param name="afkEvents">AFK 事件列表。</param>
+    /// <param name="windowEvents">窗口事件（可以含窗口之外的，这里自己裁）。</param>
+    /// <param name="afkEvents">afk 事件，同上。</param>
     /// <param name="rules">编译好的规则。</param>
-    /// <param name="selectedGroup">当前选中的唯一 goal 名（null = 未选）。</param>
-    /// <param name="queryStart">本次查询的时间窗口起点（= now − 4min）。</param>
-    /// <param name="queryEnd">本次查询的时间窗口终点（= now）。</param>
-    /// <returns>byte[240]，queryStart 起的逐秒分类结果。</returns>
-    public static byte[] ClassifySeconds(
+    /// <param name="selectedGroup">当前选中的唯一 goal 名（null = 未选，那就全是 OffTask）。</param>
+    public static void Paint(
+        Span<JudgmentCode> window,
+        DateTimeOffset windowStart,
         IReadOnlyList<AwEvent> windowEvents,
         IReadOnlyList<AwEvent> afkEvents,
         GroupRules rules,
-        string? selectedGroup,
-        DateTimeOffset queryStart,
-        DateTimeOffset queryEnd)
+        string? selectedGroup)
     {
-        var n = (int)(queryEnd - queryStart).TotalSeconds;
-        if (n <= 0) return [];
-        var result = new byte[n];
+        if (window.Length == 0) return;
 
-        for (var i = 0; i < n; i++)
+        // 命中与否先算一遍：正则匹配不便宜，而下面要遍历两趟。
+        var hit = new bool[windowEvents.Count];
+        for (var i = 0; i < windowEvents.Count; i++)
         {
-            var t = queryStart.AddSeconds(i);
-            result[i] = ClassifyMoment(windowEvents, afkEvents, rules, selectedGroup, t);
+            var e = windowEvents[i];
+            hit[i] = selectedGroup is not null
+                  && rules.GroupMatches(selectedGroup, e.App ?? "", e.Title ?? "");
         }
 
-        return result;
+        // ② Focused 先画，③ OffTask 后画 —— 顺序就是 tie-break：同一秒里两者都有时
+        //    OffTask 赢（fail-closed）。别把这两趟合成一趟。
+        for (var i = 0; i < windowEvents.Count; i++)
+            if (hit[i]) PaintOne(window, windowStart, windowEvents[i], JudgmentCode.Focused);
+
+        for (var i = 0; i < windowEvents.Count; i++)
+            if (!hit[i]) PaintOne(window, windowStart, windowEvents[i], JudgmentCode.OffTask);
+
+        // ④ afk 最后画 —— 人不在的时候窗口是什么无所谓（否则锁屏时长照涨）。
+        foreach (var e in afkEvents)
+            if (e.Status == "afk") PaintOne(window, windowStart, e, JudgmentCode.Afk);
     }
 
     /// <summary>
-    /// 判某一秒属于什么状态。
-    /// afk 优先级最高 → 匹配 group → 其余 OffTask。
+    /// 一条事件画哪几秒：<b>它触碰到的每一秒都画</b>，即 <c>floor(start) … ceil(end)−1</c>。
+    ///
+    /// <b>零时长事件也占满一秒</b>（T4）：<c>end == start</c> 时 ceil 和 floor 相等，
+    /// 这里把区间撑到 1 秒——等价于「默认 duration = 0.001」。
+    ///
+    /// 边界那一秒会被相邻两条事件同时认领，那正好交给覆盖顺序去裁决：
+    /// <b>归属由优先级决定，不由四舍五入决定</b>。代价是跨秒切换最多算错 1 秒，
+    /// 方向恒定偏严。
     /// </summary>
-    private static byte ClassifyMoment(
-        IReadOnlyList<AwEvent> windowEvents,
-        IReadOnlyList<AwEvent> afkEvents,
-        GroupRules rules,
-        string? selectedGroup,
-        DateTimeOffset t)
+    private static void PaintOne(Span<JudgmentCode> window, DateTimeOffset windowStart,
+                                 AwEvent e, JudgmentCode code)
     {
-        // 1. AFK 优先：人不在 → Afk
-        var afkEv = CoveringAt(afkEvents, t);
-        if (afkEv is { Status: "afk" })
-            return JudgmentBuffer.Afk;
+        var from = (int)Math.Floor((e.Start - windowStart).TotalSeconds);
+        var to = (int)Math.Ceiling((e.End - windowStart).TotalSeconds);
+        if (to <= from) to = from + 1;              // 零时长：至少占它落进的那一秒
 
-        // 2. 窗口事件：匹配选中 group → Focused
-        var win = CoveringAt(windowEvents, t);
-        if (win is not null && selectedGroup is not null)
-        {
-            var app = win.Value.App ?? "";
-            var title = win.Value.Title ?? "";
-            if (rules.GroupMatches(selectedGroup, app, title))
-                return JudgmentBuffer.Focused;
-        }
+        if (from < 0) from = 0;                     // 裁到切片范围（6 小时预取，见 T1/F7）
+        if (to > window.Length) to = window.Length;
+        if (to <= from) return;
 
-        // 3. 有窗口事件但不匹配 → OffTask
-        if (win is not null)
-            return JudgmentBuffer.OffTask;
-
-        // 4. 窗口事件缺失 → AW 脱机（默认算专注）
-        //    注意：afk 事件存在且为 not-afk 时也算 AW 脱机——因为 window bucket 没数据
-        //    但 afk 说人在
-        return JudgmentBuffer.AwOffline;
-    }
-
-    /// <summary>
-    /// AW 脱机时的退化分类：全段标记为 AwOffline。
-    /// 查询不到 AW 时直接调用这个方法。
-    /// </summary>
-    public static byte[] AwOfflineFallback(int lengthSeconds)
-    {
-        var result = new byte[lengthSeconds];
-        Array.Fill(result, JudgmentBuffer.AwOffline);
-        return result;
-    }
-
-    /// <summary>
-    /// 在已排序的事件列表里找覆盖时刻 t 的那条。找不到返回 null。
-    /// 同 <see cref="Replay.CoveringAt"/>。
-    /// </summary>
-    private static AwEvent? CoveringAt(IReadOnlyList<AwEvent> sorted, DateTimeOffset t)
-    {
-        foreach (var e in sorted)
-        {
-            if (e.Start > t) break;
-            if (e.Start <= t && t < e.End) return e;
-        }
-        return null;
+        window[from..to].Fill(code);
     }
 }

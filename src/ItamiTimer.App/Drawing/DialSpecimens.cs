@@ -38,8 +38,8 @@ internal static class DialSpecimens
             Cell(0, t1010, 60, 0),            // 全绿
             Cell(1, t1010, 30, 30),           // 一半偷懒
             Cell(2, t1010, 0, 60),            // 全红
-            Cell(3, t1010, 0, 0, absent: 60), // 离开：灰
-            Cell(4, t1010, 0, 0, gap: 60),    // 无数据：虚线
+            Cell(3, t1010, 0, 0, absent: 60), // 离开：虚线空心框（2026-08-02 起不再是「什么都不画」）
+            Cell(4, t1010, 0, 0, init: 60),   // 没画过：什么都不画（虚线已经让给 Afk 了）
         ], remaining: 8);
 
         // 跨圈：58 格已走完，承诺弧还剩 6 分钟 —— 必须在第 58→60 分钟处切到内圈
@@ -78,22 +78,30 @@ internal static class DialSpecimens
     }
 
     private static MinuteCell Cell(int i, DateTimeOffset t0, double counted, double off,
-                                   double absent = 0, double gap = 0)
-        => new(i, t0.AddMinutes(i), counted, off, absent, gap);
+                                   double absent = 0, double init = 0)
+        => new(i, t0.AddMinutes(i), (int)counted, (int)off, (int)absent, 0, (int)init);
 
     private static void Save(string dir, string name, DateTimeOffset startedAt,
                              IReadOnlyList<MinuteCell> cells, double remaining,
                              DateTimeOffset? restFrom = null, double restMinutes = 0,
                              DialPalette? palette = null)
     {
+        // 承诺弧不再是一个标量——它就是 buffer 里那段 Gray 格子（§4.5），
+        // 所以样张也照着接：已走过的格子后面再挂 remaining 个满格 Gray。
+        var all = new List<MinuteCell>(cells);
+        for (var i = 0; i < (int)remaining; i++)
+        {
+            var idx = cells.Count + i;
+            all.Add(new MinuteCell(idx, startedAt.AddMinutes(idx), 0, 0, 0, 60, 0));
+        }
+
         var dial = new DialControl
         {
             Width = Size,
             Height = Size,
             Palette = palette ?? DialPalette.Light,
             StartedAt = startedAt,
-            Cells = cells,
-            RemainingMinutes = remaining,
+            Cells = all,
             RestFrom = restFrom,
             RestMinutes = restMinutes,
         };

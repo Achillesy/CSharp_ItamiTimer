@@ -12,40 +12,68 @@ public class TaskRecordTests
     };
 
     /// <summary>
-    /// §8.4.2：休息 = ⌊专注 ÷ 5⌋ + 1。滑块那九个档都是 5 的倍数，
-    /// 所以就是"五分之一，再多一分钟"。
+    /// DESIGN §6.1：休息 = ⌈专注 ÷ 5⌉。正式量程全是 5 的倍数，所以就是精确的五分之一。
     /// </summary>
     [Theory]
-    [InlineData(10, 3)]
-    [InlineData(15, 4)]
-    [InlineData(25, 6)]
-    [InlineData(50, 11)]
-    public void 休息时长是五分之一再加一分钟(int focus, int expectedRest)
+    [InlineData(10, 2)]
+    [InlineData(15, 3)]
+    [InlineData(25, 5)]
+    [InlineData(50, 10)]
+    public void 休息时长是精确的五分之一(int focus, int expectedRest)
     {
         Assert.Equal(expectedRest, WithFocus(focus).RestMinutes);
     }
 
     /// <summary>
-    /// 那个 +1 的本职：补上"发现延迟"（§14.0a）。
+    /// **护栏测试的取值必须覆盖滑块实际能出的值**（DESIGN §6.1 的警示）。
     ///
-    /// 专注在某个真实时刻攒够，但程序要到下一个整分钟的计时点才发现；休息却是从
-    /// **真正达成那一刻**起算的。延迟被计时点间隔封死在 60 秒以内，所以补 1 分钟
-    /// 之后，**用户实际能歇的时间永不少于名义的五分之一**。
+    /// 老的那条 `最坏的发现延迟也吃不掉名义休息` 只验了 10/25/50——全是 5 的倍数，
+    /// 所以 `⌊f/5⌋+1` 在它眼里永远成立；而 2026-07-31 把 Debug 滑块改成步进 1 之后，
+    /// 那个公式在 3~10 这 8 个取值里破了 6 个，测试一声不吭。
+    ///
+    /// 现在改成对**每一个正整数**都验：既不为 0，也不多给。
     /// </summary>
-    [Theory]
-    [InlineData(10)]
-    [InlineData(25)]
-    [InlineData(50)]
-    public void 最坏的发现延迟也吃不掉名义休息(int focus)
+    [Fact]
+    public void 任意正整数时长都给出向上取整的五分之一且绝不为零()
     {
-        var task = WithFocus(focus);
-        const double worstDelayMinutes = 1.0;      // 计时点间隔 = 延迟上界
-        var nominal = focus / 5.0;
-
-        Assert.True(task.RestMinutes - worstDelayMinutes >= nominal,
-            $"专注 {focus} 分钟：休息 {task.RestMinutes} 分钟减掉最坏延迟之后" +
-            $"只剩 {task.RestMinutes - worstDelayMinutes}，不够名义的 {nominal}");
+        for (var focus = 1; focus <= 120; focus++)
+        {
+            var rest = WithFocus(focus).RestMinutes;
+            Assert.Equal((int)Math.Ceiling(focus / 5.0), rest);
+            Assert.True(rest >= 1, $"专注 {focus} 分钟算出了 {rest} 分钟休息");
+        }
     }
+
+    /// <summary>
+    /// DECISIONS H6：休息**只读提交时锁定的 FocusMinutes**，跟这一轮拖了多久无关。
+    /// 归档扣减的是「剩余目标」，那是 JudgmentBuffer 里的另一个量——拿它算休息的话
+    /// 拖得越久歇得越少，激励方向就反了。
+    /// </summary>
+    [Fact]
+    public void 休息时长与实际拖了多久无关()
+    {
+        var task = WithFocus(50);
+        var buf = new JudgmentBuffer(task.StartedAt, task.FocusMinutes);
+
+        // 模拟：整整两小时都在别的应用上 → 一秒都不计入 → 跑满 2 小时触发归档
+        var tick = task.StartedAt;
+        for (var i = 0; i < 125; i++)
+        {
+            tick = tick.AddMinutes(1);
+            var win = new List<AwEvent>
+            {
+                new(tick.AddSeconds(-JudgmentBuffer.QueryWindowSeconds),
+                    JudgmentBuffer.QueryWindowSeconds, "chrome", "摸鱼", null),
+            };
+            buf.Tick(tick, win, [], Rules, "学习经济学");
+        }
+
+        Assert.True(buf.ArchivedSeconds > 0, "两小时之后应该归档过");
+        Assert.Equal(10, task.RestMinutes);          // 仍然是 ⌈50/5⌉，没被剩余目标带跑
+    }
+
+    private static readonly GroupRules Rules =
+        GroupRules.Parse("""{ "groups": { "学习经济学": { "rules": [ { "app": "^econ$" } ] } } }""");
 
     /// <summary>
     /// §8.4.2a：范围约束属于 UI 层，Core 必须接受任意时长——否则 §13 的手动

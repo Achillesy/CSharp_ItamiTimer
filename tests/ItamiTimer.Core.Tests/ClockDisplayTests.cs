@@ -19,30 +19,37 @@ namespace ItamiTimer.Core.Tests;
 /// </summary>
 public class ClockDisplayTests
 {
+    /// <summary>
+    /// 第二版把这个坑从根上填了：**达成时刻不再从 AW 事件推导**，它就是喂进去的那一拍
+    /// （DESIGN §4.5）。所以它的偏移量来自调用方的时钟，跟事件是 UTC 还是本地无关。
+    ///
+    /// 这里钉住这条语义——它同时也是 §15.1 的解药：一个不从账本推导的时刻，
+    /// 不可能因为账本被重写而往回跳。
+    /// </summary>
     [Fact]
-    public void 从UTC事件推导出的达成时刻会带着UTC偏移()
+    public void 达成时刻来自调用方的时钟_不再继承AW事件的偏移量()
     {
-        // AW 返回的就是这种：UTC 时间戳
-        var utcStart = new DateTimeOffset(2026, 7, 27, 6, 35, 0, TimeSpan.Zero);
         var rules = GroupRules.Parse("""
             { "groups": { "学习经济学": { "rules": [ { "title": "经济学" } ] } } }
             """);
-        var task = new TaskRecord
+        var localStart = new DateTimeOffset(2026, 7, 27, 14, 35, 0, TimeSpan.FromHours(8));
+        var buf = new JudgmentBuffer(localStart, 5);
+
+        // 事件用 UTC 偏移喂进来——AwClient 之外的调用方完全可能这么干
+        var utcStart = localStart.ToUniversalTime();
+        List<AwEvent> win = [new(utcStart.AddMinutes(-3), 1200, "SumatraPDF.exe", "曼昆经济学.pdf", null)];
+
+        TickOutcome outcome = default;
+        DateTimeOffset tick = default;
+        for (var i = 1; i <= 5 && !outcome.Completed; i++)
         {
-            StartedAt = utcStart,
-            FocusMinutes = 5,
-            Group = "学习经济学",
-        };
-        List<AwEvent> win = [new(utcStart, 1200, "SumatraPDF.exe", "曼昆经济学.pdf", null)];
-        List<AwEvent> afk = [new(utcStart, 1200, null, null, "not-afk")];
+            tick = localStart.AddMinutes(i);
+            outcome = buf.Tick(tick, win, [], rules, "学习经济学");
+        }
 
-        var s = Replay.Run(task, rules, win, afk, utcStart.AddMinutes(20));
-
-        Assert.NotNull(s.FocusCompletedAt);
-        // 推导出来的时刻保留了事件的偏移量（这里是 UTC），直接格式化就会显示 UTC 时钟
-        Assert.Equal(TimeSpan.Zero, s.FocusCompletedAt.Value.Offset);
-        // 但它作为绝对时刻是对的——转本地之后才是给人看的那个数
-        Assert.Equal(utcStart.AddMinutes(5), s.FocusCompletedAt.Value);
+        Assert.True(outcome.Completed);
+        Assert.Equal(TimeSpan.FromHours(8), tick.Offset);      // 偏移量来自这一拍，不是事件
+        Assert.Equal(localStart.AddMinutes(5), tick);
     }
 
     [Fact]

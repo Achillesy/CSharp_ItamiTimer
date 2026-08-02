@@ -53,8 +53,8 @@ public sealed class Settings
     /// <summary>上次选中的小目标名。启动时恢复选择。</summary>
     [JsonPropertyName("selectedGroup")] public string? SelectedGroup { get; set; }
 
-    /// <summary>每个 goal 的累计专注秒数（during）。跨任务持久化。</summary>
-    [JsonPropertyName("duringByGroup")] public Dictionary<string, double> DuringByGroup { get; set; } = [];
+    // 累计专注时长（during）不在这里——它在自己的 during.json 里（§11.2）。
+    // 这份文件程序随时整份重写，而累计时长是唯一一个丢了就补不回来的数据。
 
     [JsonPropertyName("forceTicking")] public bool ForceTicking { get; set; }
 

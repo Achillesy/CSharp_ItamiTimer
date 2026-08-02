@@ -45,12 +45,17 @@ public class DialControl : Control
     /// </summary>
     private const double StaveFloor = 0.5;
 
-    /// <summary>§8.2.5 螺旋三圈。超过 180 分钟不再内缩，在 lane 2 上原地覆盖。</summary>
+    /// <summary>
+    /// §8.3 螺旋**只有两圈**。buffer 的绘制区就是 120 分钟（= 两圈），
+    /// 再往后靠归档滚动（§4.4）——每小时一次，内圈的内容整体跳到外圈、内圈清空。
+    ///
+    /// ⚠️ 原来还有第三圈 `(0.14, 0.26)`，但 `ToMinuteCells` 最多吐 120 格、
+    /// `Index/60` 最大是 1，那一圈**永远够不到**。2026-08-02 删除。
+    /// </summary>
     private static readonly (double In, double Out)[] Lanes =
     [
         (0.50, 0.68),   // 0–60 分钟
         (0.31, 0.46),   // 60–120
-        (0.14, 0.26),   // 120–180
     ];
 
     public static readonly StyledProperty<DialPalette> PaletteProperty =
@@ -63,10 +68,6 @@ public class DialControl : Control
     /// <summary>任务开始时刻，决定色环从盘面哪个分钟刻度起画（§8.2.2 分针即写入头）。</summary>
     public static readonly StyledProperty<DateTimeOffset?> StartedAtProperty =
         AvaloniaProperty.Register<DialControl, DateTimeOffset?>(nameof(StartedAt));
-
-    /// <summary>还欠多少分钟专注。§8.2.4 的承诺弧与截止线。</summary>
-    public static readonly StyledProperty<double> RemainingMinutesProperty =
-        AvaloniaProperty.Register<DialControl, double>(nameof(RemainingMinutes));
 
     /// <summary>休息扇形的起点（= 专注达成那一刻）。null = 不在休息，不画。</summary>
     public static readonly StyledProperty<DateTimeOffset?> RestFromProperty =
@@ -83,14 +84,13 @@ public class DialControl : Control
     public DialPalette Palette { get => GetValue(PaletteProperty); set => SetValue(PaletteProperty, value); }
     public IReadOnlyList<MinuteCell> Cells { get => GetValue(CellsProperty); set => SetValue(CellsProperty, value); }
     public DateTimeOffset? StartedAt { get => GetValue(StartedAtProperty); set => SetValue(StartedAtProperty, value); }
-    public double RemainingMinutes { get => GetValue(RemainingMinutesProperty); set => SetValue(RemainingMinutesProperty, value); }
     public DateTimeOffset? RestFrom { get => GetValue(RestFromProperty); set => SetValue(RestFromProperty, value); }
     public double RestMinutes { get => GetValue(RestMinutesProperty); set => SetValue(RestMinutesProperty, value); }
     public double AlarmMinutes { get => GetValue(AlarmMinutesProperty); set => SetValue(AlarmMinutesProperty, value); }
 
     static DialControl()
         => AffectsRender<DialControl>(PaletteProperty, CellsProperty, StartedAtProperty,
-                                      RemainingMinutesProperty, RestFromProperty, RestMinutesProperty,
+                                      RestFromProperty, RestMinutesProperty,
                                       AlarmMinutesProperty);
 
     // 12 点为 0°，顺时针，分钟 × 6°（§8.2）
@@ -214,106 +214,88 @@ public class DialControl : Control
             var lane = Math.Min(cell.Index / 60, Lanes.Length - 1);
             var (rIn, rOut) = Lanes[lane];
             var d0 = (m0 + cell.Index) * 6;
-            var d1 = d0 + Math.Max(0.1, cell.TotalSeconds / 60.0) * 6;
+            var d1 = d0 + 6;
 
-            // 四种结局分开画（§0.4.1）。把"起身离开"画成红色等于冤枉自己。
-            if (cell.GapSeconds > cell.TotalSeconds / 2)
+            // ---- §4.6 染色。**色块只为好看，不是账**（用户 2026-08-02）：
+            //      真正参与判定的只有 §4.5 那个缺口，怎么分档都不影响任务什么时候完成。
+            //
+            // 有 focus 就按 >40 / >20 / >0 分三档。高度跟着颜色走，编的是同一个量：
+            // 一个给正常视觉，一个给所有人（D1 的木桶短板，只是从连续换成了离散）。
+            if (cell.FocusSeconds > 0)
             {
-                var pen = new Pen(new SolidColorBrush(p.Tick), R(0.012))
-                { DashStyle = new DashStyle([2, 2], 0) };
-                ctx.DrawGeometry(null, pen, Annulus(c, R(rIn), R(rOut), d0 + 0.4, d1 - 0.4));
+                var (tint, height) = cell.FocusSeconds switch
+                {
+                    > 40 => (p.Focus, 1.00),
+                    > 20 => (p.Ramp(0.5), 0.80),
+                    _ => (p.Ramp(0.8), 0.60),
+                };
+                Stave(ctx, c, R, rIn, rOut, d0, d1, tint, height);
                 continue;
             }
 
-            // 「人不在」：**什么都不画**（用户 2026-07-28）。
+            // ---- 一秒 focus 都没有：在 Init/Gray/Afk/OffTask 里取【计数最大】的那个，
+            //      平局取【码值大】的 —— OffTask(3) > Afk(2) > Gray(1) > Init(0)，fail-closed。
             //
-            // 原来画一块灰的。用户的话：「离开我觉得应该什么都不画，就是预计完成的
-            // 圆弧加长而已啊。」—— 离开不是你的错（§0.4.1「把起身离开画成红色等于
-            // 冤枉自己」），惩罚只该体现在**截止弧变长**这一处，盘面上不必再记一笔。
-            //
-            // 留下的空白不会跟"还没走到"混淆：写入头之前的每一分钟都已经发生过，
-            // 中间的空白只可能是离开；而"AW 没数据"另有虚线框，也分得开。
-            if (cell.AbsentSeconds > cell.TotalSeconds / 2) continue;
+            // argmax 而不是"过半"：三类混合时可能谁都不过半，按阈值写会默认掉进红色，
+            // 于是「离开 29 秒 + 摸鱼 28 秒」被整格判成全红。**把起身离开画成红色等于
+            // 冤枉自己**（§0.4.1），而 argmax 没有阈值，也就没有那道悬崖。
+            var best = cell.InitSeconds;
+            var pick = 0;
+            if (cell.GraySeconds >= best) { best = cell.GraySeconds; pick = 1; }
+            if (cell.AfkSeconds >= best) { best = cell.AfkSeconds; pick = 2; }
+            if (cell.OffTaskSeconds >= best) pick = 3;
 
-            // **木桶的短板**（用户 2026-07-28）：一格的【高度】= 那一分钟的纯度。
-            //
-            // 这一圈是个木桶，每一分钟是一块板。专注满了就是满高的一块；这一分钟
-            // 走神了，板子就短一截 —— **短板自己会露出来**。
-            //
-            // 它取代了原来那根"色盲第二信号"的刻线。刻线是往颜色上贴的补丁，而这个
-            // 是把同一个量编码进**长度**：长度不需要辨色，任何色盲都读得出来，也不必
-            // 再去数刻线。原来那根线还有个致命的副作用 —— 一格在真实尺寸下只有 8.7px
-            // 宽，1.1px 的刻线加左右各 0.7px 的边框，红色只剩两条 3px 的窄边，
-            // **注解把被注解的东西吃掉了**（用户：「看着像个空心的小块」）。
-            //
-            // 从内缘长出来、往外缘长：内圈保持一条干净的圆，参差的一边朝着刻度。
-            // 高度在 [StaveFloor, 1] 之间线性映射 —— 最短也有半块板，看得见。
-            // 而**满高的灰色承诺弧正好成了"这一分钟满格"的参照线** —— 绿板齐了它就
-            // 是满的，短了一眼就看得见。
-            //
-            // 颜色照旧（绿 → 琥珀 → 红），两个通道编同一个量：一个给正常视觉、
-            // 一个给所有人。
-            var purity = Math.Clamp(cell.Purity, 0, 1);
-            var top = rIn + (rOut - rIn) * (StaveFloor + (1 - StaveFloor) * purity);
+            switch (pick)
+            {
+                case 3:     // OffTask：红，半高。下限 1/2 绝不取 0（D2）——
+                            // 零高度会跟「不画」撞车，而那是最不该混淆的一对。
+                    Stave(ctx, c, R, rIn, rOut, d0, d1, p.Slack, 0.50);
+                    break;
 
-            ctx.DrawGeometry(new SolidColorBrush(p.Ramp(1 - purity)),
-                new Pen(new SolidColorBrush(A(p.Face, 0xCC)), R(0.005)),
-                Annulus(c, R(rIn), R(top), d0, d1));
+                case 2:     // Afk：虚线空心框，满高。
+                            //
+                            // 2026-08-02 起「人不在」重新画出来了（D3 翻案）：原来什么都不画，
+                            // 现在给它一个**空心**的框——有形状、没实体，读起来是「这段时间
+                            // 存在，但不属于任何一边」。`Absent` 这个 token 从 07-28 起就
+                            // 一直留着当语义占位，等的就是今天。
+                    ctx.DrawGeometry(null,
+                        new Pen(new SolidColorBrush(p.Absent), R(0.012))
+                        { DashStyle = new DashStyle([2, 2], 0) },
+                        Annulus(c, R(rIn), R(rOut), d0 + 0.4, d1 - 0.4));
+                    break;
+
+                case 1:     // Gray：承诺弧。**它不再单独计算**——就是 buffer 里那段 Gray
+                            // （§4.5），跟色块走同一条投影、同一套坐标。
+                            //
+                            // 满高的灰正好成了「这一分钟满格」的参照线：绿板齐了它就是满的，
+                            // 短了一眼看得见。
+                    using (ctx.PushOpacity(0.30))
+                        ctx.DrawGeometry(new SolidColorBrush(p.Tick), null,
+                            Annulus(c, R(rIn), R(rOut), d0, d1));
+                    break;
+
+                    // case 0 Init：什么都不画。到这里只有两种可能——漏拍留下的洞，
+                    // 或者承诺弧之后的空白。两个都不该占版面。
+            }
         }
-
-        DrawPendingArc(ctx, c, R, m0 + cells.Count, cells.Count);
     }
 
     /// <summary>
-    /// §8.2.4 承诺弧与截止线。
-    ///
-    /// **点下「开始」的那一刻就要看得见**（用户 2026-07-27）：从开始时刻到预定的结束
-    /// 时刻画一整段灰弧。此前它被画在「有色块」的前提之下，所以任务刚开始、一格都还
-    /// 没走完时盘面是空的 —— 看着像没在跑。
-    ///
-    /// **不画截止线**（用户 2026-07-27）。§8.2.4 原本要求在弧的末端画一条径向实线，
-    /// 理由是"偷懒时它往前滑，眼睛得追得住"；实际画出来那一小段线是多余的 ——
-    /// 弧自己的末端已经把位置说清楚了。
+    /// 一块板：从内缘长出来、往外缘长，高度是 <paramref name="height"/> 那么多。
+    /// 内圈保持一条干净的圆，参差的一边朝着刻度。
     /// </summary>
-    /// <param name="headDial">
-    /// 写入头在**表盘上**的位置，单位分钟（0~60 一圈）。= 起算时刻的分钟数 + 已走完的格数。
-    /// </param>
-    /// <param name="elapsedMinutes">
-    /// 任务**已经走了多少分钟**。圈号只能从这个数来。
-    ///
-    /// ⚠️ 2026-07-28 的 bug 就出在这里：原来写的是 `(int)(headDial / 60)`，拿表盘上的
-    /// 绝对分钟数当圈号。于是 23:59 起算的任务一走过 00:00，`60/60 = 1`，承诺弧就跳到
-    /// 第二圈去了，而色块（用的是 `cell.Index / 60`，口径正确）还在第一圈 —— 角度对、
-    /// 半径错，看着就是"弧线错位"。任何整点都会犯，零点只是碰巧也是整点。
-    /// </param>
-    private void DrawPendingArc(DrawingContext ctx, Point c, Func<double, double> R,
-                                double headDial, int elapsedMinutes)
+    private void Stave(DrawingContext ctx, Point c, Func<double, double> R,
+                       double rIn, double rOut, double d0, double d1, Color tint, double height)
     {
-        if (RemainingMinutes <= 0.01) return;
-
-        // 承诺弧本身也可能跨过一圈的边界（50 分钟的任务加上补时很容易超过 60 分钟），
-        // 所以按圈切段分别画，跟色块的螺旋内缩对齐（§8.2.5）。
-        var from = (double)elapsedMinutes;
-        var to = from + RemainingMinutes;
-
-        while (from < to - 0.01)
-        {
-            var lap = Math.Min((int)(from / 60), Lanes.Length - 1);
-            // 最后一圈不再往里缩，剩下的全画在这一圈上
-            var segEnd = lap == Lanes.Length - 1 ? to : Math.Min(to, (lap + 1) * 60.0);
-            var (rIn, rOut) = Lanes[lap];
-
-            var d0 = (headDial + (from - elapsedMinutes)) * 6;
-            var d1 = (headDial + (segEnd - elapsedMinutes)) * 6;
-
-            // 灰色，不是蓝色：这段是"还欠着的时间"，它不该有任何情绪
-            using (ctx.PushOpacity(0.30))
-                ctx.DrawGeometry(new SolidColorBrush(Palette.Tick), null,
-                    Annulus(c, R(rIn), R(rOut), d0, d1));
-
-            from = segEnd;
-        }
+        var top = rIn + (rOut - rIn) * Math.Max(StaveFloor, height);
+        ctx.DrawGeometry(new SolidColorBrush(tint),
+            new Pen(new SolidColorBrush(A(Palette.Face, 0xCC)), R(0.005)),
+            Annulus(c, R(rIn), R(top), d0, d1));
     }
+
+    // §8.2.4 的承诺弧曾经在这里单独算一遍（`RemainingMinutes` + 按圈切段）。
+    // 2026-08-02 删除：承诺弧现在就是 buffer 里那段 Gray（§4.5），跟色块走同一条
+    // 投影。同一个量两处算法，迟早会漂——这次是真漂了（§15.1）。
 
     /// <summary>
     /// §8.4.4 休息扇形：**你挣来的那块时间**。
