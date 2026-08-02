@@ -1,3 +1,4 @@
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -35,7 +36,13 @@ public sealed class During
 
     private static string Path_ => System.IO.Path.Combine(AppData.Dir, "during.json");
 
-    private static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
+    private static readonly JsonSerializerOptions Json = new()
+    {
+        WriteIndented = true,
+        // 不转义非 ASCII —— 这是个**给人看**的文件，小目标名是中文，
+        // 默认编码器会把「学习经济学」写成 学习...，想手动清零都认不出是哪一行。
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
 
     public double this[string goal] => AccumulatedSeconds.GetValueOrDefault(goal, 0);
 
