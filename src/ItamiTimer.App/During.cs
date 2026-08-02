@@ -1,4 +1,3 @@
-using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -31,27 +30,24 @@ namespace ItamiTimer.App;
 /// </summary>
 public sealed class During
 {
+    /// <summary>
+    /// 每个小目标的累计专注秒数。**整数**——统计的是 buffer 里的格子数，
+    /// 不是 AW 事件的 duration，永远不会有小数（用户 2026-08-02）。
+    /// </summary>
     [JsonPropertyName("accumulatedSeconds")]
-    public Dictionary<string, double> AccumulatedSeconds { get; set; } = [];
+    public Dictionary<string, long> AccumulatedSeconds { get; set; } = [];
 
     private static string Path_ => System.IO.Path.Combine(AppData.Dir, "during.json");
 
-    private static readonly JsonSerializerOptions Json = new()
-    {
-        WriteIndented = true,
-        // 不转义非 ASCII —— 这是个**给人看**的文件，小目标名是中文，
-        // 默认编码器会把「学习经济学」写成 学习...，想手动清零都认不出是哪一行。
-        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
-    };
 
-    public double this[string goal] => AccumulatedSeconds.GetValueOrDefault(goal, 0);
+    public long this[string goal] => AccumulatedSeconds.GetValueOrDefault(goal, 0);
 
     /// <summary>把一段专注时间记到某个小目标名下，并立刻落盘。</summary>
     /// <remarks>
     /// <b>每次入账就写一次盘</b>，不等退出（退出还有崩溃、关机、进程被杀三条路走不到）。
     /// 一轮任务最多写两三次，成本可以忽略。
     /// </remarks>
-    public void Add(string goal, double seconds)
+    public void Add(string goal, long seconds)
     {
         if (seconds <= 0) return;
         AccumulatedSeconds[goal] = this[goal] + seconds;
@@ -60,17 +56,57 @@ public sealed class During
 
     public static During Load()
     {
+        // 文件不存在时**不在这里建**——建之前要先知道有哪些小目标（见 EnsureSeeded）。
+        if (!File.Exists(Path_)) return new During();
+
+        var text = "";
         try
         {
-            if (!File.Exists(Path_)) return new During();
-            return JsonSerializer.Deserialize<During>(File.ReadAllText(Path_)) ?? new During();
+            text = File.ReadAllText(Path_);
+            return JsonSerializer.Deserialize<During>(text) ?? new During();
         }
         catch (Exception e)
         {
-            // 读不出来就从零开始。绝不能因为一个统计文件让程序打不开。
+            // 秒数 2026-08-02 从 double 改成 long。老文件里可能还留着小数（38253.4），
+            // 那样直接反序列化会抛。**这是唯一一个丢了就补不回来的数据**，
+            // 值得为它多写一个宽容的回退，而不是一句 Log.Error 就归零。
+            try
+            {
+                var loose = JsonSerializer.Deserialize<Dictionary<string, Dictionary<string, double>>>(text);
+                if (loose?.TryGetValue("accumulatedSeconds", out var d) == true)
+                {
+                    var recovered = new During
+                    {
+                        AccumulatedSeconds = d.ToDictionary(kv => kv.Key, kv => (long)Math.Round(kv.Value)),
+                    };
+                    Log.Warn($"during.json had fractional seconds; rounded {recovered.AccumulatedSeconds.Count} entries to whole seconds");
+                    recovered.Save();
+                    return recovered;
+                }
+            }
+            catch { /* 回退也失败，走下面归零 */ }
+
             Log.Error("Failed to read during.json; starting from zero", e);
             return new During();
         }
+    }
+
+    /// <summary>
+    /// 文件还不存在时，按当前的小目标名建一份**全 0** 的（用户 2026-08-02）。
+    ///
+    /// 界面上那个数字没有单位、不解释（D6），用户只能去数据目录里翻。翻到一个 <c>{}</c>
+    /// 什么也学不到，翻到 <c>{ "番茄钟": 0 }</c> 就一眼明白这表是按小目标名索引的秒数。
+    /// 跟 rules.json 「给例子不给注释」是同一条思路。
+    ///
+    /// **只在创建那一次播种，之后绝不再同步。** 状态文件不该去镜像配置文件：
+    /// 后来改了目标名，这儿留一条对不上的零就留着——它不显示、不参与任何判定，
+    /// 而为了清掉它去跟 rules.json 对账，才是真的把两个文件绑死。
+    /// </summary>
+    public void EnsureSeeded(IReadOnlyList<string> goals)
+    {
+        if (File.Exists(Path_)) return;
+        foreach (var g in goals) AccumulatedSeconds[g] = 0;
+        Save();
     }
 
     public void Save()
@@ -78,7 +114,7 @@ public sealed class During
         try
         {
             Directory.CreateDirectory(AppData.Dir);
-            File.WriteAllText(Path_, JsonSerializer.Serialize(this, Json));
+            File.WriteAllText(Path_, JsonSerializer.Serialize(this, AppData.JsonOptions));
         }
         catch (Exception e)
         {

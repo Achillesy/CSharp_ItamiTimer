@@ -100,8 +100,8 @@ round.
   },
 
   "executeCommand": {
-    "windows": "shutdown /s /t 0",
-    "macos":   "osascript -e 'tell application \"System Events\" to shut down'"
+    "windows": [ "explorer", "rundll32.exe user32.dll,LockWorkStation", "shutdown /s /t 0" ],
+    "macos":   [ "open -a TextEdit", "pmset displaysleepnow", "osascript -e 'tell application \"System Events\" to shut down'" ]
   }
 }
 ```
@@ -114,7 +114,8 @@ round.
 - Windows and macOS app names live in the same file; a pattern that can't match on the
   other platform is harmless.
 - `executeCommand` is optional — it's what the alarm's **Execute** switch runs when the
-  yellow hand comes due (see below). Without it, nothing runs.
+  yellow hand comes due (see below). **Only the first entry ever runs**: keep your
+  collection there and move one to the top to use it. Without it, nothing runs.
 - Comments and trailing commas are allowed (JSONC). **The program never writes this file**,
   so your comments survive.
 - Lookup order: `%LOCALAPPDATA%\ItamiTimer\rules.json` (yours, survives republish) →

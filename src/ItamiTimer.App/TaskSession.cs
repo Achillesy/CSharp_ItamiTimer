@@ -42,8 +42,14 @@ public sealed class TaskSession : IDisposable
     public bool InRest => _focusDoneAt is not null;
     public bool Finished { get; private set; }
 
-    /// <summary>本轮到目前为止的专注秒数 = 已归档结算的 + 还留在 buffer 里的。只用于显示。</summary>
-    public double FocusedSeconds() => _settledSeconds + _buffer.FocusedSeconds;
+    /// <summary>
+    /// 本轮到目前为止的专注秒数 = 已归档结算的 + 还留在 buffer 里的。
+    ///
+    /// **整数**——它数的是 buffer 里的格子，不是 AW 事件的 duration，永远不会有小数
+    /// （用户 2026-08-02）。所以除以 60 的地方一律要写 <c>60.0</c>，
+    /// 否则整数除法会把小数位悄悄吃掉（DECISIONS G）。
+    /// </summary>
+    public int FocusedSeconds() => _settledSeconds + _buffer.FocusedSeconds;
 
     /// <summary>
     /// 归档结算掉了一段专注时间（§4.4）。调用方要立刻把它记进 during（§11.2）——
@@ -57,7 +63,7 @@ public sealed class TaskSession : IDisposable
     /// 幂等：重复调用返回 0。放弃、关窗口、休息结束三条路都会走到这里，
     /// <b>重复入账比漏账更难查</b>，所以在这里挡死而不是在调用方各自小心。
     /// </summary>
-    public double TakeUnbankedSeconds()
+    public int TakeUnbankedSeconds()
     {
         if (_banked) return 0;
         _banked = true;
@@ -157,7 +163,7 @@ public sealed class TaskSession : IDisposable
             Cells = cells; // #11：专注完成后不消失，圆弧保留在休息扇形下层
             Updated?.Invoke();
 
-            Log.Info($"{FocusedSeconds() / 60,5:F1}/{Task.FocusMinutes} min  " +
+            Log.Info($"{FocusedSeconds() / 60.0,5:F1}/{Task.FocusMinutes} min  " +
                      $"cells {cells.Count}  deficit {outcome.DeficitSeconds}s  " +
                      $"settled {_settledSeconds}s");
 
@@ -193,7 +199,7 @@ public sealed class TaskSession : IDisposable
         Finished = true;
         _tick.Stop();
         Task = Task with { Status = RecordStatus.Abandoned, AbandonedAt = DateTimeOffset.Now };
-        Log.Info($"Task abandoned. Focused {FocusedSeconds() / 60:F1}/{Task.FocusMinutes} min");
+        Log.Info($"Task abandoned. Focused {FocusedSeconds() / 60.0:F1}/{Task.FocusMinutes} min");
     }
 
     public void Dispose()

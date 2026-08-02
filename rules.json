@@ -1,62 +1,35 @@
-// 一袋米要扛几楼 —— 小目标规则
-//
-// 格式和匹配语义见 DESIGN.md §5.2。三条要点：
-//   1. 一个组 = 一个小目标。rules 是条件列表，组内【任一条】命中即算命中。
-//   2. 单条规则里 app 和 title 都写，则两个都要命中；只写一个，另一个不限。
-//   3. 这些是【正则】，不是通配符。所以点号要转义、反斜杠要双写：
-//      explorer.exe 得写成 "explorer\\.exe"。
-//
-// 允许写注释和结尾逗号（解析时开了 ReadCommentHandling=Skip 和
-// AllowTrailingCommas）。这个文件是逐渐生长的：新的小目标往下加，
-// 过期的加一行 "disabled": true 屏蔽掉，不用删。
-
 {
-  "groups": {
-
-    // 当前唯一的小目标：不管用什么应用，窗口标题里有「经济学」就算在学。
-    //
-    // 拿本机 2026-07-27 往前 3 天的真实 AW 数据验过，命中 75 条：
-    //     SumatraPDF.exe  58   曼昆经济学原理第五版.pdf - SumatraPDF
-    //     explorer.exe    16   曼昆-经济学原理 - 文件资源管理器
-    //     chrome.exe       1
-    // 正是「可能在看书、可能在看视频，反正标题里有经济学」那个意思。
-    "学习经济学": {
-      "rules": [
-        { "title": "经济学" }
-      ],
-      "accumulatedMinutes": 38.9
+  "Groups": {
+    "ItamiTimer": {
+      "Disabled": false,
+      "Rules": [
+        {
+          "App": "^ItamiTimer\\.exe$|^ItamiTimer$",
+          "Title": null
+        },
+        {
+          "App": null,
+          "Title": "ISSUE"
+        }
+      ]
     }
-
   },
-
-  // 中性名单：既不算专注，也不算违规，但【计入】累计专注时长（DESIGN.md §4）。
-  // 文件对话框、开始菜单、锁屏这些是干活的附带动作，为它们停表既琐碎又制造噪音。
-  //
-  // 这一段跟上面的小目标无关，是背景噪音的兜底。想体验"一点杂音都不放过"
-  // 可以把它清空成 []，代价是每次点开文件管理器都会被提醒一次。
-  //
-  // ⚠️ 【两个平台的条目都在这里，是故意的】。AW 上报的 app 名两边完全不同：
-  // Windows 是 exe 文件名（explorer.exe），macOS 是应用显示名（Finder）。
-  // 一条在另一个平台上永远匹配不上的正则是【无害】的，所以不拆文件——
-  // 拆了反而要维护两份、还会漏同步。这也正是 §5.1「同一组里同时写 Windows
-  // 和 macOS 的 app 名」那条的落点。
-  "ignore": [
-    // ---- Windows
-    "^LockApp\\.exe$",                                  // 锁屏（注意 §4：afk 同时说 afk 时判 Absent，优先级更高）
-    "^SearchHost\\.exe$|^StartMenuExperienceHost\\.exe$", // 开始菜单 / 搜索
-    "^PickerHost\\.exe$|^OpenWith\\.exe$",              // 文件选择、打开方式对话框
-    "^explorer\\.exe$",                                 // 文件资源管理器
-    "^dwm\\.exe$",                                      // 桌面窗口管理器
-
-    // ---- macOS（2026-07-28 加。名字取自本机 aw-watcher-window 的真实上报）
-    "^loginwindow$",                                    // 锁屏 / 登录窗，对应 LockApp.exe
-    "^Finder$",                                         // 访达，对应 explorer.exe
-    "^Spotlight$",                                      // 聚焦搜索，对应开始菜单
-    "^Dock$|^SystemUIServer$|^WindowManager$",          // 程序坞、菜单栏右侧、台前调度
-    "^Notification Cent(er|re)$|^ControlCenter$",       // 通知中心 / 控制中心
-    "^universalAccessAuthWarn$|^UserNotificationCenter$", // 权限弹窗、系统提示框
-
-    // ---- 两边通用
-    "^unknown$"                                         // AW 拿不到窗口信息时的占位
-  ]
+  "executeCommand": {
+    "windows": [
+      "explorer",
+      "rundll32.exe user32.dll,LockWorkStation",
+      "rundll32.exe powrprof.dll,SetSuspendState 0,1,0",
+      "shutdown /h",
+      "shutdown /r /t 0",
+      "shutdown /s /t 0"
+    ],
+    "macos": [
+      "open /System/Library/CoreServices/Finder.app",
+      "pmset displaysleepnow",
+      "osascript -e 'tell application \"System Events\" to sleep'",
+      "osascript -e 'tell application \"System Events\" to log out'",
+      "osascript -e 'tell application \"System Events\" to restart'",
+      "osascript -e 'tell application \"System Events\" to shut down'"
+    ]
+  }
 }

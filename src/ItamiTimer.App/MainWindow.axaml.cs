@@ -157,7 +157,7 @@ public partial class MainWindow : Window
         {
             _alarm.MarkFired();   // 一次性——响过就撤，不是每天重复的闹钟。
                                   // 内存里清掉就够了，退出时 SaveAlarmOnExit 自会写成 null。
-            if (_settings.CommandEnabled) Command.Execute();
+            if (_settings.CommandEnabled) Command.Execute(_rules);
             else Sound.Play(_settings.CommandSound);
         }
     }
@@ -235,6 +235,9 @@ public partial class MainWindow : Window
                 });
             }
             F<ItemsControl>("Goals").ItemsSource = rows;   // 也只设这一次
+
+            // 第一次运行：按现在这些小目标建一份全 0 的 during.json（§11.2）
+            _during.EnsureSeeded(_rules.SelectableGroups);
             RefreshGoalItems();
             // 恢复上次选中的 goal，找不到就选第一个
             var saved = _goalRadios.FirstOrDefault(r =>
@@ -410,7 +413,7 @@ public partial class MainWindow : Window
     /// <see cref="TaskSession.Settled"/> 里当场入账，剩下的由
     /// <see cref="TaskSession.TakeUnbankedSeconds"/> 幂等地取走。
     /// </summary>
-    private void Bank(string? goal, double seconds)
+    private void Bank(string? goal, long seconds)
     {
         if (goal is null || seconds <= 0) return;
         _during.Add(goal, seconds);

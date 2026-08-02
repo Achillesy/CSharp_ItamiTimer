@@ -1,3 +1,6 @@
+using System.Text.Encodings.Web;
+using System.Text.Json;
+
 namespace ItamiTimer.App;
 
 /// <summary>
@@ -55,4 +58,24 @@ public static class AppData
         var beside = Path.Combine(AppContext.BaseDirectory, "rules.json");
         return File.Exists(beside) ? beside : "rules.json";
     }
+
+    /// <summary>
+    /// **程序自己那两个文件**（settings.json / during.json）怎么写。
+    ///
+    /// 一份，不是两份——原来 `Settings` 和 `During` 各写了一套一模一样的（连注释都一样），
+    /// 那正是「同一件事写两遍、改一处忘另一处」的种子（§15.4 的 `executeCommand` 就是
+    /// 那么长出来的）。
+    ///
+    /// 不转义非 ASCII：这两个是**给人看**的文件，小目标名是中文，默认编码器会把
+    /// 「学习经济学」写成 学习...，想手动清零都认不出是哪一行。
+    /// （`Unsafe` 指的是不为 HTML 上下文转义；这两份文件只被自己读写，不进任何网页。）
+    ///
+    /// ⚠️ 这**不能**用来读写 `rules.json`——那是用户手写的，程序只读不写，
+    /// 而且它的解析设置在 `GroupRules` 里（注释、结尾逗号、大小写不敏感）。
+    /// </summary>
+    public static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        WriteIndented = true,
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
 }

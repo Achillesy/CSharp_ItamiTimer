@@ -23,10 +23,63 @@ public sealed class GoalGroup
     // rules.json 是**用户手写**的，程序只读不写——写一次注释就全没了。
 }
 
-/// <summary>rules.json 的原始形状。</summary>
+/// <summary>
+/// rules.json 的原始形状。**整个文件的唯一类型模型**——文件里有什么，这里就得有什么。
+///
+/// ⚠️ 2026-08-02 之前 <c>executeCommand</c> 不在这儿，由 App 的 <c>Command</c> 用裸
+/// <c>JsonDocument</c> 另读一遍。**同一个文件两条读取路径、两套解析设置，只能靠人手动
+/// 保持一致**，而且咬过两次：一次是那边没开 `Skip`（写了注释 → 小目标正常、Execute
+/// 静默失效），一次是 `TryGetProperty` 区分大小写而这边不区分（同样的症状）。
+/// 两次都是「文件的一半好用、另一半安静地不工作，程序照常启动」。
+///
+/// 现在一次解析出全部。**往这个文件里加新的节，就往这个类里加字段**，别再另起一条路。
+/// </summary>
 public sealed class RulesFile
 {
     public Dictionary<string, GoalGroup> Groups { get; init; } = [];
+
+    /// <summary>闹钟 Execute 用的命令表，按 OS 分（§9）。值可以是一条字符串，也可以是列表。</summary>
+    [JsonConverter(typeof(CommandTableConverter))]
+    public Dictionary<string, IReadOnlyList<string>>? ExecuteCommand { get; init; }
+}
+
+/// <summary>
+/// <c>executeCommand</c> 的读法：值**既接受一条字符串、也接受一个列表**，
+/// 统一成列表。OS 名（windows / macos）大小写不敏感——跟这个文件其余部分一致。
+/// </summary>
+internal sealed class CommandTableConverter : JsonConverter<Dictionary<string, IReadOnlyList<string>>>
+{
+    public override Dictionary<string, IReadOnlyList<string>> Read(
+        ref Utf8JsonReader reader, Type type, JsonSerializerOptions options)
+    {
+        var table = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
+        if (reader.TokenType != JsonTokenType.StartObject)
+            throw new JsonException("executeCommand must be an object keyed by OS.");
+
+        while (reader.Read() && reader.TokenType != JsonTokenType.EndObject)
+        {
+            var os = reader.GetString()!;
+            reader.Read();
+            var list = new List<string>();
+            if (reader.TokenType == JsonTokenType.String)
+            {
+                list.Add(reader.GetString()!);
+            }
+            else if (reader.TokenType == JsonTokenType.StartArray)
+            {
+                while (reader.Read() && reader.TokenType != JsonTokenType.EndArray)
+                    if (reader.TokenType == JsonTokenType.String)
+                        list.Add(reader.GetString()!);
+            }
+            else throw new JsonException($"executeCommand.{os} must be a string or an array of strings.");
+
+            table[os] = list;
+        }
+        return table;
+    }
+
+    public override void Write(Utf8JsonWriter w, Dictionary<string, IReadOnlyList<string>> v, JsonSerializerOptions o)
+        => throw new NotSupportedException("The program never writes rules.json.");
 }
 
 /// <summary>
@@ -44,6 +97,7 @@ public sealed class GroupRules
     private sealed record CompiledGroup(string Name, bool Disabled, IReadOnlyList<CompiledRule> Rules);
 
     private readonly IReadOnlyList<CompiledGroup> _groups;
+    private readonly IReadOnlyDictionary<string, IReadOnlyList<string>> _commands;
 
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
@@ -52,10 +106,19 @@ public sealed class GroupRules
         PropertyNameCaseInsensitive = true,
     };
 
-    private GroupRules(IReadOnlyList<CompiledGroup> groups)
+    private GroupRules(IReadOnlyList<CompiledGroup> groups,
+                       IReadOnlyDictionary<string, IReadOnlyList<string>> commands)
     {
         _groups = groups;
+        _commands = commands;
     }
+
+    /// <summary>
+    /// 某个 OS 的命令表（§9）。**调用方只该用第 0 条**——这儿是个常用命令的收藏夹，
+    /// 换命令靠重排，不靠界面（DECISIONS E9）。没配就是空列表。
+    /// </summary>
+    public IReadOnlyList<string> CommandsFor(string os)
+        => _commands.TryGetValue(os, out var list) ? list : [];
 
     public static GroupRules Load(string path) => Parse(File.ReadAllText(path));
 
@@ -80,7 +143,8 @@ public sealed class GroupRules
             groups.Add(new CompiledGroup(name, g.Disabled, rules));
         }
 
-        return new GroupRules(groups);
+        return new GroupRules(groups,
+            file.ExecuteCommand ?? new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase));
     }
 
     private static Regex? Compile(string? pattern, string where)

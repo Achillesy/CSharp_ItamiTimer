@@ -1,4 +1,3 @@
-using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -77,13 +76,6 @@ public sealed class Settings
 
     private static string Path_ => System.IO.Path.Combine(AppData.Dir, "settings.json");
 
-    private static readonly JsonSerializerOptions Json = new()
-    {
-        WriteIndented = true,
-        // 不转义非 ASCII —— 这是个**给人看**的文件，小目标名是中文，
-        // 默认编码器会把「学习经济学」写成 学习...，想手动清零都认不出是哪一行。
-        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
-    };
 
     public static Settings Load()
     {
@@ -140,7 +132,7 @@ public sealed class Settings
         try
         {
             Directory.CreateDirectory(AppData.Dir);
-            File.WriteAllText(Path_, JsonSerializer.Serialize(this, Json));
+            File.WriteAllText(Path_, JsonSerializer.Serialize(this, AppData.JsonOptions));
         }
         catch (Exception e)
         {

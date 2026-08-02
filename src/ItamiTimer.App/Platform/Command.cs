@@ -1,5 +1,5 @@
 using System.Diagnostics;
-using System.Text.Json;
+using ItamiTimer.Core;
 
 namespace ItamiTimer.App;
 
@@ -18,17 +18,46 @@ namespace ItamiTimer.App;
 /// </code>
 ///
 /// **没配就什么都不做**——但一定要在日志里说清楚为什么（§8.1a：界面可以沉默，
-/// 理由不能丢）。2026-08-02 之前这里有三条**静默**的 return（没有键 / 当前 OS 没
-/// 对应项 / 值是空串），用户打开 Execute 开关、等到点、什么都没发生，
-/// 而日志里一个字都没有——查不起。
+/// 理由不能丢）。2026-08-02 之前这里有三条**静默**的 return，用户打开 Execute 开关、
+/// 等到点、什么都没发生，而日志里一个字都没有——查不起。
+///
+/// ⚠️ **这里不读文件。** 命令表来自启动时 `GroupRules` 那一次解析（§15.4）：
+/// 同一个文件曾经有两条读取路径、两套解析设置，靠人手动保持一致，咬过两次。
+/// 现在整个 rules.json 只有一个类型模型、一个解析器。
 /// </summary>
 public static class Command
 {
-    /// <summary>执行 rules.json 里的 <c>executeCommand.{os}</c>。</summary>
-    public static void Execute()
+    /// <summary>
+    /// 执行 <c>executeCommand.{os}</c> 的**第一条**。命令表来自启动时那一次解析
+    /// （<see cref="GroupRules"/>），这里**不再自己读文件**。
+    /// </summary>
+    public static void Execute(GroupRules? rules)
     {
-        var cmd = LoadForCurrentOs();
-        if (string.IsNullOrWhiteSpace(cmd)) return;   // 原因已经在 LoadForCurrentOs 里记过
+        var key = OperatingSystem.IsWindows() ? "windows" : "macos";
+
+        if (rules is null)
+        {
+            Log.Warn("executeCommand: rules.json never loaded; nothing to run");
+            return;
+        }
+
+        var list = rules.CommandsFor(key);
+        if (list.Count == 0)
+        {
+            Log.Warn($"executeCommand: no \"{key}\" entry in rules.json; nothing to run");
+            return;
+        }
+
+        // 列表里**永远只执行第一条**（DECISIONS E9）。这儿是一个常用命令的收藏夹：
+        // 想换用哪条，就把它挪到第一位。没有界面去选——能猜的就让人猜（D6）。
+        var cmd = list[0];
+        if (string.IsNullOrWhiteSpace(cmd))
+        {
+            Log.Warn($"executeCommand: the first \"{key}\" entry is empty; nothing to run");
+            return;
+        }
+        if (list.Count > 1)
+            Log.Info($"executeCommand: {list.Count} entries under \"{key}\"; only the first one runs");
 
         var shell = OperatingSystem.IsWindows() ? "cmd.exe" : "/bin/sh";
         var shellArgs = OperatingSystem.IsWindows() ? $"/c {cmd}" : $"-c \"{cmd}\"";
@@ -67,40 +96,6 @@ public static class Command
         catch (Exception e)
         {
             Log.Error($"Failed to run executeCommand ({cmd})", e);
-        }
-    }
-
-    private static string? LoadForCurrentOs()
-    {
-        var key = OperatingSystem.IsWindows() ? "windows" : "macos";
-        try
-        {
-            var path = AppData.RulesPath();
-            if (!File.Exists(path))
-            {
-                Log.Warn($"executeCommand: rules.json not found at {path}; nothing to run");
-                return null;
-            }
-
-            using var doc = JsonDocument.Parse(File.ReadAllText(path),
-                new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true });
-
-            if (!doc.RootElement.TryGetProperty("executeCommand", out var cmd))
-            {
-                Log.Warn($"executeCommand: no \"executeCommand\" section in {path}; nothing to run");
-                return null;
-            }
-            if (!cmd.TryGetProperty(key, out var v) || string.IsNullOrWhiteSpace(v.GetString()))
-            {
-                Log.Warn($"executeCommand: no \"{key}\" entry under executeCommand; nothing to run");
-                return null;
-            }
-            return v.GetString();
-        }
-        catch (Exception e)
-        {
-            Log.Error("executeCommand: failed to read rules.json", e);
-            return null;
         }
     }
 }
