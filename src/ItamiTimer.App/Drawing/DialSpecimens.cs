@@ -1,4 +1,6 @@
 using Avalonia;
+using Avalonia.Controls;
+using Avalonia.Layout;
 using Avalonia.Media.Imaging;
 using ItamiTimer.Core;
 
@@ -74,7 +76,31 @@ internal static class DialSpecimens
             [], remaining: 0, restFrom: t1010.AddMinutes(25), restMinutes: 5,
             palette: DialPalette.Dark);
 
+        RenderDominoProgression(outDir);
+
         Console.WriteLine($"Dial specimens written to {outDir}");
+    }
+
+    /// <summary>
+    /// 骨牌一周七天叠在一张图上（Fallen 1~7），核对 §16.1 亮面递减：
+    /// 表盘的 `--dial-specimens` 从不覆盖 <see cref="DominoRow"/>，几何错误只能靠这个看出来。
+    /// </summary>
+    private static void RenderDominoProgression(string dir)
+    {
+        const int w = Size, rowH = 90;
+        var panel = new StackPanel { Orientation = Orientation.Vertical, Width = w, Background = Avalonia.Media.Brushes.White };
+        for (var fallen = 0; fallen <= DominoRow.Count; fallen++)
+            panel.Children.Add(new DominoRow { Fallen = fallen, Palette = DialPalette.Light, Width = w, Height = rowH });
+
+        var totalH = rowH * (DominoRow.Count + 1);
+        panel.Measure(new Size(w, totalH));
+        panel.Arrange(new Rect(0, 0, w, totalH));
+
+        using var bmp = new RenderTargetBitmap(new PixelSize(w, totalH), new Vector(96, 96));
+        bmp.Render(panel);
+#pragma warning disable CS0618
+        bmp.Save(Path.Combine(dir, "11-domino-week-progression.png"));
+#pragma warning restore CS0618
     }
 
     private static MinuteCell Cell(int i, DateTimeOffset t0, double counted, double off,

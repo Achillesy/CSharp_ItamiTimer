@@ -79,19 +79,30 @@ public class DominoRow : Control
     private const double H = 6, T = 1, Pitch = 4;
 
     /// <summary>
-    /// 露出的侧面宽度，**直接用像素定死**（用户 2026-07-27）：屏幕上从左数
-    /// 6、5、4、3、2、1 像素，第七块和所有倒下的都没有。
+    /// 露出的侧面宽度，**直接用像素定死**（用户 2026-07-27）：从左数第几块站着的骨牌
+    /// 决定基础宽度 6、5、4、3、2、1，第七档和所有倒下的都没有。
     ///
     /// 刻意不跟缩放走。这个面本来就只是一道暗示厚度的窄边，按比例算的话在小窗口上
     /// 会细到看不见、在大窗口上又会宽得像另一块骨牌；给绝对像素反而稳定。
     /// （Avalonia 画的是 DIP，所以高 DPI 下它仍会跟着系统缩放，不会变成发丝。）
     /// </summary>
-    private static readonly double[] SidePx = [6, 5, 4, 3, 2, 1];
+    private static readonly double[] SidePx = [6, 5, 4, 3, 2, 1.5];
 
-    private static double SideWidthPx(int i)
+    /// <summary>
+    /// 亮面宽度还要随 <paramref name="fallen"/> 递减（原 ISSUE #12 / DESIGN §16.1）：
+    /// 最左边那块骨牌是**同一块**（世界坐标恒为 <c>Count-1</c>），它会站到周日才倒，
+    /// 若只按屏幕位置查表，它整周都会是固定的 6px。
+    ///
+    /// 按「剩余站立数」移窗（<c>shift = fallen − 1</c>，钳到 0）：周一（fallen=1）
+    /// 用回原表 6…1；此后每多倒一块，可见的这一截就整体收窄一档；它自己站着的
+    /// 最后一天（周六，fallen=6）宽度正好收到 1px 而不是提前归零——**不出现「还没倒
+    /// 但已经没有侧面」的空窗期**，宽度用尽和它倒下是同一天。
+    /// </summary>
+    private static double SideWidthPx(int i, int fallen)
     {
-        var j = Count - 1 - i;        // 镜像之后，屏幕上从左数第几块（0 起）
-        return j < SidePx.Length ? SidePx[j] : 0;
+        var j = Count - 1 - i;                 // 镜像之后，屏幕上从左数第几块（0 起）
+        var index = j + Math.Max(0, fallen - 1);
+        return index < SidePx.Length ? SidePx[index] : 0;
     }
 
     /// <summary>
@@ -252,7 +263,7 @@ public class DominoRow : Control
                 // **不是上下等宽**：视平线就在骨牌顶端（所以看不到顶面），纵深方向的
                 // 线全都朝那里收，于是这个面越往上越窄、到顶几乎并成一条。远端的
                 // 底角同时要抬起来一点——它比近端离视平线更近。
-                var d = SideWidthPx(i);
+                var d = SideWidthPx(i, k.Fallen);
                 if (d > 0.4)
                 {
                     // 消失点在**画面之外**、大致在半高的位置，所以远端那条边
