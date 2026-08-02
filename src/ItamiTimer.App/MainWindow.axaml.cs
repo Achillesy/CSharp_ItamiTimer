@@ -344,11 +344,13 @@ public partial class MainWindow : Window
         _session.Settled += seconds => Bank(task.Group, seconds);
         foreach (var r in _goalRadios) r.IsEnabled = false;   // Start 后锁定选择
 
-        // 点下按钮的那一刻盘面就要有东西：整段灰弧立刻摆上去，不等第一次 AW 回来
+        // 点下按钮的那一刻盘面就要有东西：整段灰弧立刻摆上去，不等第一次 AW 回来。
+        // 休息扇形同理——它现在是投影值，构造 TaskSession 时就已经算好了（起点+专注时长）。
         var dial = F<DialControl>("Dial");
         dial.StartedAt = task.StartedAt;
         dial.Cells = _session.Cells;   // 承诺弧就是 buffer 里那段 Gray，构造时就有了（§4.5）
-        dial.RestFrom = null;
+        dial.RestFrom = _session.RestFrom;
+        dial.RestMinutes = task.RestMinutes;
         dial.InvalidateVisual();
 
         RefreshStartButton();

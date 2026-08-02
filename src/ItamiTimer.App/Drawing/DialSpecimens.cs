@@ -76,6 +76,20 @@ internal static class DialSpecimens
             [], remaining: 0, restFrom: t1010.AddMinutes(25), restMinutes: 5,
             palette: DialPalette.Dark);
 
+        // 休息扇形 2026-08-02 起不等达成才画：起点是承诺弧末端对应的墙钟时刻，
+        // 任务一开始就有预告，拖延时跟着灰弧一起往后退（§8.2 / TaskSession.RestFrom）。
+        // 两张对照：20 分钟过去，一个几乎全专注（灰弧只剩 2 分钟），一个几乎全偷懒
+        // （灰弧还有 18 分钟）——起点、也就是扇形，被推得老远。
+        var focused20 = new List<MinuteCell>();
+        for (var i = 0; i < 20; i++) focused20.Add(Cell(i, t1010, 60, 0));
+        Save(outDir, "12-rest-wedge-projected-nearly-on-time", t1010, focused20, remaining: 2,
+            restFrom: t1010.AddMinutes(22), restMinutes: 5);
+
+        var slacked20 = new List<MinuteCell>();
+        for (var i = 0; i < 20; i++) slacked20.Add(Cell(i, t1010, 5, 55));
+        Save(outDir, "13-rest-wedge-projected-pushed-back-by-slacking", t1010, slacked20, remaining: 18,
+            restFrom: t1010.AddMinutes(38), restMinutes: 5);
+
         RenderDominoProgression(outDir);
 
         Console.WriteLine($"Dial specimens written to {outDir}");

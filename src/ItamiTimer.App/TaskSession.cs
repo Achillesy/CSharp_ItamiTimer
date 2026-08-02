@@ -44,6 +44,11 @@ public sealed class TaskSession : IDisposable
     public TaskRecord Task { get; private set; }
     public IReadOnlyList<MinuteCell> Cells { get; private set; } = [];
 
+    /// <summary>
+    /// 休息扇形的起点。**专注达成之前是投影值**（= 承诺弧末端对应的墙钟时刻，
+    /// 每拍跟着缺口重算），**达成之后锁定为实际达成时刻**——两者在缺口归零那一拍
+    /// 是同一个数，交接不跳变。任务一构造完就有值，不用等第一拍 AW 回来。
+    /// </summary>
     public DateTimeOffset? RestFrom { get; private set; }
 
     public bool InRest => _focusDoneAt is not null;
@@ -97,6 +102,8 @@ public sealed class TaskSession : IDisposable
         // 点下按钮那一刻盘面就要有东西：整段灰弧在构造 buffer 时就已经铺好了（§4.5），
         // 投影一次即可，不用等第一次 AW 回来，也不用界面层另算一份。
         Cells = _buffer.ToMinuteCells();
+        // 休息扇形同一刻就有预告：此时缺口还是整段承诺，投影出来正好是 起点+专注时长。
+        RestFrom = _buffer.TaskStart.AddSeconds(_buffer.ElapsedSeconds + _deficitSeconds);
         _tick.Interval = TimeSpan.FromSeconds(1);
         _tick.Tick += OnTick;
         _tick.Start();
@@ -165,6 +172,17 @@ public sealed class TaskSession : IDisposable
                 Log.Warn($"No fresh afk events in the last {AwStaleSeconds}s — aw-watcher-afk may be stuck (or the machine just woke up)");
             var outcome = _buffer.Tick(minute, win, afk, _rules, Task.Group);
             _deficitSeconds = outcome.DeficitSeconds;
+
+            // 休息扇形不等达成才画：**它的起点就是承诺弧的末端**（DESIGN §4.5：
+            // 「承诺弧消失的那一刻 = 专注达成的那一刻」），任务一开始就有了，不用等
+            // 真达成。每拍重算、不记状态——跟判定引擎同一条原则（原则 4）。
+            //
+            // 这也是故意的痛感设计：拖延时缺口不减、ElapsedSeconds 照样 +60，
+            // 投影出来的休息起点跟着**一起往后挪**——不只是灰弧变长，连挣来的休息
+            // 也在实时后退。真正达成那一拍，这个投影值恰好等于 `minute` 本身，
+            // 跟下面 `_focusDoneAt` 落定后 `RestFrom = done` 是同一个数，交接不跳变。
+            RestFrom = _buffer.TaskStart.AddSeconds(_buffer.ElapsedSeconds + outcome.DeficitSeconds);
+
             if (outcome.SettledSeconds > 0)
             {
                 // 归档 = 一次 ignore（§11.2）：那一小时马上要被移出 buffer，当场入账。
