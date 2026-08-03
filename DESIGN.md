@@ -792,10 +792,13 @@ ItamiTimer"` 或不带 `--dmg` 的 `pack-macos.sh` 把东西发到项目目录�
 Microsoft.WindowsDesktop.App` 有没有 `10.*` 子目录，没有就提示用户、从
 `https://aka.ms/dotnet/10.0/windowsdesktop-runtime-win-x64.exe`（官方 evergreen 链接，
 实测能正确 302 到 builds.dotnet.microsoft.com）下载运行时安装器并帮忙装上（见
-`installer/ItamiTimer.iss` 的 `[Code]` 段）。整个安装包用 `PrivilegesRequired=admin`
-——运行时安装器本身需要提权，让外层安装包一起提权，省得嵌套再弹一次 UAC。构建这一步
-需要 Inno Setup 6 的 `ISCC.exe`（`winget install --id JRSoftware.InnoSetup -e`，纯开发机
-工具，不影响最终用户）。
+`installer/ItamiTimer.iss` 的 `[Code]` 段）。**ItamiTimer 本体走 `PrivilegesRequired=lowest`
+按用户级安装**（`{autopf}` 因此落在 `%LOCALAPPDATA%\Programs`，跟项目手动 publish 那条命令
+是同一个目录），全程不弹 UAC；只有真的要装 .NET 运行时那一步——它本身必须机器级、需要
+提权——单独用 `ShellExec('runas', ...)` 弹一次 UAC，跟主程序装哪不装哪脱钩（2026-08-03
+从 `PrivilegesRequired=admin` 改过来：那样整个安装都要提权，用户每次都得自己把开始菜单
+项从"所有用户"那堆里挪到自己账户下，体验更差）。构建这一步需要 Inno Setup 6 的
+`ISCC.exe`（`winget install --id JRSoftware.InnoSetup -e`，纯开发机工具，不影响最终用户）。
 - 安装包的发布目标（`dist/`）被正在运行的程序锁住时会重试 10 次然后失败——先关程序。
 - `%LOCALAPPDATA%\ItamiTimer\`（settings.json/rules.json/log）和机器级单实例 Mutex
   都不认安装位置——装好的版本、项目内的 Debug/Release 编译产物，读写的是同一份配置，

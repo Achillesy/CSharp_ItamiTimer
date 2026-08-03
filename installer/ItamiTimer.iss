@@ -7,10 +7,17 @@
 ; Unlike the macOS .dmg (which just tells the user in a Read Me to install the
 ; .NET Runtime themselves), this installer actively detects whether the .NET
 ; Desktop Runtime is present and offers to download + run the official installer
-; if it's missing -- see the [Code] section below. That's also why the whole
-; installer runs as PrivilegesRequired=admin: the runtime installer needs
-; elevation anyway, so letting the outer installer carry it avoids a second UAC
-; prompt for the nested one.
+; if it's missing -- see the [Code] section below.
+;
+; The app itself installs per-user (PrivilegesRequired=lowest, no UAC prompt at
+; all for the common case) -- {autopf} then resolves to the same
+; %LOCALAPPDATA%\Programs location the project's own manual dev-publish command
+; already uses. The .NET runtime installer, though, genuinely needs admin
+; rights, and Inno's plain Exec() (CreateProcess) can't elevate a nested
+; process on its own when the caller isn't already elevated. So that one step
+; alone is launched via ShellExec's 'runas' verb, which pops its own UAC
+; consent dialog just for that step -- everything else about installing
+; ItamiTimer stays fully per-user.
 
 #define MyAppName "ItamiTimer"
 #ifndef MyAppVersion
@@ -35,7 +42,7 @@ AppPublisherURL={#MyAppURL}
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
-PrivilegesRequired=admin
+PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir=..\dist
@@ -58,21 +65,21 @@ Source: "{#StageDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs c
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
-Name: "{commondesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Run]
-; Only runs when a download actually happened (skipifdoesntexist quietly no-ops otherwise).
-Filename: "{tmp}\windowsdesktop-runtime-win-x64.exe"; Parameters: "/install /passive /norestart"; \
-    StatusMsg: "Installing .NET Desktop Runtime..."; Flags: skipifdoesntexist waituntilterminated
 Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent
 
 [Code]
 var
   DownloadPage: TDownloadWizardPage;
+  RuntimeInstallerReady: Boolean;
 
 // net10.0 needs Microsoft.WindowsDesktop.App 10.x: scan
 // C:\Program Files\dotnet\shared\Microsoft.WindowsDesktop.App for a subfolder
 // starting with "10.". 64-bit install path only -- this project only ships win-x64.
+// The runtime itself is always machine-wide regardless of whether ItamiTimer is
+// installed per-user or per-machine, so this check doesn't change either way.
 function IsDotNetDesktopRuntimeInstalled(const MajorVersion: string): Boolean;
 var
   FindRec: TFindRec;
@@ -101,6 +108,7 @@ end;
 procedure InitializeWizard;
 begin
   DownloadPage := CreateDownloadPage(SetupMessage(msgWizardPreparing), SetupMessage(msgPreparingDesc), nil);
+  RuntimeInstallerReady := False;
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
@@ -114,7 +122,8 @@ begin
 
   if SuppressibleMsgBox(
        'ItamiTimer needs the .NET {#DotNetMajor} Desktop Runtime, which was not found on this computer.' + #13#10 + #13#10 +
-       'Setup can download it now (about 60 MB) from Microsoft and launch its installer right after ItamiTimer is installed.' + #13#10 + #13#10 +
+       'Setup can download it now (about 60 MB) from Microsoft and launch its installer right after ItamiTimer is installed. ' +
+       'That step needs administrator approval (the runtime itself installs machine-wide); ItamiTimer itself does not.' + #13#10 + #13#10 +
        'Continue?',
        mbConfirmation, MB_YESNO, IDYES) <> IDYES then
     Exit;
@@ -125,6 +134,7 @@ begin
   try
     try
       DownloadPage.Download;
+      RuntimeInstallerReady := True;
     except
       if DownloadPage.AbortedByUser then
         Log('User aborted .NET runtime download')
@@ -141,4 +151,24 @@ begin
   finally
     DownloadPage.Hide;
   end;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  ResultCode: Integer;
+begin
+  if (CurStep <> ssPostInstall) or not RuntimeInstallerReady then
+    Exit;
+
+  // ItamiTimer's own install stays per-user (no elevation). The runtime installer
+  // genuinely needs admin, and a plain Exec() can't elevate a nested process when
+  // the caller isn't already elevated -- ShellExec's 'runas' verb pops its own UAC
+  // prompt just for this one step.
+  if not ShellExec('runas', ExpandConstant('{tmp}\windowsdesktop-runtime-win-x64.exe'),
+       '/install /passive /norestart', '', SW_SHOWNORMAL, ewWaitUntilTerminated, ResultCode) then
+    SuppressibleMsgBox(
+      'Could not launch the .NET Desktop Runtime installer (administrator approval was likely declined).' + #13#10 + #13#10 +
+      'ItamiTimer is installed. If it fails to start, install the .NET ' + '{#DotNetMajor}' +
+      ' Desktop Runtime (x64) manually from https://dotnet.microsoft.com/download and try again.',
+      mbInformation, MB_OK, IDOK);
 end;
