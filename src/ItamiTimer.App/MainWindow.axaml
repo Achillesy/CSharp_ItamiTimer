@@ -131,12 +131,8 @@
       <!-- There used to be an AlarmBtn here (removed 2026-07-30, see the note outside this
            XAML): the alarm's press interaction moved directly onto the clock face itself
            (DialControl), no longer occupying its own icon. -->
-      <!-- No ToolTip.Tip here (unlike the other chrome buttons): a modal SettingsWindow opens
-           on click, and being a separate top-level window it never gives this button the
-           PointerExited that would close an open tooltip, so the popup gets stuck showing on
-           top of (and after closing) the dialog. Explicitly closing it in OnSettings didn't
-           reliably fix it either (user, 2026-08-03); the gear icon is self-explanatory
-           enough that dropping the tooltip entirely is the simpler fix. -->
+      <!-- No ToolTip.Tip here, unlike the other two chrome buttons — the modal it opens
+           leaves the tooltip stuck on screen (DECISIONS E10). Don't add one back. -->
       <Button x:Name="SettingsBtn" Classes="chrome"
               HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-6,30,0"/>
     </Grid>

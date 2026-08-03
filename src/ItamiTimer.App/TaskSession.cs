@@ -82,6 +82,19 @@ public sealed class TaskSession : IDisposable
     public event Action<int>? Settled;
 
     /// <summary>
+    /// The "not yet credited" portion of focus seconds, **read without consuming it**
+    /// (§11.2). The goal list adds this on top of what's on disk once a minute, so the total
+    /// moves while a task runs instead of jumping only at the end.
+    ///
+    /// <b>The sum <c>during[goal] + UnbankedSeconds</c> is invariant across the moment
+    /// crediting happens</b>, which is what makes it safe to display: archiving adds exactly
+    /// what leaves the buffer (§4.4's `[180, 3780)`, and <c>FocusedSeconds</c> excludes the
+    /// padding, so it isn't counted twice), and <see cref="TakeUnbankedSeconds"/> moves the
+    /// rest across while zeroing this. The number on screen never jumps at the handoff.
+    /// </summary>
+    public int UnbankedSeconds => _banked ? 0 : _buffer.FocusedSeconds;
+
+    /// <summary>
     /// Takes the "not yet credited" portion of focus seconds (= still sitting in the
     /// buffer) and voids it; called once when a task ends.
     ///
@@ -89,12 +102,18 @@ public sealed class TaskSession : IDisposable
     /// rest ending -- land here, and <b>double-crediting is harder to spot than a missed
     /// credit</b>, so it's guarded here rather than trusting every caller to be careful on
     /// their own.
+    ///
+    /// ⚠️ **Display code must never call this** -- it's a take, not a read. Setting
+    /// <c>_banked</c> from a repaint would silently void the whole round's time at the end
+    /// of the task, with nothing to see until the number fails to grow. Read
+    /// <see cref="UnbankedSeconds"/> instead; it's the same quantity, expressed once so the
+    /// two can't drift.
     /// </summary>
     public int TakeUnbankedSeconds()
     {
-        if (_banked) return 0;
+        var seconds = UnbankedSeconds;
         _banked = true;
-        return _buffer.FocusedSeconds;
+        return seconds;
     }
 
     private bool _banked;

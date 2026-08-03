@@ -63,6 +63,30 @@ public partial class MainWindow : Window
     // adjustment window).
     private DateTime _alarmQuietUntil = DateTime.MinValue;
 
+    // How many times the alarm rings when it fires (user, 2026-08-03). A single system
+    // sound is one or two seconds long — short enough to lose to a passing thought, and
+    // the alarm is the one sound with no second chance: the three notification sounds are
+    // tied to a state that's still on screen afterward, while the alarm leaves nothing
+    // behind (the yellow hand doesn't move, nothing pops up — §8.1a: the program never
+    // interrupts).
+    //
+    // ⚠️ This is **not** DECISIONS E5's "daily repeating alarm": still one firing, still
+    // one-shot, MarkFired above still runs before the first ring. Only the ringing itself
+    // got longer.
+    private const int AlarmRings = 4;
+
+    // The three notification sounds ring twice (user, 2026-08-03) — the same reasoning as
+    // above, weaker: each of them lands on something that stays on screen afterward (a
+    // finished dial, a blue wedge, cells that stopped growing), so a missed beep can still
+    // be recovered by looking. Two is enough to say "that was for you", four would turn
+    // every completed pomodoro into an event.
+    //
+    // Fewer than the alarm on purpose, and the gap is what enforces it: these fire off the
+    // whole-minute tick, and Idle can fire on two consecutive minutes — so a sequence has
+    // to comfortably finish inside a minute even with the longest system sound picked
+    // (Ring05 is 12.8s: twice is 26s, four times would overrun into the next nudge).
+    private const int NotifyRings = 2;
+
     public MainWindow()
     {
         Log.Info($"Started. Log: {Log.Path_}");
@@ -81,7 +105,16 @@ public partial class MainWindow : Window
         dial.PointerWheelChanged += OnAlarmWheel;
         _alarm.Restore(_settings.AlarmFireAt, DateTime.Now);
         dial.AlarmMinutes = _alarm.Position;
-        F<Button>("MuteBtn").Click += (_, _) => { _settings.TickEnabled = !_settings.TickEnabled; ApplyChrome(); _settings.Save(); };
+        // Turning the tick off cuts off the one that's mid-play; turning it on doesn't touch
+        // anything (the next second boundary starts it). Deliberately **not** in ApplyChrome
+        // — see the note there.
+        F<Button>("MuteBtn").Click += (_, _) =>
+        {
+            _settings.TickEnabled = !_settings.TickEnabled;
+            if (!_settings.TickEnabled) Tick.Stop();
+            ApplyChrome();
+            _settings.Save();
+        };
         F<Button>("PinBtn").Click += (_, _) => { _settings.Pinned = !_settings.Pinned; ApplyChrome(); _settings.Save(); };
         ApplyChrome();
 
@@ -169,7 +202,7 @@ public partial class MainWindow : Window
             _alarm.MarkFired();   // One-shot — fires once and is done, not a daily repeating alarm.
                                   // Clearing it in memory is enough; SaveAlarmOnExit writes it back to null on exit.
             if (_settings.CommandEnabled) Command.Execute(_rules);
-            else Sound.Play(_settings.CommandSound);
+            else Sound.Repeat(_settings.CommandSound, AlarmRings);
         }
     }
 
@@ -209,7 +242,13 @@ public partial class MainWindow : Window
         pin.Content = ChromeIcons.Pin(_settings.Pinned);
         pin.Classes.Set("on", _settings.Pinned);
 
-        if (!_settings.TickEnabled) Tick.Stop();
+        // ⚠️ Cutting off the tick that's already playing does **not** belong here (moved out
+        // 2026-08-03, DECISIONS E13). ApplyChrome runs on four paths — construction, the
+        // speaker, **the pin**, and closing Settings — and on Windows `Tick.Stop()` is
+        // `PlaySound(null)`, which stops whatever this process has on winmm's single
+        // channel, no matter who started it. Sitting here, it meant clicking the pin
+        // silenced the alarm ring that happened to be playing. Stopping the tick is the
+        // speaker's business, so it lives in the speaker's handler.
         WindowPin.Set(this, _settings.Pinned);
     }
 
@@ -306,7 +345,20 @@ public partial class MainWindow : Window
         for (var i = 0; i < _goalRadios.Count && i < _duringLabels.Count; i++)
         {
             var name = (string)_goalRadios[i].Content!;
-            _duringLabels[i].Text = (_during[name] / 3600.0).ToString("F2");
+
+            // What's on disk, plus this round's not-yet-credited seconds (§11.2). A pure
+            // display sum — nothing is written, and the credit still happens only when
+            // archiving or the task ends. The sum doesn't move at that handoff, so the
+            // number doesn't jump when this term crosses over into during.json.
+            //
+            // It **can go backwards**: every tick repaints the last 4 minutes (§4.2),
+            // because ActivityWatch backfills its afk verdict 180 seconds late. Walk away
+            // and a minute already counted gets revoked. Accepted, knowingly (DECISIONS
+            // D9) — the dial's cells and deadline arc already retreat the same way, and
+            // holding a "highest seen this round" to keep it monotonic would be a piece of
+            // UI state that lies (Principle 4: state is derived, not accumulated).
+            var live = _session is { } s && s.Task.Group == name ? s.UnbankedSeconds : 0;
+            _duringLabels[i].Text = ((_during[name] + live) / 3600.0).ToString("F2");
         }
     }
 
@@ -405,6 +457,10 @@ public partial class MainWindow : Window
         var elapsed = Math.Max(1, (DateTimeOffset.Now - s.Task.StartedAt).TotalSeconds);
         Icon = RingIcon.Make(progress, Math.Clamp(1 - focused / elapsed, 0, 1));
 
+        // The goal list's running total follows the same tick — no timer of its own, because
+        // the number it shows only ever changes on the whole-minute tick anyway (during rest
+        // this fires once a second, but nothing behind it moves, so it's a no-op repaint).
+        RefreshGoalItems();
     }
 
     /// <summary>
@@ -430,17 +486,17 @@ public partial class MainWindow : Window
         switch (why)
         {
             case TaskSession.Interrupt.FocusDone:
-                if (_settings.FocusDoneEnabled) Sound.Play(_settings.FocusDoneSound);
+                if (_settings.FocusDoneEnabled) Sound.Repeat(_settings.FocusDoneSound, NotifyRings);
                 RefreshStartButton();
                 break;
 
             case TaskSession.Interrupt.RestDone:
-                if (_settings.RestDoneEnabled) Sound.Play(_settings.RestDoneSound);
+                if (_settings.RestDoneEnabled) Sound.Repeat(_settings.RestDoneSound, NotifyRings);
                 EndSession();
                 break;
 
             case TaskSession.Interrupt.Idle:
-                if (_settings.IdleEnabled) Sound.Play(_settings.IdleSound);
+                if (_settings.IdleEnabled) Sound.Repeat(_settings.IdleSound, NotifyRings);
                 break;
         }
     }
