@@ -439,6 +439,9 @@ public partial class MainWindow : Window
         // un-pins now, it no longer minimizes (see the watchdog in OnFrame).
     }
 
+    /// <summary>Whole minute the taskbar icon was last redrawn for — see the throttle in <see cref="OnSessionUpdated"/>.</summary>
+    private DateTimeOffset? _lastIconMinute;
+
     private void OnSessionUpdated()
     {
         if (_session is not { } s) return;
@@ -451,11 +454,19 @@ public partial class MainWindow : Window
         dial.InvalidateVisual();
 
         // §8.3.2: the taskbar icon is an **aggregate projection** — angle = completion
-        // ratio, colour = overall purity.
-        var focused = s.FocusedSeconds();
-        var progress = Math.Clamp(focused / (s.Task.FocusMinutes * 60.0), 0, 1);
-        var elapsed = Math.Max(1, (DateTimeOffset.Now - s.Task.StartedAt).TotalSeconds);
-        Icon = RingIcon.Make(progress, Math.Clamp(1 - focused / elapsed, 0, 1));
+        // ratio, colour = overall purity. Only worth redrawing once a whole minute has
+        // passed: during rest this method is called once a second, but the projection
+        // barely moves tick to tick, so repainting that often was pure churn (user,
+        // 2026-08-04) — same cadence as the dial's own per-minute judgment tick.
+        var minute = TimeGrid.FloorToMinute(DateTimeOffset.Now);
+        if (minute != _lastIconMinute)
+        {
+            _lastIconMinute = minute;
+            var focused = s.FocusedSeconds();
+            var progress = Math.Clamp(focused / (s.Task.FocusMinutes * 60.0), 0, 1);
+            var elapsed = Math.Max(1, (DateTimeOffset.Now - s.Task.StartedAt).TotalSeconds);
+            Icon = RingIcon.Make(progress, Math.Clamp(1 - focused / elapsed, 0, 1));
+        }
 
         // The goal list's running total follows the same tick — no timer of its own, because
         // the number it shows only ever changes on the whole-minute tick anyway (during rest
@@ -542,6 +553,7 @@ public partial class MainWindow : Window
         dial.InvalidateVisual();
 
         Icon = RingIcon.Make(0, 0);
+        _lastIconMinute = null;
         RefreshGoalItems();
         RefreshStartButton();
     }

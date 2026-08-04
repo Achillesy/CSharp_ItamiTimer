@@ -26,9 +26,19 @@ public static class RingIcon
     public static WindowIcon Make(double progress, double impurity, int size = 64)
         => ToIcon(Render(progress, impurity, size));
 
-    /// <summary>WindowIcon and the UI preview share the same bitmap, not drawn twice.</summary>
+    /// <summary>
+    /// WindowIcon and the UI preview share the same bitmap, not drawn twice.
+    ///
+    /// Disposes <paramref name="bmp"/> before returning: RenderTargetBitmap wraps a native
+    /// Skia surface with no finalizer anywhere in the chain (checked against the installed
+    /// Avalonia 12.1.0 assemblies), so an undisposed one is never reclaimed. Make() is
+    /// called once a second through every rest period -- without this, a long-running day
+    /// silently piles up native surfaces until the taskbar ring stops updating, with no
+    /// exception and no log line to point at it.
+    /// </summary>
     public static WindowIcon ToIcon(RenderTargetBitmap bmp)
     {
+        using var _ = bmp;
         var ms = new MemoryStream();
         bmp.Save(ms, new PngBitmapEncoderOptions());
         ms.Position = 0;
