@@ -22,6 +22,7 @@ try
     {
         "start" => await StartAsync(),
         "replay" => await ReplayPastAsync(),
+        "backfill" => await BackfillAsync(),
         "bench" => Bench(),
         _ => Help(),
     };
@@ -207,15 +208,72 @@ async Task<int> ReplayPastAsync()
     return 0;
 }
 
+/// <summary>
+/// 干跑累计时长的回填（DESIGN §11.2）：数出一段历史里属于某个小目标的专注秒数。
+///
+/// **不写 during.json**——CLI 从来不碰那个文件，这里也一样。它是用来回答两个问题的：
+/// 「我这条规则在真实历史上到底能捞到多少」，以及「界面上那个数字凭什么是这个数」。
+///
+/// 省略 `--since` 就是模拟**首次启动**：从 window bucket 的 `created` 一路数到现在，
+/// 跟界面上第一次点 Start 走的是同一条路径。
+/// </summary>
+async Task<int> BackfillAsync()
+{
+    var group = opt.GetValueOrDefault("group")
+                ?? throw new ArgumentException("A goal is required: --group <name from rules.json>");
+    var until = opt.TryGetValue("until", out var u)
+        ? DateTimeOffset.Parse(u)
+        : TimeGrid.FloorToMinute(DateTimeOffset.Now);
+
+    var rules = LoadRules();
+    if (!rules.SelectableGroups.Contains(group))
+        throw new ArgumentException($"No enabled goal \"{group}\" in rules.json. Available: {string.Join(", ", rules.SelectableGroups)}");
+
+    using var aw = new AwClient(timeoutSeconds: Backfill.ClientTimeoutSeconds);
+
+    DateTimeOffset? since = opt.TryGetValue("since", out var s) ? DateTimeOffset.Parse(s) : null;
+    if (since is null)
+    {
+        since = await aw.FindBucketCreatedAsync(AwClient.WindowBucketType);
+        Console.WriteLine(since is null
+            ? "No --since given and the window bucket has no creation time; falling back to one year."
+            : $"No --since given: walking the whole history, from the window bucket's creation ({since:yyyy-MM-dd HH:mm}).");
+        since ??= until.AddYears(-1);
+    }
+
+    Console.WriteLine($"\nBackfill dry run: {Renderer.Clock(since.Value, "yyyy-MM-dd HH:mm")} → " +
+                      $"{Renderer.Clock(until, "yyyy-MM-dd HH:mm")}   goal: {group}");
+    Console.WriteLine($"Span: {(until - since.Value).TotalDays:F1} days. Nothing is written to disk.\n");
+
+    var sw = System.Diagnostics.Stopwatch.StartNew();
+    var lastPrinted = -1L;
+    var seconds = await Backfill.CountAsync(
+        aw, since.Value, until, rules, group,
+        (through, running) =>
+        {
+            if (running == lastPrinted) return;   // 空片不刷屏——按天切，一年就是 365 片
+            lastPrinted = running;
+            Console.WriteLine($"  through {Renderer.Clock(through, "yyyy-MM-dd HH:mm")}   {running / 3600.0,8:F2} h");
+        });
+
+    Console.WriteLine($"\n{group}: {seconds} s = {seconds / 3600.0:F2} hours   ({sw.Elapsed.TotalSeconds:F1}s)\n");
+    return 0;
+}
+
 int Help()
 {
     Console.WriteLine("""
 
         ItamiTimer (一袋米要扛几楼) — command-line layer
 
-          itami start  --minutes 25 --group <goal>
-          itami replay --since "2026-07-26 20:00" [--until ...] --minutes 25 --group <goal>
-          itami bench  --minutes 25 [--pattern focused|mixed|slack]
+          itami start    --minutes 25 --group <goal>
+          itami replay   --since "2026-07-26 20:00" [--until ...] --minutes 25 --group <goal>
+          itami backfill --group <goal> [--since ...] [--until ...]
+          itami bench    --minutes 25 [--pattern focused|mixed|slack]
+
+        backfill dry-runs the accumulated-time count over real history (fail-closed: only
+        what ActivityWatch can actually prove). Omit --since to walk the whole history,
+        which is what the GUI does the first time you start that goal. It writes nothing.
 
         A task lives only in this process and is never written to disk: quitting itami
         abandons the current task.
@@ -285,7 +343,7 @@ int Bench()
     // 3. Final results
     Console.WriteLine($"\n══════════════════════════════════════════════");
     Console.WriteLine($"  Done. Ticks: {tick}  Elapsed: {elapsed}s ({elapsed / 60}min)");
-    Console.WriteLine($"  Settled into during: {settled}s ({settled / 3600.0:F2} hours)");
+    Console.WriteLine($"  Archived out of the buffer: {settled}s ({settled / 3600.0:F2} hours)");
     Console.WriteLine($"  Focus complete: {buf.IsFocusComplete}");
     Console.WriteLine($"══════════════════════════════════════════════\n");
 

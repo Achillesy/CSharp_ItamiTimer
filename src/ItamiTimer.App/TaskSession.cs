@@ -64,59 +64,20 @@ public sealed class TaskSession : IDisposable
     public bool Finished { get; private set; }
 
     /// <summary>
-    /// Focus seconds so far this round = already settled by archiving + still sitting in
-    /// the buffer.
+    /// 本轮到目前为止的专注秒数 = 归档已结算的 + 还在 buffer 里的。
     ///
-    /// **An integer** -- it counts cells in the buffer, not ActivityWatch event durations,
-    /// so it never has a fractional part (user, 2026-08-02). Every division by 60 must
-    /// therefore write <c>60.0</c>, otherwise integer division silently swallows the
-    /// decimal places (DECISIONS G).
+    /// **整数** —— 数的是 buffer 里的格子数，不是 AW 事件的 `duration`，所以永远没有小数
+    /// 部分（用户 2026-08-02）。每一处 `/ 60` 都得写成 `60.0`，否则整数除法会把小数位悄悄
+    /// 吃掉（DECISIONS G）。
+    ///
+    /// ⚠️ **这个数不落盘，纯粹是本轮的实时显示项**（§11.2 / DECISIONS I2）。它带着 H2 的
+    /// fail-open 水分（`AwOffline` 计入专注），而账本只认下次启动时 fail-closed 重数出来的
+    /// 结果。1.0.x 那套 `Settled` 事件 / `UnbankedSeconds` / `TakeUnbankedSeconds` /
+    /// `_banked` 幂等标志已经整套删掉了——它们防的是「这一秒现在不记就永远没了」，
+    /// 而 AW 是地面真相，那个前提不成立了。
     /// </summary>
     public int FocusedSeconds() => _settledSeconds + _buffer.FocusedSeconds;
 
-    /// <summary>
-    /// Archiving settled a stretch of focus time (§4.4). The caller must credit it into
-    /// during immediately (§11.2) -- that hour is about to be evicted from the buffer, and
-    /// not recording it now means it's gone for good.
-    /// </summary>
-    public event Action<int>? Settled;
-
-    /// <summary>
-    /// The "not yet credited" portion of focus seconds, **read without consuming it**
-    /// (§11.2). The goal list adds this on top of what's on disk once a minute, so the total
-    /// moves while a task runs instead of jumping only at the end.
-    ///
-    /// <b>The sum <c>during[goal] + UnbankedSeconds</c> is invariant across the moment
-    /// crediting happens</b>, which is what makes it safe to display: archiving adds exactly
-    /// what leaves the buffer (§4.4's `[180, 3780)`, and <c>FocusedSeconds</c> excludes the
-    /// padding, so it isn't counted twice), and <see cref="TakeUnbankedSeconds"/> moves the
-    /// rest across while zeroing this. The number on screen never jumps at the handoff.
-    /// </summary>
-    public int UnbankedSeconds => _banked ? 0 : _buffer.FocusedSeconds;
-
-    /// <summary>
-    /// Takes the "not yet credited" portion of focus seconds (= still sitting in the
-    /// buffer) and voids it; called once when a task ends.
-    ///
-    /// Idempotent: repeated calls return 0. All three paths -- abandon, close the window,
-    /// rest ending -- land here, and <b>double-crediting is harder to spot than a missed
-    /// credit</b>, so it's guarded here rather than trusting every caller to be careful on
-    /// their own.
-    ///
-    /// ⚠️ **Display code must never call this** -- it's a take, not a read. Setting
-    /// <c>_banked</c> from a repaint would silently void the whole round's time at the end
-    /// of the task, with nothing to see until the number fails to grow. Read
-    /// <see cref="UnbankedSeconds"/> instead; it's the same quantity, expressed once so the
-    /// two can't drift.
-    /// </summary>
-    public int TakeUnbankedSeconds()
-    {
-        var seconds = UnbankedSeconds;
-        _banked = true;
-        return seconds;
-    }
-
-    private bool _banked;
     private int _settledSeconds;
     private int _deficitSeconds;
 
@@ -250,10 +211,11 @@ public sealed class TaskSession : IDisposable
 
             if (outcome.SettledSeconds > 0)
             {
-                // Archiving = one ignore event (§11.2): that hour is about to be evicted from the buffer, credit it on the spot.
+                // 归档把一小时移出了 buffer（§4.4）。**这里不再入账**（§11.2 重写）：
+                // 这一小时会和本轮其余时间一起，在下次任务启动时由回填 fail-closed 地重新
+                // 数一遍。这里只是把它记进本轮的实时显示项，免得表盘和图标在归档瞬间跳水。
                 _settledSeconds += outcome.SettledSeconds;
-                Settled?.Invoke(outcome.SettledSeconds);
-                Log.Info($"Archived an hour; {outcome.SettledSeconds}s banked into during.");
+                Log.Info($"Archived an hour; {outcome.SettledSeconds}s carried into this round's running total.");
             }
 
             var cells = _buffer.ToMinuteCells();

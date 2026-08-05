@@ -48,7 +48,7 @@ public partial class MainWindow : Window
     private readonly List<TextBlock> _duringLabels = [];
     private readonly Settings _settings = Settings.Load();
 
-    /// <summary>Accumulated focus time per goal (§11.2). Read in at startup; saved to disk immediately on every credit.</summary>
+    /// <summary>每个小目标的累计专注时间 + 算到了哪一刻（§11.2）。启动读入，<b>只在任务启动那一刻被回填改写一次</b>。</summary>
     private readonly During _during = During.Load();
 
     private TaskSession? _session;
@@ -346,18 +346,17 @@ public partial class MainWindow : Window
         {
             var name = (string)_goalRadios[i].Content!;
 
-            // What's on disk, plus this round's not-yet-credited seconds (§11.2). A pure
-            // display sum — nothing is written, and the credit still happens only when
-            // archiving or the task ends. The sum doesn't move at that handoff, so the
-            // number doesn't jump when this term crosses over into during.json.
+            // 已落盘的 checkpoint + 本轮实时（§11.2）。**纯显示求和，一个字都不写**：
+            // during.json 只在任务启动那一刻被回填改写一次。
             //
-            // It **can go backwards**: every tick repaints the last 4 minutes (§4.2),
-            // because ActivityWatch backfills its afk verdict 180 seconds late. Walk away
-            // and a minute already counted gets revoked. Accepted, knowingly (DECISIONS
-            // D9) — the dial's cells and deadline arc already retreat the same way, and
-            // holding a "highest seen this round" to keep it monotonic would be a piece of
-            // UI state that lies (Principle 4: state is derived, not accumulated).
-            var live = _session is { } s && s.Task.Group == name ? s.UnbankedSeconds : 0;
+            // 本轮那一项带着 H2 的 fail-open 水分（AwOffline 计入专注），而下次启动的回填
+            // 是 fail-closed 的，所以**同一段时间在下次启动后可能变小**（DECISIONS I2）。
+            // 另外它本来就**会往回退**：每拍重画最近 4 分钟（§4.2），因为 AW 的 afk 判定
+            // 要 180 秒才追认——走开一会儿，已经数过的一分钟会被撤销。两种回退都是知情
+            // 接受的（DECISIONS D9）：表盘的格子和承诺弧本来就这么退，为了单调而记一个
+            // 「本轮见过的最高值」是一个会撒谎的 UI 状态（原则 4：状态是推导出来的，不是
+            // 累积出来的）。
+            var live = _session is { } s && s.Task.Group == name ? s.FocusedSeconds() : 0;
             _duringLabels[i].Text = ((_during[name] + live) / 3600.0).ToString("F2");
         }
     }
@@ -417,10 +416,11 @@ public partial class MainWindow : Window
         _session = new TaskSession(task, _rules!, _settings.AwBaseUrl);
         _session.Updated += OnSessionUpdated;
         _session.Interrupted += OnInterrupted;
-        // Archiving = one ignore event (§11.2): that hour is about to be evicted from the
-        // buffer, so credit it immediately
-        _session.Settled += seconds => Bank(task.Group, seconds);
         foreach (var r in _goalRadios) r.IsEnabled = false;   // Lock the selection once Start is pressed
+
+        // 启动这一刻是 during.json 唯一的写入点（§11.2）：补齐上次统计到现在这一段，推进
+        // checkpoint。故意不 await —— 界面不等它，先显示旧值。
+        _ = BackfillAsync(picked, task.StartedAt);
 
         // The dial must show something the instant the button is pressed: the whole grey
         // arc goes up immediately, without waiting for the first ActivityWatch response.
@@ -513,28 +513,84 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Credits a stretch of focus time to a goal (§11.2). <b>Every second is credited
-    /// exactly once</b>: the hour that gets archived is credited on the spot in
-    /// <see cref="TaskSession.Settled"/>, and whatever's left is taken idempotently by
-    /// <see cref="TaskSession.TakeUnbankedSeconds"/>.
+    /// 从 AW 的历史里补齐 <c>[上次统计到的时刻, 本次任务开始)</c> 这一段，然后把 checkpoint
+    /// 推到本次开始时刻（§11.2 / DECISIONS I1）。<b>这是 during.json 唯一的写入点。</b>
+    ///
+    /// 这一段覆盖的正好是：<b>上一场任务全程（当时一秒都没落盘）+ 中间的空隙</b>。不会重复
+    /// 计费，因为上一场的秒数根本没进过账本。
+    ///
+    /// 三件事按这个顺序，缺一不可：
+    /// <list type="number">
+    ///   <item><b>不阻塞启动。</b>fire-and-forget，任务界面立刻就绪，界面上先显示旧值，
+    ///         每分钟的实时项照常累加。回填完成时数字会跳一次——首次可能跳很大，之后每次
+    ///         就是上一场任务那点量。用户 2026-08-06 明确接受。</item>
+    ///   <item><b>CPU 不落在 UI 线程上。</b><see cref="Backfill.CountAsync"/> 内部全程
+    ///         <c>ConfigureAwait(false)</c>，画格子在线程池上跑；这里的 <c>await</c> 捕获
+    ///         的是 UI 上下文，所以续体里碰 <c>_during</c> 和刷界面都是安全的。</item>
+    ///   <item><b>失败就不推进 checkpoint。</b>下次启动自然重试同一个窗口——推进 checkpoint
+    ///         这个动作本身就是成功的唯一证明，不需要任何重试或恢复逻辑。</item>
+    /// </list>
     /// </summary>
-    private void Bank(string? goal, long seconds)
+    private async Task BackfillAsync(string goal, DateTimeOffset upTo)
     {
-        if (goal is null || seconds <= 0) return;
-        _during.Add(goal, seconds);
+        if (_rules is null) return;
+
+        try
+        {
+            using var aw = new AwClient(_settings.AwBaseUrl, Backfill.ClientTimeoutSeconds);
+
+            var from = _during.RecordedThrough(goal);
+            if (from is null)
+            {
+                // 首次：走完整段 AW 历史。起点不需要准确，只需要足够早——真正的裁剪是 AW
+                // 自己干的，`created` 只是给分块循环定个下界，免得从 1970 年开始空扫
+                // （DECISIONS I3）。
+                from = await aw.FindBucketCreatedAsync(AwClient.WindowBucketType);
+                Log.Info(from is null
+                    ? $"Backfill \"{goal}\": first run, no bucket creation time available; falling back to one year"
+                    : $"Backfill \"{goal}\": first run, walking history from {from:yyyy-MM-dd HH:mm}");
+                from ??= upTo.AddYears(-1);
+            }
+
+            if (from >= upTo)
+            {
+                _during.Advance(goal, 0, upTo);   // 同一分钟内连开两次：没有新地面，只对齐 checkpoint
+                return;
+            }
+
+            // 只在这一片真数到东西时才写日志：按天切片，走完整段历史是几百片，全记下来会
+            // 把 1MB 的滚动日志冲掉——而空片本来就没什么可看的。
+            var lastLogged = 0L;
+            var seconds = await Backfill.CountAsync(
+                aw, from.Value, upTo, _rules, goal,
+                (through, running) =>
+                {
+                    if (running == lastLogged) return;
+                    lastLogged = running;
+                    Log.Info($"Backfill \"{goal}\": through {through:yyyy-MM-dd HH:mm}, {running / 3600.0:F2}h so far");
+                });
+
+            _during.Advance(goal, seconds, upTo);
+            Log.Info($"Backfill \"{goal}\": +{seconds / 3600.0:F2}h over " +
+                     $"{(upTo - from.Value).TotalHours:F1}h of history; total {_during[goal] / 3600.0:F2}h");
+            RefreshGoalItems();
+        }
+        catch (AwUnavailableException ex)
+        {
+            // ⚠️ **这里绝不能 fail-open**。运行期连不上 AW 会把那一分钟判成 AwOffline 并计入
+            // 专注（H2），因为那时机器摆明开着、人摆明在。回填的处境正相反——程序当时没在
+            // 跑，AW 没数据最大的可能是机器关着。checkpoint 原地不动，下次启动重试。
+            Log.Warn($"Backfill \"{goal}\" skipped, ActivityWatch unreachable; checkpoint left where it was: {ex.Message}");
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"Backfill \"{goal}\" failed; checkpoint left where it was", ex);
+        }
     }
 
-    /// <summary>Task ended (completed / abandoned / window closed): credit whatever hasn't been credited yet.</summary>
-    private void BankRemainder()
-    {
-        if (_session is { } s) Bank(s.Task.Group, s.TakeUnbankedSeconds());
-    }
-
-    /// <summary>Task ended: back to the empty dial.</summary>
+    /// <summary>Task ended: back to the empty dial. <b>不写盘</b>——本轮的秒数会在下次任务启动时由回填重新数出来（§11.2）。</summary>
     private void EndSession()
     {
-        BankRemainder();
-
         var old = _session;
         _session = null;
         try { old?.Dispose(); } catch { /* couldn't close it, doesn't matter — state is already cleared */ }
@@ -566,19 +622,21 @@ public partial class MainWindow : Window
     /// §9: **closing the window mid-focus = abandoning the task**, so it has to ask once.
     /// The title-bar ×, the taskbar's right-click "Close window", and Alt+F4 all land here.
     ///
-    /// No task, or already resting (focus already achieved and already credited) →
-    /// **quit right away, no question asked**.
+    /// No task, or already resting (focus already achieved) → **quit right away, no
+    /// question asked**.
     ///
     /// Closing is a synchronous event, so it can't await a dialog inline — cancel the
     /// close first, ask asynchronously, then close for real.
+    ///
+    /// **这里不再记账**（§11.2 重写）。1.0.x 时三条终结路径都得记得调 `BankRemainder()`，
+    /// 漏一条就丢一段时间，崩溃更是直接丢——那套机制整个删掉了：本轮的秒数会在下次任务
+    /// 启动时由回填从 AW 重新数出来，跟程序是怎么退出的完全无关。
     /// </summary>
     private async void OnClosing(object? sender, WindowClosingEventArgs e)
     {
         if (_closeApproved) return;
 
-        // No question when closing during rest — focus was already achieved. But it
-        // still has to be **credited** (§11.2: quitting the program is also an ignore event).
-        if (_session is { Finished: false, InRest: true }) { BankRemainder(); return; }
+        if (_session is { Finished: false, InRest: true }) return;   // Resting: focus already achieved, nothing to ask
         if (_session is not { Finished: false }) return;
 
         e.Cancel = true;
@@ -586,7 +644,6 @@ public partial class MainWindow : Window
         if (await Confirm.AskAsync(this, "The task isn't finished. Quit anyway?"))
         {
             _session?.Abandon();
-            BankRemainder();     // Abandoned, but the time spent is still a fact
             _closeApproved = true;
             Close();
         }

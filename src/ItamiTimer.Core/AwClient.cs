@@ -44,7 +44,15 @@ public sealed class AwClient : IDisposable
     private readonly HttpClient _http;
     private readonly Dictionary<string, string> _bucketIds = [];
 
-    public AwClient(string baseUrl = "http://127.0.0.1:5600")
+    /// <summary>
+    /// 默认超时 10 秒——这是按**运行期那种 4 分钟窗口的小查询**定的：AW 卡住时宁可让这一拍
+    /// fail-open 过去，也不能把整分钟的节拍拖住。
+    ///
+    /// 回填是完全相反的场景，得用 <see cref="Backfill.ClientTimeoutSeconds"/>，见那边的注释。
+    /// </summary>
+    public const int DefaultTimeoutSeconds = 10;
+
+    public AwClient(string baseUrl = "http://127.0.0.1:5600", int timeoutSeconds = DefaultTimeoutSeconds)
     {
         // §6.1.2: must bypass the system proxy. A system-level SOCKS/HTTP proxy swallows
         // localhost traffic along with everything else, showing up as a mysterious
@@ -52,7 +60,7 @@ public sealed class AwClient : IDisposable
         _http = new HttpClient(new HttpClientHandler { UseProxy = false })
         {
             BaseAddress = new Uri(baseUrl),
-            Timeout = TimeSpan.FromSeconds(10),
+            Timeout = TimeSpan.FromSeconds(timeoutSeconds),
         };
     }
 
@@ -70,13 +78,6 @@ public sealed class AwClient : IDisposable
             throw new AwUnavailableException(
                 $"Cannot reach ActivityWatch at {_http.BaseAddress}. Make sure aw-server is running.", e);
         }
-    }
-
-    /// <summary>Probes whether it's reachable. Meant for use before submitting a task -- if it can't connect, refuse the submission rather than starting a task that could never be accounted for (§6.2).</summary>
-    public async Task<string> ProbeAsync()
-    {
-        var info = await GetAsync("/api/0/info");
-        return info.TryGetProperty("hostname", out var h) ? h.GetString() ?? "?" : "?";
     }
 
     /// <summary>Finds a bucket's id by its type field (something like aw-watcher-window_Codex-Win11), caching it once found.</summary>
@@ -100,6 +101,31 @@ public sealed class AwClient : IDisposable
         // exploit available. Never degrade to "always assume present".
         throw new AwUnavailableException(
             $"No bucket of type {bucketType} found. Both watchers (window and afk) must be running.");
+    }
+
+    /// <summary>
+    /// 这个 bucket 自己的建立时刻——它可能持有数据的最早边界。
+    ///
+    /// <b>只用来给首次回填的分块循环定个下界，查完就扔，绝不落盘</b>（DECISIONS I3）。
+    /// 把它写进 <c>during.json</c> 是错的：重装 AW、迁移 datastore 都会让这个值变，
+    /// 而且播种发生在程序启动路径上，那一刻 AW 可能根本连不上——于是「已播种但起点未知」
+    /// 这个状态无论如何都省不掉，materialize 它只是在旁边多加一条会变质的脆弱路径。
+    ///
+    /// 回填窗口的起点<b>不需要准确，只需要足够早</b>；真正的裁剪是 AW 自己干的。
+    ///
+    /// 返回 null = 这个 AW 版本没给 <c>created</c> 字段，调用方自己兜底。
+    /// </summary>
+    public async Task<DateTimeOffset?> FindBucketCreatedAsync(string bucketType)
+    {
+        var buckets = await GetAsync("/api/0/buckets/");
+        foreach (var b in buckets.EnumerateObject())
+        {
+            if (b.Value.TryGetProperty("type", out var t) && t.GetString() == bucketType
+                && b.Value.TryGetProperty("created", out var c)
+                && DateTimeOffset.TryParse(c.GetString(), out var created))
+                return created.ToLocalTime();   // 和 FetchEventsAsync 一样，在边界上归一到本地时区
+        }
+        return null;
     }
 
     /// <summary>

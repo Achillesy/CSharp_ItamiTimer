@@ -119,11 +119,33 @@ Runtime data:
 |---|---|---|
 | `rules.json` | **you**, by hand | your goals, and optionally `executeCommand` |
 | `settings.json` | the program | sound choices, switches, the alarm time |
-| `during.json` | the program | accumulated focus seconds per goal |
+| `during.json` | the program | accumulated focus seconds per goal, and how far that count has been carried |
 | `itami.log` | the program | 1 MB rolling; the UI is silent, so this is the only place to find out what happened |
 
-Task state is **never** written to disk. Closing the program abandons the current round —
-though the time you did earn is still added to `during.json`.
+Task state is **never** written to disk. Closing the program abandons the current round.
+
+### Where the accumulated hours come from
+
+The number beside each goal is **not** a tally the program keeps as it runs. It is
+re-derived from ActivityWatch's own history, and `during.json` only ever stores a
+checkpoint: how many seconds so far, and the moment that count reaches.
+
+Every time you start a task, the program replays `[last counted moment, this task's start)`
+against your rules for that goal, adds what it finds, and moves the checkpoint forward.
+That span covers your **previous** round plus **all the time in between** — so time you
+spent on the goal without a timer running still counts. During a round the displayed
+number follows along live, but nothing is written until the next start.
+
+Two consequences worth knowing:
+
+- **Nothing is ever lost to a crash.** ActivityWatch is the source of truth; the next
+  start re-derives whatever the checkpoint hasn't covered yet.
+- **The first time you start a given goal, it counts your whole history** — which can take
+  a moment, and makes the number jump once. After that each backfill is small.
+
+A goal you have never started shows `0.00`, even if you have spent hours in matching apps.
+The number means "time this program has accounted for", and it starts accounting when you
+first start that goal.
 
 ## Dry-running the engine
 
