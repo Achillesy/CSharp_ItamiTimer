@@ -48,6 +48,13 @@ public partial class SettingsWindow : Window
             () => settings.IdleEnabled, v => settings.IdleEnabled = v,
             () => settings.IdleSound, v => settings.IdleSound = v);
 
+        // Alarms 清单卡（DESIGN §17）：跟三声通知同一种"开关+音色"结构，不是 Command 卡
+        // 那种互斥关系——这个开关只管响不响，检查清单/弹通知这条主链路是强制的、不受
+        // 它控制，跟 Execute 完全独立。
+        WireSoundCard("AlarmsOn", "AlarmsSound", names,
+            () => settings.AlarmsListEnabled, v => settings.AlarmsListEnabled = v,
+            () => settings.AlarmsListSound, v => settings.AlarmsListSound = v);
+
         // The Command card: Execute on -> runs the command, sound picker greys out. Execute off -> rings, sound is selectable.
         {
             var toggle = this.FindControl<ToggleSwitch>("ExecuteOn")!;

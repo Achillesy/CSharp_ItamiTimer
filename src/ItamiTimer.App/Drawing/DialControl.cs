@@ -32,6 +32,14 @@ public class DialControl : Control
     private const double RAlarm = 0.62;    // Alarm's yellow hand: shorter than the minute hand, slightly longer than the hour hand
     private const double RHub = 0.035;
 
+    /// <summary>
+    /// Alarms 清单的小红圈（DESIGN §17）：靠近木框的空白区，介于刻度终点（0.955）和
+    /// 表盘边缘（1.0）之间——跟 OffTask 色环（0.50~0.68）、闹钟黄针（0.62）都不在同一层，
+    /// 不会被看成同一件事。
+    /// </summary>
+    private const double RAlarmsDot = 0.98;
+    private const double RAlarmsDotRadius = 0.018;
+
     /// <summary>Outer edge of the rest wedge. Sits inside the tick ring so it doesn't cover the numerals (§8.4.4).</summary>
     private const double RestWedgeOuter = 0.70;
 
@@ -91,17 +99,26 @@ public class DialControl : Control
     public static readonly StyledProperty<double> AlarmMinutesProperty =
         AvaloniaProperty.Register<DialControl, double>(nameof(AlarmMinutes));
 
+    /// <summary>
+    /// Alarms 清单下一条触发时间的角度位置（0-719 分钟），null = 不画。**由调用方每次都
+    /// 整个重算**（<see cref="AlarmsList.DotPosition"/>），跟表盘上其它一切一样，不需要
+    /// 任何"清除"逻辑——上一拍没有满足条件，这一拍自然不画。
+    /// </summary>
+    public static readonly StyledProperty<double?> AlarmsDotMinutesProperty =
+        AvaloniaProperty.Register<DialControl, double?>(nameof(AlarmsDotMinutes));
+
     public DialPalette Palette { get => GetValue(PaletteProperty); set => SetValue(PaletteProperty, value); }
     public IReadOnlyList<MinuteCell> Cells { get => GetValue(CellsProperty); set => SetValue(CellsProperty, value); }
     public DateTimeOffset? StartedAt { get => GetValue(StartedAtProperty); set => SetValue(StartedAtProperty, value); }
     public DateTimeOffset? RestFrom { get => GetValue(RestFromProperty); set => SetValue(RestFromProperty, value); }
     public double RestMinutes { get => GetValue(RestMinutesProperty); set => SetValue(RestMinutesProperty, value); }
     public double AlarmMinutes { get => GetValue(AlarmMinutesProperty); set => SetValue(AlarmMinutesProperty, value); }
+    public double? AlarmsDotMinutes { get => GetValue(AlarmsDotMinutesProperty); set => SetValue(AlarmsDotMinutesProperty, value); }
 
     static DialControl()
         => AffectsRender<DialControl>(PaletteProperty, CellsProperty, StartedAtProperty,
                                       RestFromProperty, RestMinutesProperty,
-                                      AlarmMinutesProperty);
+                                      AlarmMinutesProperty, AlarmsDotMinutesProperty);
 
     // 12 o'clock is 0°, clockwise, minute × 6° (§8.2)
     private static Point At(Point c, double r, double deg)
@@ -132,6 +149,20 @@ public class DialControl : Control
         DrawTicks(ctx, c, R, rFace);
         DrawNumerals(ctx, c, R, rFace);
         DrawHands(ctx, c, R, rFace);
+        DrawAlarmsDot(ctx, c, R);
+    }
+
+    /// <summary>
+    /// Alarms 清单下一条触发时间的小红圈（DESIGN §17）。<see cref="AlarmsDotMinutes"/> 为
+    /// null 就什么都不画——不存在"清除上一次画的圆"这回事，跟表盘上其它一切一样，每一拍
+    /// 整个重画，条件不满足这一拍的结果直接就是"不画"。
+    /// </summary>
+    private void DrawAlarmsDot(DrawingContext ctx, Point c, Func<double, double> R)
+    {
+        if (AlarmsDotMinutes is not { } minutes) return;
+        var deg = (minutes % AlarmClock.FaceMinutes) / 2.0;   // 720 分钟 = 360°，跟黄针同一个换算
+        var at = At(c, R(RAlarmsDot), deg);
+        ctx.DrawEllipse(new SolidColorBrush(Palette.AlarmsDot), null, at, R(RAlarmsDotRadius), R(RAlarmsDotRadius));
     }
 
     /// <summary>The clock's cast shadow on the wall. Squashed, offset downward, fading from black to transparent.</summary>

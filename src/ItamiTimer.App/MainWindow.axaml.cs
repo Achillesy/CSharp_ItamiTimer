@@ -87,6 +87,21 @@ public partial class MainWindow : Window
     // (Ring05 is 12.8s: twice is 26s, four times would overrun into the next nudge).
     private const int NotifyRings = 2;
 
+    // Alarms 清单（DESIGN §17）：响铃遍数跟三声通知同一个理由——响完之后系统通知留在
+    // 通知中心里，属于"留了痕迹回头能看"的一类，不需要闹钟那种"唯一没有第二次机会"的
+    // 待遇，所以是 2 遍不是 4 遍。跟 NotifyRings 数值恰好相同但理由各自独立，故意不共用
+    // 同一个常量。
+    private const int AlarmsListRings = 2;
+
+    /// <summary>
+    /// Alarms 清单的去重水位线：(after, now] 区间内到点的条目才算"新到点"（见
+    /// <see cref="AlarmsList.Due"/>）。**纯内存，不持久化，初始化成启动那一刻而不是
+    /// null**——已经定了"不补响、只看未来"，程序关闭期间错过的条目重新打开后直接跳过，
+    /// 不需要跨会话记住"上次数到哪一分钟"，这跟闹钟要跨会话持久的 `_fired` 不是同一类
+    /// 东西（DESIGN §17）。
+    /// </summary>
+    private DateTime _alarmsProcessedThrough;
+
     public MainWindow()
     {
         Log.Info($"Started. Log: {Log.Path_}");
@@ -105,6 +120,9 @@ public partial class MainWindow : Window
         dial.PointerWheelChanged += OnAlarmWheel;
         _alarm.Restore(_settings.AlarmFireAt, DateTime.Now);
         dial.AlarmMinutes = _alarm.Position;
+        // 水位线定在启动这一刻：程序关闭期间错过的条目直接跳过，不倒回去补（DESIGN §17）。
+        _alarmsProcessedThrough = DateTime.Now;
+        CheckAlarmsList(DateTime.Now);   // 立刻画一次红圈，不等第一次整分钟的心跳
         // Turning the tick off cuts off the one that's mid-play; turning it on doesn't touch
         // anything (the next second boundary starts it). Deliberately **not** in ApplyChrome
         // — see the note there.
@@ -194,6 +212,14 @@ public partial class MainWindow : Window
             : _settings.TickEnabled;
         if (ticking) Tick.Play(sec, _settings.TickVolume);
 
+        // Alarms 清单每分钟查一次（DESIGN §17）——蹭同一个整分钟节拍，跟闹钟的每秒检查
+        // 粒度不同，不需要闹钟那种跨会话持久的 `_fired`。
+        //
+        // ⚠️ **必须排在闹钟检查之前**：同一分钟内两边都到点时，闹钟的响铃调用要晚发生，
+        // Windows 上 winmm 单通道谁后响谁把前一个截断，闹钟响完真的什么都不留，Alarms
+        // 清单响完还有系统通知兜底，让闹钟赢这一下代价更小（DESIGN §17，延伸 E12/E13）。
+        if (sec == 0) CheckAlarmsList(DateTime.Now);
+
         // Alarm check: the target moment is fixed the instant the yellow hand was set ->
         // fire once (not while it's being adjusted). The check runs **once per second**
         // (the second-boundary gate above), so it's at most 1 second late.
@@ -203,6 +229,50 @@ public partial class MainWindow : Window
                                   // Clearing it in memory is enough; SaveAlarmOnExit writes it back to null on exit.
             if (_settings.CommandEnabled) Command.Execute(_rules);
             else Sound.Repeat(_settings.CommandSound, AlarmRings);
+        }
+    }
+
+    /// <summary>
+    /// Alarms 清单的每分钟检查（DESIGN §17）：读文件、找到点的条目、弹通知（无条件，不
+    /// 受任何开关控制）、出声（受 <see cref="Settings.AlarmsListEnabled"/> 控制）、刷新
+    /// 表盘小红圈。
+    /// </summary>
+    private void CheckAlarmsList(DateTime now)
+    {
+        var entries = ReadAlarmsList();
+
+        foreach (var entry in AlarmsList.Due(entries, _alarmsProcessedThrough, now))
+        {
+            // 跟闹钟的 Command.Execute 同一个理由记一笔：这条动作唯一的事后痕迹就是日志——
+            // 通知弹没弹出来、Windows 通知设置有没有把它拦下，界面上永远不会告诉你。
+            Log.Info($"Alarms 清单到点: {entry.Text}");
+            Notify.Show(entry.Text);   // 无条件：检查/通知这条主链路不受任何开关控制
+            if (_settings.AlarmsListEnabled) Sound.Repeat(_settings.AlarmsListSound, AlarmsListRings);
+        }
+        _alarmsProcessedThrough = now;
+
+        F<DialControl>("Dial").AlarmsDotMinutes = AlarmsList.DotPosition(AlarmsList.Next(entries, now), now);
+    }
+
+    /// <summary>
+    /// 读 <c>alarms.md</c>。程序只读不回写不清理——文件不存在（还没建过）就当空清单，
+    /// 任何读取/解析失败都安静收场，一个格式错误的清单文件绝不能把程序搞挂。
+    ///
+    /// <c>File.ReadAllText(path)</c> 默认就按 UTF-8 解码、且会自动探测并跳过开头的
+    /// BOM——Windows 记事本存的 UTF-8 经常带 BOM，不能依赖系统默认代码页（中文 Windows
+    /// 是 GBK，会话乱码）。
+    /// </summary>
+    private static IReadOnlyList<AlarmEntry> ReadAlarmsList()
+    {
+        try
+        {
+            var path = Path.Combine(AppData.Dir, "alarms.md");
+            return File.Exists(path) ? AlarmsList.Parse(File.ReadAllText(path)) : [];
+        }
+        catch (Exception e)
+        {
+            Log.Error("Failed to read alarms.md; treating as empty for this check", e);
+            return [];
         }
     }
 

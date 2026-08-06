@@ -99,7 +99,7 @@ src/ItamiTimer.Core/    net10.0  the accounting engine: rules, judgment buffer, 
                                  No UI, no platform calls — enforced by the csproj.
 src/ItamiTimer.Cli/     net10.0  `itami` — dry-run the engine against real ActivityWatch data.
                                  The only place that ever prints a report.
-src/ItamiTimer.App/     net10.0  Avalonia UI: dial, dominoes, sounds, alarm, settings.
+src/ItamiTimer.App/     net10.0  Avalonia UI: dial, dominoes, sounds, alarm, alarms list, settings.
 tests/                  xUnit    pure-function tests: synthetic events, no waiting.
 ```
 
@@ -120,6 +120,7 @@ Runtime data:
 | `rules.json` | **you**, by hand | your goals, and optionally `executeCommand` |
 | `settings.json` | the program | sound choices, switches, the alarm time |
 | `during.json` | the program | accumulated focus seconds per goal, and how far that count has been carried |
+| `alarms.md` | **you** (or a script), by hand | scheduled reminders — see below |
 | `itami.log` | the program | 1 MB rolling; the UI is silent, so this is the only place to find out what happened |
 
 Task state is **never** written to disk. Closing the program abandons the current round.
@@ -142,6 +143,28 @@ Two consequences worth knowing:
   start re-derives whatever the checkpoint hasn't covered yet.
 - **The first time you start a given goal, it counts your whole history** — which can take
   a moment, and makes the number jump once. After that each backfill is small.
+
+### Scheduled reminders (Alarms list)
+
+Separate from the one-shot alarm hand on the dial, ItamiTimer can also watch a plain
+Markdown checklist for standing appointments — medication, a check-in time you set in your
+own notes or calendar, anything with a fixed moment attached. Point a script (or your own
+hand) at `alarms.md` in the data directory above:
+
+```markdown
+- [ ] 2026-08-06 14:00 Take medication
+- [ ] 2026-08-06 21:30 Evening check-in
+- [x] 2026-08-05 09:00 Already done — check it off to mute a single entry
+```
+
+The program only ever reads this file — it never writes back, never deletes a past entry,
+and never expands a recurring rule ("every day at 2pm") on its own; whatever generates the
+file is responsible for laying down each occurrence as its own line. Every minute, due
+entries raise a system notification unconditionally; whether they also play a sound is a
+toggle in Settings. A small red dot appears near the wooden rim of the dial when the next
+entry is under 12 hours away.
+
+
 
 A goal you have never started shows `0.00`, even if you have spent hours in matching apps.
 The number means "time this program has accounted for", and it starts accounting when you

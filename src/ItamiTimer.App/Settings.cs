@@ -33,6 +33,17 @@ public sealed class Settings
     [JsonPropertyName("commandSound")] public string? CommandSound { get; set; }
 
     /// <summary>
+    /// Alarms 清单（DESIGN §17）到点时要不要出声。**普通的持久化设置**，跟三声通知的
+    /// 开关同一个待遇——不像 <see cref="CommandEnabled"/> 那样每次启动强制复位，因为它
+    /// 不武装任何危险的东西：检查清单、决定下一条、弹系统通知这三件事是强制的、无条件
+    /// 的、每分钟都在做，这个开关只管其中"响不响"这一个维度。
+    /// </summary>
+    [JsonPropertyName("alarmsListEnabled")] public bool AlarmsListEnabled { get; set; }
+
+    /// <summary>Alarms 清单响铃用的音色，跟闹钟的 <see cref="CommandSound"/> 是独立的两个文件——就算同一分钟撞上了，靠音色也能分清是哪一路。</summary>
+    [JsonPropertyName("alarmsListSound")] public string? AlarmsListSound { get; set; }
+
+    /// <summary>
     /// Runs the command preset in rules.json when the alarm fires.
     /// Doesn't persist across sessions -- forced back to off in Load() on every launch.
     /// </summary>
@@ -128,6 +139,9 @@ public sealed class Settings
             // exist on macOS, and PreferredOrFirst would silently fall back to whichever
             // comes first alphabetically (Basso, a dull thud).
             s.CommandSound ??= Sound.PreferredOrFirst("Sosumi", "Glass", "Ping");
+            // Alarms 清单跟闹钟共用同一分钟时靠音色分清是哪一路（DESIGN §17），必须是
+            // 跟 CommandSound 不同的候选列表，否则两边极大概率选中同一个文件。
+            s.AlarmsListSound ??= Sound.PreferredOrFirst("Funk", "Pop", "Tink");
         }
         else
         {
@@ -141,6 +155,9 @@ public sealed class Settings
                 "Windows Message Nudge", "Windows Balloon", "Windows Background", "ding");
             // This used to be missing a default for AlarmSound, so the first run was always null = silent
             s.CommandSound ??= Sound.PreferredOrFirst("Alarm02", "Alarm01", "Ring01");
+            // Alarms 清单跟闹钟共用同一分钟时靠音色分清是哪一路（DESIGN §17），必须是
+            // 跟 CommandSound 不同的候选列表，否则两边极大概率选中同一个文件。
+            s.AlarmsListSound ??= Sound.PreferredOrFirst("Windows Notify Messaging", "notify", "chimes");
         }
         return s;
     }

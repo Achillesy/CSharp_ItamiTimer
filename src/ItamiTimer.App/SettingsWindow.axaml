@@ -83,6 +83,17 @@
     <Border Classes="card">
       <StackPanel Spacing="12">
         <Grid ColumnDefinitions="*,Auto">
+          <TextBlock Classes="title" Text="Alarms"/>
+          <ToggleSwitch x:Name="AlarmsOn" Grid.Column="1" VerticalAlignment="Center"
+                        OnContent="On" OffContent="Off"/>
+        </Grid>
+        <ComboBox x:Name="AlarmsSound" HorizontalAlignment="Stretch" MaxDropDownHeight="320"/>
+      </StackPanel>
+    </Border>
+
+    <Border Classes="card">
+      <StackPanel Spacing="12">
+        <Grid ColumnDefinitions="*,Auto">
           <TextBlock Classes="title" Text="Force Ticking"/>
           <ToggleSwitch x:Name="ForceOn" Grid.Column="1" VerticalAlignment="Center"
                         OnContent="On" OffContent="Off"/>

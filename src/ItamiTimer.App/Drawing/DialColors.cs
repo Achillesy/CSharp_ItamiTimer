@@ -19,7 +19,7 @@ public sealed record DialPalette(
     Color BezelLit, Color BezelMid, Color BezelDark,
     Color Focus, Color Amber, Color Slack, Color Absent, Color Pending, Color Sweep, Color Rest,
     Color DominoTop, Color DominoFace, Color DominoSide,
-    Color Alarm)
+    Color Alarm, Color AlarmsDot)
 {
     /// <summary>Day face: a plain white face plus a wooden bezel (tuned against the reference photo the user provided).</summary>
     public static readonly DialPalette Light = new(
@@ -60,7 +60,10 @@ public sealed record DialPalette(
         DominoFace: Color.FromRgb(0xC4, 0x9E, 0x74),
         DominoSide: Color.FromRgb(0xE6, 0xC8, 0xA4),
         // The alarm hand: warm yellow, like an old-fashioned alarm clock. Shorter than the minute hand, thicker than the hour hand.
-        Alarm: Color.FromRgb(0xF0, 0xC0, 0x40));
+        Alarm: Color.FromRgb(0xF0, 0xC0, 0x40),
+        // Alarms 清单的小红圈（DESIGN §17）：独立的一个色号，即便数值上跟 Slack 相近，
+        // 也不共用同一个 token——以后想单独调其中一个都不会牵动另一个。
+        AlarmsDot: Color.FromRgb(0xD6, 0x45, 0x3F));
 
     /// <summary>Night face: a deep grey face plus a dark metal bezel.</summary>
     public static readonly DialPalette Dark = new(
@@ -81,7 +84,8 @@ public sealed record DialPalette(
         DominoTop: Color.FromRgb(0x8A, 0x6E, 0x50),
         DominoFace: Color.FromRgb(0x6E, 0x56, 0x3C),
         DominoSide: Color.FromRgb(0x93, 0x77, 0x57),
-        Alarm: Color.FromRgb(0xF5, 0xD0, 0x50));
+        Alarm: Color.FromRgb(0xF5, 0xD0, 0x50),
+        AlarmsDot: Color.FromRgb(0xE9, 0x63, 0x5C));
 
     /// <summary>
     /// §8.2.3's three-stop transition: focus -> amber -> slack.
