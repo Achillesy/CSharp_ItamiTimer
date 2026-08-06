@@ -102,6 +102,15 @@ public partial class MainWindow : Window
     /// </summary>
     private DateTime _alarmsProcessedThrough;
 
+    /// <summary>
+    /// Alarms 清单提示条要显示到几点（方案 B，2026-08-06）：本来想走 Windows 原生系统
+    /// 通知，真机验证发现走不通——`powershell.exe` 那个 AppId 在 Windows 里从没注册过，
+    /// API 调用不报错但通知被静默丢弃，Settings 的通知应用列表里根本找不到它。改成
+    /// 程序自己在骨牌那块区域画一条提示，**刚好显示一分钟**（到点那一刻起到下一分钟
+    /// 整点为止），到点自动消失，不需要用户手动关。
+    /// </summary>
+    private DateTime? _alarmBannerHideAt;
+
     public MainWindow()
     {
         Log.Info($"Started. Log: {Log.Path_}");
@@ -220,6 +229,14 @@ public partial class MainWindow : Window
         // 清单响完还有系统通知兜底，让闹钟赢这一下代价更小（DESIGN §17，延伸 E12/E13）。
         if (sec == 0) CheckAlarmsList(DateTime.Now);
 
+        // Alarms 清单提示条：显示满一分钟就自动收起，不用等下一次整分钟检查——这里跟
+        // 秒针共用的心跳一样每秒都看一眼，到点就关，用户不需要手动点掉。
+        if (_alarmBannerHideAt is { } hideAt && DateTime.Now >= hideAt)
+        {
+            F<Border>("AlarmBanner").IsVisible = false;
+            _alarmBannerHideAt = null;
+        }
+
         // Alarm check: the target moment is fixed the instant the yellow hand was set ->
         // fire once (not while it's being adjusted). The check runs **once per second**
         // (the second-boundary gate above), so it's at most 1 second late.
@@ -233,25 +250,40 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Alarms 清单的每分钟检查（DESIGN §17）：读文件、找到点的条目、弹通知（无条件，不
-    /// 受任何开关控制）、出声（受 <see cref="Settings.AlarmsListEnabled"/> 控制）、刷新
-    /// 表盘小红圈。
+    /// Alarms 清单的每分钟检查（DESIGN §9.1）：读文件、找到点的条目、叠一条提示条在骨牌
+    /// 上（无条件，不受任何开关控制）、出声（受 <see cref="Settings.AlarmsListEnabled"/>
+    /// 控制）、刷新表盘小红圈。
     /// </summary>
     private void CheckAlarmsList(DateTime now)
     {
         var entries = ReadAlarmsList();
-
-        foreach (var entry in AlarmsList.Due(entries, _alarmsProcessedThrough, now))
-        {
-            // 跟闹钟的 Command.Execute 同一个理由记一笔：这条动作唯一的事后痕迹就是日志——
-            // 通知弹没弹出来、Windows 通知设置有没有把它拦下，界面上永远不会告诉你。
-            Log.Info($"Alarms 清单到点: {entry.Text}");
-            Notify.Show(entry.Text);   // 无条件：检查/通知这条主链路不受任何开关控制
-            if (_settings.AlarmsListEnabled) Sound.Repeat(_settings.AlarmsListSound, AlarmsListRings);
-        }
+        var due = AlarmsList.Due(entries, _alarmsProcessedThrough, now);
         _alarmsProcessedThrough = now;
 
+        if (due.Count > 0)
+        {
+            // 跟闹钟的 Command.Execute 同一个理由记一笔：提示条只显示一分钟，这行日志是
+            // 之后唯一还能查到"当时到底响过什么"的地方。
+            foreach (var entry in due) Log.Info($"Alarms 清单到点: {entry.Text}");
+            ShowAlarmBanner(due, now);   // 无条件：这条主链路不受任何开关控制
+            if (_settings.AlarmsListEnabled) Sound.Repeat(_settings.AlarmsListSound, AlarmsListRings);
+        }
+
         F<DialControl>("Dial").AlarmsDotMinutes = AlarmsList.DotPosition(AlarmsList.Next(entries, now), now);
+    }
+
+    /// <summary>
+    /// 叠在骨牌上的提示条（方案 B，2026-08-06）：Windows 原生系统通知在真机上验证
+    /// 走不通（见 <see cref="_alarmBannerHideAt"/> 的注释），改成程序自己画。**显示
+    /// 刚好一分钟**——到点那一刻起、到下一分钟整点为止，在 <see cref="OnFrame"/> 里
+    /// 跟秒针共用的心跳一起收起，不需要用户手动点掉。
+    /// </summary>
+    private void ShowAlarmBanner(IReadOnlyList<AlarmEntry> due, DateTime now)
+    {
+        F<TextBlock>("AlarmBannerTime").Text = due[0].At.ToString("HH:mm");
+        F<TextBlock>("AlarmBannerText").Text = string.Join(" / ", due.Select(e => e.Text));
+        F<Border>("AlarmBanner").IsVisible = true;
+        _alarmBannerHideAt = now.AddMinutes(1);
     }
 
     /// <summary>
