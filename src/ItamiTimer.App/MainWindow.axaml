@@ -130,17 +130,34 @@
            通知应用列表里压根找不到它（DECISIONS J9 改稿）。改成程序自己画，不依赖
            操作系统那一层。
            只在骨牌所在的这个 Grid 里叠一层，不单开窗口——复用现成的位置和尺寸，
-           gear 图标声明在它之后所以还留在最上层、正常可点。 -->
-      <Border x:Name="AlarmBanner" Height="76" CornerRadius="8"
-              Background="#4E8CC8" IsVisible="False">
-        <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="2" Margin="12,0">
-          <TextBlock x:Name="AlarmBannerTime" FontSize="20" FontWeight="Bold"
-                     Foreground="White" HorizontalAlignment="Center"/>
-          <TextBlock x:Name="AlarmBannerText" FontSize="13" Foreground="White"
+           gear 图标声明在它之后所以还留在最上层、正常可点。
+
+           ⚠️ 2026-08-06 当天好几轮现场反馈才定稿（见 DECISIONS J11）：整块矩形
+           色块 → 贴着文字的小背景 → 纯文字、骨牌透出来 → 深色文字打底、蓝色文字
+           错位叠在上面。两层内容完全一样，蓝色那份声明在后面所以画在最上层，
+           `Margin="-2,-2,0,0"` 让它相对深色那份往左上错开一点，跟 DialControl
+           画指针阴影的手法一样（先画一份偏移的，再在真实位置画一份），只是这里
+           两份都是实色文字，不是"深色文字 + 阴影"那种主次关系。时间行加粗、
+           文字行不加粗，两行同一套字号（先统一成时间的 18 号，再定稿收到 16 号）。 -->
+      <Grid x:Name="AlarmBanner" HorizontalAlignment="Center" VerticalAlignment="Center"
+            IsVisible="False">
+        <StackPanel Spacing="2">
+          <TextBlock x:Name="AlarmBannerTime" FontSize="18" FontWeight="Bold"
+                     Foreground="#1B222A" HorizontalAlignment="Center"/>
+          <TextBlock x:Name="AlarmBannerText" FontSize="16" Foreground="#1B222A"
                      HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap"
-                     MaxWidth="300"/>
+                     MaxWidth="280"/>
         </StackPanel>
-      </Border>
+        <!-- 亮蓝色用 DialPalette.Dark.Rest 那个色号——已经是这个项目里"同一色相调亮
+             一档"的现成值（该颜色本身的注释是"给夜面调亮一档"），不用另外调一个新色号。 -->
+        <StackPanel Spacing="2" Margin="-2,-2,0,0">
+          <TextBlock x:Name="AlarmBannerTimeBlue" FontSize="18" FontWeight="Bold"
+                     Foreground="#63A6E0" HorizontalAlignment="Center"/>
+          <TextBlock x:Name="AlarmBannerTextBlue" FontSize="16" Foreground="#63A6E0"
+                     HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap"
+                     MaxWidth="280"/>
+        </StackPanel>
+      </Grid>
 
       <!-- A right margin of 26 (DIP) lands the gear directly below the **speaker**, and
            also directly above the fallen dominoes — so it looks like the gear is what

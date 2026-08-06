@@ -233,7 +233,7 @@ public partial class MainWindow : Window
         // 秒针共用的心跳一样每秒都看一眼，到点就关，用户不需要手动点掉。
         if (_alarmBannerHideAt is { } hideAt && DateTime.Now >= hideAt)
         {
-            F<Border>("AlarmBanner").IsVisible = false;
+            F<Grid>("AlarmBanner").IsVisible = false;
             _alarmBannerHideAt = null;
         }
 
@@ -280,9 +280,16 @@ public partial class MainWindow : Window
     /// </summary>
     private void ShowAlarmBanner(IReadOnlyList<AlarmEntry> due, DateTime now)
     {
-        F<TextBlock>("AlarmBannerTime").Text = due[0].At.ToString("HH:mm");
-        F<TextBlock>("AlarmBannerText").Text = string.Join(" / ", due.Select(e => e.Text));
-        F<Border>("AlarmBanner").IsVisible = true;
+        var time = due[0].At.ToString("HH:mm");
+        var text = string.Join(" / ", due.Select(e => e.Text));
+
+        // 深色底层 + 蓝色错位叠层，内容完全一样，两层都要设（DESIGN §9.1）
+        F<TextBlock>("AlarmBannerTime").Text = time;
+        F<TextBlock>("AlarmBannerText").Text = text;
+        F<TextBlock>("AlarmBannerTimeBlue").Text = time;
+        F<TextBlock>("AlarmBannerTextBlue").Text = text;
+
+        F<Grid>("AlarmBanner").IsVisible = true;
         _alarmBannerHideAt = now.AddMinutes(1);
     }
 
