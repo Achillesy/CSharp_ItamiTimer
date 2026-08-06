@@ -33,12 +33,14 @@ public class DialControl : Control
     private const double RHub = 0.035;
 
     /// <summary>
-    /// Alarms 清单的小红圈（DESIGN §17）：靠近木框的空白区，介于刻度终点（0.955）和
-    /// 表盘边缘（1.0）之间——跟 OffTask 色环（0.50~0.68）、闹钟黄针（0.62）都不在同一层，
-    /// 不会被看成同一件事。
+    /// Alarms 清单的红色圆环（DESIGN §17）：圆心落在表盘边缘（1.0），**故意允许盖到
+    /// 木框上**——跟 OffTask 色环（0.50~0.68）、闹钟黄针（0.62）都不在同一层，不会被
+    /// 看成同一件事。2026-08-06 用户反馈原来的小红点太小、太像填色实心点，改成更大的
+    /// 空心圆环。
     /// </summary>
-    private const double RAlarmsDot = 0.98;
-    private const double RAlarmsDotRadius = 0.018;
+    private const double RAlarmsDot = 1.0;
+    private const double RAlarmsDotRadius = 0.05;
+    private const double RAlarmsDotStroke = 0.022;
 
     /// <summary>Outer edge of the rest wedge. Sits inside the tick ring so it doesn't cover the numerals (§8.4.4).</summary>
     private const double RestWedgeOuter = 0.70;
@@ -153,16 +155,19 @@ public class DialControl : Control
     }
 
     /// <summary>
-    /// Alarms 清单下一条触发时间的小红圈（DESIGN §17）。<see cref="AlarmsDotMinutes"/> 为
-    /// null 就什么都不画——不存在"清除上一次画的圆"这回事，跟表盘上其它一切一样，每一拍
-    /// 整个重画，条件不满足这一拍的结果直接就是"不画"。
+    /// Alarms 清单下一条触发时间的红色圆环（DESIGN §17）。空心圆环而不是实心点——
+    /// 2026-08-06 改大、改成圆环、圆心移到表盘边缘，故意盖到木框上，好让它在一堆细
+    /// 刻度和数字旁边一眼就能看见。<see cref="AlarmsDotMinutes"/> 为 null 就什么都不
+    /// 画——不存在"清除上一次画的圆"这回事，跟表盘上其它一切一样，每一拍整个重画，
+    /// 条件不满足这一拍的结果直接就是"不画"。
     /// </summary>
     private void DrawAlarmsDot(DrawingContext ctx, Point c, Func<double, double> R)
     {
         if (AlarmsDotMinutes is not { } minutes) return;
         var deg = (minutes % AlarmClock.FaceMinutes) / 2.0;   // 720 分钟 = 360°，跟黄针同一个换算
         var at = At(c, R(RAlarmsDot), deg);
-        ctx.DrawEllipse(new SolidColorBrush(Palette.AlarmsDot), null, at, R(RAlarmsDotRadius), R(RAlarmsDotRadius));
+        var pen = new Pen(new SolidColorBrush(Palette.AlarmsDot), R(RAlarmsDotStroke));
+        ctx.DrawEllipse(null, pen, at, R(RAlarmsDotRadius), R(RAlarmsDotRadius));
     }
 
     /// <summary>The clock's cast shadow on the wall. Squashed, offset downward, fading from black to transparent.</summary>
