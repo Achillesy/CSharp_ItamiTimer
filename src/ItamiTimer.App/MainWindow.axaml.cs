@@ -103,11 +103,13 @@ public partial class MainWindow : Window
     private DateTime _alarmsProcessedThrough;
 
     /// <summary>
-    /// Alarms 清单提示条要显示到几点（方案 B，2026-08-06）：本来想走 Windows 原生系统
-    /// 通知，真机验证发现走不通——`powershell.exe` 那个 AppId 在 Windows 里从没注册过，
-    /// API 调用不报错但通知被静默丢弃，Settings 的通知应用列表里根本找不到它。改成
-    /// 程序自己在骨牌那块区域画一条提示，**刚好显示一分钟**（到点那一刻起到下一分钟
-    /// 整点为止），到点自动消失，不需要用户手动关。
+    /// Alarms 清单提示条要显示到几点（2026-08-06）：程序自己在骨牌那块区域画一条提示，
+    /// **刚好显示一分钟**（到点那一刻起到下一分钟整点为止），到点自动消失，不需要
+    /// 用户手动关。这条**保证屏幕上一定看得见**——跟 <see cref="Notify"/> 弹的系统
+    /// 通知并存，不是二选一：系统通知那条一度因为用错 AppId 被误判成"走不通"整个
+    /// 放弃过，后来发现只是那个字符串没注册、横幅还被"请勿打扰"吞掉，通知其实躺在
+    /// 通知中心里（见 <see cref="Notify"/> 的注释、DECISIONS J13）。提示条不依赖这些
+    /// Windows 侧的不确定性，所以留着。
     /// </summary>
     private DateTime? _alarmBannerHideAt;
 
@@ -265,7 +267,8 @@ public partial class MainWindow : Window
             // 跟闹钟的 Command.Execute 同一个理由记一笔：提示条只显示一分钟，这行日志是
             // 之后唯一还能查到"当时到底响过什么"的地方。
             foreach (var entry in due) Log.Info($"Alarms 清单到点: {entry.Text}");
-            ShowAlarmBanner(due, now);   // 无条件：这条主链路不受任何开关控制
+            ShowAlarmBanner(due, now);   // 无条件：屏幕上一定看得见
+            foreach (var entry in due) Notify.Show(entry.Text);   // 无条件：系统通知，多一份关掉程序也能翻看的记录（DECISIONS J13）
             if (_settings.AlarmsListEnabled) Sound.Repeat(_settings.AlarmsListSound, AlarmsListRings);
         }
 
@@ -273,10 +276,10 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 叠在骨牌上的提示条（方案 B，2026-08-06）：Windows 原生系统通知在真机上验证
-    /// 走不通（见 <see cref="_alarmBannerHideAt"/> 的注释），改成程序自己画。**显示
-    /// 刚好一分钟**——到点那一刻起、到下一分钟整点为止，在 <see cref="OnFrame"/> 里
-    /// 跟秒针共用的心跳一起收起，不需要用户手动点掉。
+    /// 叠在骨牌上的提示条（2026-08-06，见 <see cref="_alarmBannerHideAt"/> 的注释）：
+    /// 程序自己画，保证屏幕上一定看得见，跟 <see cref="Notify"/> 的系统通知并存。
+    /// **显示刚好一分钟**——到点那一刻起、到下一分钟整点为止，在 <see cref="OnFrame"/>
+    /// 里跟秒针共用的心跳一起收起，不需要用户手动点掉。
     /// </summary>
     private void ShowAlarmBanner(IReadOnlyList<AlarmEntry> due, DateTime now)
     {
