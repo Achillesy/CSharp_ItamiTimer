@@ -168,6 +168,23 @@ public partial class MainWindow : Window
                 BeginMoveDrag(e);
         };
 
+        // 表盘右键菜单（用户 2026-08-08）：无边框之后没有标题栏、没有系统菜单，任务栏
+        // 图标的右键菜单成了唯一能关窗口的地方——补一个跟它对齐的入口，就在拖动窗口
+        // 的同一块区域上。只有"关闭窗口"一项，不做成一整套窗口菜单。
+        //
+        // 跟左键拖动挂在同一个控件上互不影响：ContextMenu 走的是右键，上面那个
+        // PointerPressed 明确只认左键。
+        //
+        // **文字是英文**："界面文字英文"是这个项目一条既有硬约束（CLAUDE.md）；用户
+        // 提过"要根据系统文字，如果不行，就统一为英文"，跟系统语言走需要引入一整套
+        // 本地化资源机制（目前一行都没有），为一个菜单项不划算，按用户给的退路走英文。
+        // 图标同样是矢量画的（ChromeIcons.Close），仓库不放位图（DECISIONS D5）。
+        var closeItem = new MenuItem { Header = "Close window", Icon = ChromeIcons.Close() };
+        // 走 Close() 而不是直接退进程：任务没结束时照样会弹"要放弃吗"的确认
+        // （OnClosing，§9），跟点标题栏 ×、Alt+F4 完全同一条路径。
+        closeItem.Click += (_, _) => Close();
+        dial.ContextMenu = new ContextMenu { ItemsSource = new[] { closeItem } };
+
         _frame.Tick += OnFrame;
         _frame.Start();
         Closing += OnClosing;

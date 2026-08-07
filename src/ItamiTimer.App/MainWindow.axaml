@@ -128,7 +128,15 @@
          more like part of some control, making "what on earth are these seven things"
          even harder to guess — the same philosophy as the slider giving no numbers and
          nothing below the divider explaining itself (§8.4.2a). -->
-    <Grid Grid.Row="1" Margin="0,2,0,10">
+    <!-- 下边距是**负的**：卡片（Row 2）要紧贴骨牌底部，中间一点空都不留（用户
+         2026-08-08 两次强调，DECISIONS K16）。原来这里是 10px 正边距（卡片还不存在
+         时给骨牌和 Start 按钮留的呼吸感），先收到 0——但用户还是看得到一条缝，因为
+         **那条缝不在布局里，在 DominoRow 自己的绘制里**：它的地面线落在控件高度的
+         96.5%（`DominoRow.cs` 的 `baseY = k.H * 0.965`），76px 最底下约 2.7px 是它
+         自己留的空白，阴影压根没画到那儿。-3 正好把这段死区吃掉。
+         ⚠️ 别把这个 -3 当成"随手调的视觉微调"删掉或凑整——它是跟 DominoRow 那个
+         0.965 绑死的，那边动了这里要跟着重算。 -->
+    <Grid Grid.Row="1" Margin="0,2,0,-3">
       <app:DominoRow x:Name="Dominoes" Height="76"/>
 
       <!-- Alarms 清单到点时叠在骨牌上的提示条（DESIGN §9.1）：程序自己画，保证
@@ -186,11 +194,10 @@
          Grid.Row="2"，紧接着骨牌所在的 Row 1，两行之间没有额外间隔——Grid 的行与行
          默认贴着排，不用像之前（DECISIONS K16）那样手动算 Margin 去够到骨牌下边缘，
          这版直接更省事。
-         `Padding="12"` 是 Border 自带的内边距，四边统一 12px，不用像上一版那样在
-         StackPanel 上加 Margin；StackPanel 自己的 Spacing 也从 10 提到 12，跟外边距
-         用同一个数字，卡片内部"留白"是统一的一套间距，不是外圈 12、控件间距 10 两个
-         不同的数。 -->
-    <Border Grid.Row="2" Background="#E6D7DBE0" CornerRadius="10" Padding="12">
+         `Padding="8"` 是 Border 自带的内边距，四边统一——12px 试过一版，用户反馈
+         "内边界显大"，收到 8px。控件之间的 Spacing 保持 12 不动，只有贴着卡片边框
+         的那一圈收窄了。 -->
+    <Border Grid.Row="2" Background="#E6D7DBE0" CornerRadius="10" Padding="8">
       <StackPanel x:Name="Controls" Spacing="12">
 
         <Button x:Name="StartBtn" Classes="start" Click="OnStart" Content="Start"/>

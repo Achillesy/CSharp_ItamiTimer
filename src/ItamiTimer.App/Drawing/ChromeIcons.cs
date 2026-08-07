@@ -153,6 +153,30 @@ public static class ChromeIcons
         return canvas;
     }
 
+    /// <summary>
+    /// 关闭（表盘右键菜单里那一项）。两笔交叉的斜线，跟系统任务栏"关闭窗口"那一项
+    /// 的图标同一个形状。
+    ///
+    /// **不加光晕描边**，跟上面三个不一样：这个图标只出现在右键菜单里，菜单自己有
+    /// 不透明背景，不存在直接叠在桌面壁纸上的问题（Halo 那条注释里说的正是这个前提）。
+    ///
+    /// ⚠️ 这里的 X **跟 <see cref="Pin"/> 那条注释里"刻意不用 X"是两回事**：那条说的是
+    /// 别拿 X 表示"图钉关着"（会读成"禁用置顶"，正好相反）；这里 X 就是它字面的意思
+    /// ——关闭，没有歧义。
+    /// </summary>
+    public static Control Close()
+    {
+        var canvas = new Canvas { Width = Box, Height = Box };
+        canvas.Children.Add(new Path
+        {
+            Data = Geometry.Parse("M 4,4 L 12,12 M 12,4 L 4,12"),
+            Stroke = Ink,
+            StrokeThickness = 1.5,
+            StrokeLineCap = PenLineCap.Round,
+        });
+        return canvas;
+    }
+
     /// <summary>光晕垫底 + 正常描边，两层叠在一起加进 canvas——光晕更粗、垫在下面，正常粗细的 Ink 描边叠在正上方（见 Halo 的注释）。</summary>
     private static void AddStroke(Canvas canvas, string data, double thickness)
     {
