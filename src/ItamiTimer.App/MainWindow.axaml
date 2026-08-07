@@ -133,10 +133,12 @@
          时给骨牌和 Start 按钮留的呼吸感），先收到 0——但用户还是看得到一条缝，因为
          **那条缝不在布局里，在 DominoRow 自己的绘制里**：它的地面线落在控件高度的
          96.5%（`DominoRow.cs` 的 `baseY = k.H * 0.965`），76px 最底下约 2.7px 是它
-         自己留的空白，阴影压根没画到那儿。-3 正好把这段死区吃掉。
-         ⚠️ 别把这个 -3 当成"随手调的视觉微调"删掉或凑整——它是跟 DominoRow 那个
-         0.965 绑死的，那边动了这里要跟着重算。 -->
-    <Grid Grid.Row="1" Margin="0,2,0,-3">
+         自己留的空白，阴影压根没画到那儿。
+         -3 是按这段死区算出来的，实测还剩一丝白线（阴影渐变在底边淡出的尾巴，见
+         DominoRow 里那段"最暗的一档不能落在底边"的注释），用户拍板收到 -4。
+         ⚠️ 别把这个 -4 当成"随手调的视觉微调"删掉或凑整——它跟 DominoRow 那个
+         0.965 和底边的渐变淡出绑在一起，那边动了这里要跟着重算。 -->
+    <Grid Grid.Row="1" Margin="0,2,0,-4">
       <app:DominoRow x:Name="Dominoes" Height="76"/>
 
       <!-- Alarms 清单到点时叠在骨牌上的提示条（DESIGN §9.1）：程序自己画，保证
@@ -194,11 +196,12 @@
          Grid.Row="2"，紧接着骨牌所在的 Row 1，两行之间没有额外间隔——Grid 的行与行
          默认贴着排，不用像之前（DECISIONS K16）那样手动算 Margin 去够到骨牌下边缘，
          这版直接更省事。
-         `Padding="8"` 是 Border 自带的内边距，四边统一——12px 试过一版，用户反馈
-         "内边界显大"，收到 8px。控件之间的 Spacing 保持 12 不动，只有贴着卡片边框
-         的那一圈收窄了。 -->
+         **卡片内部只有一个间距数字 8**：`Border.Padding`（四边内边距）和 StackPanel
+         的 `Spacing`（控件之间）取同一个值，卡片边框到控件的距离 = 控件与控件之间的
+         距离，整张卡片一套节奏。中间试过 12/12（用户："内边界显大"）和 8/12（边距
+         和控件间距不一致），定稿是两边都取 8。 -->
     <Border Grid.Row="2" Background="#E6D7DBE0" CornerRadius="10" Padding="8">
-      <StackPanel x:Name="Controls" Spacing="12">
+      <StackPanel x:Name="Controls" Spacing="8">
 
         <Button x:Name="StartBtn" Classes="start" Click="OnStart" Content="Start"/>
 
