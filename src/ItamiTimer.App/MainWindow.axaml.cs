@@ -155,6 +155,19 @@ public partial class MainWindow : Window
         F<Button>("PinBtn").Click += (_, _) => { _settings.Pinned = !_settings.Pinned; ApplyChrome(); _settings.Save(); };
         ApplyChrome();
 
+        // 无边框之后窗口没有标题栏可拖了（DECISIONS K，改成整个主窗口无边框/透明，
+        // 不是另开一扇挂件）。拖动生效范围**收窄到表盘本身**（用户 2026-08-08 明确
+        // 要求："仅仅点在表盘区域拖动才有效"）——挂在 Dial 控件上而不是整个 Window，
+        // 用的就是 Dial 自己那个矩形 Bounds 当命中范围（"包裹钟面的方块"这个选项，
+        // 比再手算一个圆形距离判断省事）。跟表盘上唯一的另一个手势
+        // PointerWheelChanged（闹钟滚轮）不冲突，那是滚轮事件，这是按下事件，互不相关；
+        // 钟面点击本来就留白（DECISIONS E3），不会跟别的交互打架。
+        dial.PointerPressed += (_, e) =>
+        {
+            if (e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
+                BeginMoveDrag(e);
+        };
+
         _frame.Tick += OnFrame;
         _frame.Start();
         Closing += OnClosing;
@@ -385,6 +398,9 @@ public partial class MainWindow : Window
             var rows = new List<DockPanel>();
             foreach (var name in _rules.SelectableGroups)
             {
+                // 这一块整个坐在 Start 按钮以下那张半透明卡片上（DECISIONS K，
+                // 2026-08-08 改稿），不再需要 HaloTextBlock 那套双层描边——卡片本身
+                // 已经给足对比度了，Content 恢复成普通字符串即可。
                 var radio = new RadioButton
                 {
                     Content = name,

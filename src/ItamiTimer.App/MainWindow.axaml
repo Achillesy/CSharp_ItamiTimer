@@ -7,7 +7,14 @@
         SizeToContent="Height"
         CanResize="False"
         WindowStartupLocation="CenterScreen"
-        Background="#D7DBE0">
+        WindowDecorations="None"
+        Background="Transparent"
+        TransparencyLevelHint="Transparent">
+  <!-- DECISIONS K（改稿）：无边框、透明背景是**整扇主窗口**的属性，不是另开一扇挂件——
+       所有功能原样保留，只是外框和窗口底色没了。没有标题栏之后窗口本身没法拖了，靠
+       MainWindow.axaml.cs 里挂在 Dial 控件（不是整个 Window）上的
+       PointerPressed -> BeginMoveDrag 补上——拖动生效范围收窄到表盘本身，用的是 Dial
+       自己的矩形 Bounds 当命中范围（用户 2026-08-08 要求"仅仅点在表盘区域才有效"）。 -->
 
   <Window.Styles>
     <!-- "Start" is both a button and the dividing line: above it is for the eyes, below it
@@ -99,13 +106,13 @@
     </Style>
   </Window.Styles>
 
-  <StackPanel Margin="18,14,18,16">
+  <Grid Margin="18,14,18,16" RowDefinitions="Auto,Auto,Auto">
 
     <!-- The dial. While a task is running, it's the whole story; an empty dial is the
          invitation for the next round (§8.4.5a). Two instant toggles sit in the top-right
          corner: speaker first, then pin (the order the user specified on 2026-07-28). The
          clock is round, so its top-right corner is empty space that fits them perfectly. -->
-    <Grid>
+    <Grid Grid.Row="0">
       <app:DialControl x:Name="Dial" Height="330"/>
       <StackPanel Orientation="Horizontal" Spacing="2"
                   HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-4,-4,0">
@@ -121,7 +128,7 @@
          more like part of some control, making "what on earth are these seven things"
          even harder to guess — the same philosophy as the slider giving no numbers and
          nothing below the divider explaining itself (§8.4.2a). -->
-    <Grid Margin="0,2,0,10">
+    <Grid Grid.Row="1" Margin="0,2,0,10">
       <app:DominoRow x:Name="Dominoes" Height="76"/>
 
       <!-- Alarms 清单到点时叠在骨牌上的提示条（DESIGN §9.1）：程序自己画，保证
@@ -174,43 +181,52 @@
               HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-6,30,0"/>
     </Grid>
 
-    <!-- vvv Below the divider: if ActivityWatch can't be reached, this whole block turns
-         grey and the program is just a clock (§6.2) -->
-    <StackPanel x:Name="Controls" Spacing="10">
+    <!-- 半透明背景卡片（用户 2026-08-08 三次定稿：90% 不透明度，从骨牌最下边开始，
+         包住 Start 按钮、滑块、目标列表、版权/版本号，内部四边统一 12px 留白）。
+         Grid.Row="2"，紧接着骨牌所在的 Row 1，两行之间没有额外间隔——Grid 的行与行
+         默认贴着排，不用像之前（DECISIONS K16）那样手动算 Margin 去够到骨牌下边缘，
+         这版直接更省事。
+         `Padding="12"` 是 Border 自带的内边距，四边统一 12px，不用像上一版那样在
+         StackPanel 上加 Margin；StackPanel 自己的 Spacing 也从 10 提到 12，跟外边距
+         用同一个数字，卡片内部"留白"是统一的一套间距，不是外圈 12、控件间距 10 两个
+         不同的数。 -->
+    <Border Grid.Row="2" Background="#E6D7DBE0" CornerRadius="10" Padding="12">
+      <StackPanel x:Name="Controls" Spacing="12">
 
-      <Button x:Name="StartBtn" Classes="start" Click="OnStart" Content="Start"/>
+        <Button x:Name="StartBtn" Classes="start" Click="OnStart" Content="Start"/>
 
-      <!-- The value control. No explanation, no label, not even a number (user,
-           2026-07-27: the whole point is guessing). Just nine tick marks, drag it yourself.
+        <!-- The value control. No explanation, no label, not even a number (user,
+             2026-07-27: the whole point is guessing). Just nine tick marks, drag it yourself.
 
-           §8.4.2a's real range: 10-50 minutes, step 5, default 25.
-           (Between 2026-07-27 and 07-28 this was temporarily 2-10 minutes, so you didn't
-           have to sit through a real 25 minutes every time just to see the completion
-           moment — changed back once the core loop was working.) -->
-      <Slider x:Name="Minutes" Margin="2,4,2,0"
-              Minimum="10" Maximum="50" TickFrequency="5"
-              IsSnapToTickEnabled="True" TickPlacement="BottomRight" Value="25"/>
+             §8.4.2a's real range: 10-50 minutes, step 5, default 25.
+             (Between 2026-07-27 and 07-28 this was temporarily 2-10 minutes, so you didn't
+             have to sit through a real 25 minutes every time just to see the completion
+             moment — changed back once the core loop was working.) -->
+        <Slider x:Name="Minutes" Margin="2,4,2,0"
+                Minimum="10" Maximum="50" TickFrequency="5"
+                IsSnapToTickEnabled="True" TickPlacement="BottomRight" Value="25"/>
 
-      <!-- The goal list. As many rows as rules.json has goals, and the window height
-           follows along. -->
-      <ItemsControl x:Name="Goals">
-        <ItemsControl.Styles>
-          <Style Selector="ItemsControl#Goals ContentPresenter">
-            <Setter Property="HorizontalAlignment" Value="Stretch"/>
-          </Style>
-        </ItemsControl.Styles>
-      </ItemsControl>
+        <!-- The goal list. As many rows as rules.json has goals, and the window height
+             follows along. -->
+        <ItemsControl x:Name="Goals">
+          <ItemsControl.Styles>
+            <Style Selector="ItemsControl#Goals ContentPresenter">
+              <Setter Property="HorizontalAlignment" Value="Stretch"/>
+            </Style>
+          </ItemsControl.Styles>
+        </ItemsControl>
 
-      <!-- Moved here from SettingsWindow (user, 2026-08-07): during the Alarms 清单 testing
-           round it became clear that not being able to see the running version without
-           opening Settings made it hard to tell whether a stray old build was still
-           running, exactly the kind of mix-up this line exists to prevent, so it belongs
-           where it's seen without an extra click. -->
-      <Grid ColumnDefinitions="*,Auto">
-        <TextBlock Text="©️2026 Achilles.Newman" HorizontalAlignment="Center" FontSize="11" Opacity="0.4"/>
-        <TextBlock x:Name="VersionLabel" Grid.Column="1" HorizontalAlignment="Right" FontSize="11" Opacity="0.4"/>
-      </Grid>
+        <!-- Moved here from SettingsWindow (user, 2026-08-07): during the Alarms 清单 testing
+             round it became clear that not being able to see the running version without
+             opening Settings made it hard to tell whether a stray old build was still
+             running, exactly the kind of mix-up this line exists to prevent, so it belongs
+             where it's seen without an extra click. -->
+        <Grid ColumnDefinitions="*,Auto">
+          <TextBlock Text="©️2026 Achilles.Newman" HorizontalAlignment="Center" FontSize="11" Opacity="0.4"/>
+          <TextBlock x:Name="VersionLabel" Grid.Column="1" HorizontalAlignment="Right" FontSize="11" Opacity="0.4"/>
+        </Grid>
 
-    </StackPanel>
-  </StackPanel>
+      </StackPanel>
+    </Border>
+  </Grid>
 </Window>
