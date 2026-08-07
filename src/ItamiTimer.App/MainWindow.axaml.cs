@@ -193,10 +193,108 @@ public partial class MainWindow : Window
         closeItem.Click += (_, _) => Close();
         dial.ContextMenu = new ContextMenu { ItemsSource = new[] { closeItem } };
 
+        RestoreWindowPosition();
+
         _frame.Tick += OnFrame;
         _frame.Start();
         Closing += OnClosing;
-        Closed += (_, _) => SaveAlarmOnExit();
+        Closed += (_, _) =>
+        {
+            // 窗口关掉之后再让它跑一拍，Position/Screens 就是在一个已经没了的窗口上取值
+            _settle.Stop();
+            SaveAlarmOnExit();
+        };
+    }
+
+    // ---------------------------------------------------------------- 窗口位置（DECISIONS K22/K23）
+
+    /// <summary>
+    /// 拖动停下来之后才做「拉回屏幕内 + 记住位置」这两件事的判定器。**故意不在
+    /// <see cref="OnPositionChanged"/> 里当场做**，见 <see cref="ClampIntoScreen"/>
+    /// 的注释：拖动过程中就往回拉会让窗口永远跨不过两块屏幕的交界。
+    /// </summary>
+    private readonly DispatcherTimer _settle = new() { Interval = TimeSpan.FromMilliseconds(250) };
+
+    /// <summary>重入闸：<see cref="ClampIntoScreen"/> 自己写 <c>Position</c> 会再次触发 <see cref="OnPositionChanged"/>。</summary>
+    private bool _clamping;
+
+    /// <summary>
+    /// 恢复上次的位置。没存过（首次运行）就什么都不做，让 axaml 里的
+    /// <c>WindowStartupLocation="CenterScreen"</c> 照常居中。
+    ///
+    /// 有存过就切成 <c>Manual</c> 并在 <c>Opened</c> 里落位——**必须等到 Opened**：
+    /// 原生窗口还没建出来时 <see cref="TopLevel.Screens"/> 拿不到可靠的屏幕信息，
+    /// 而恢复完立刻要用它做一次 <see cref="ClampIntoScreen"/>（上次那块屏可能已经
+    /// 拔掉了，见 <see cref="Settings.WindowX"/> 的注释）。
+    /// </summary>
+    private void RestoreWindowPosition()
+    {
+        PositionChanged += OnPositionChanged;
+        _settle.Tick += OnPositionSettled;
+
+        if (_settings.WindowX is not { } x || _settings.WindowY is not { } y) return;
+
+        WindowStartupLocation = WindowStartupLocation.Manual;
+        Opened += (_, _) =>
+        {
+            Position = new PixelPoint(x, y);
+            ClampIntoScreen();
+        };
+    }
+
+    /// <summary>拖动中每动一下都会来，只负责把「停下来」的计时器往后推。真正干活的是 <see cref="OnPositionSettled"/>。</summary>
+    private void OnPositionChanged(object? sender, PixelPointEventArgs e)
+    {
+        if (_clamping) return;
+        _settle.Stop();
+        _settle.Start();
+    }
+
+    /// <summary>位置稳定 250ms（= 松手了）：拉回屏幕内，然后记住它。</summary>
+    private void OnPositionSettled(object? sender, EventArgs e)
+    {
+        _settle.Stop();
+        ClampIntoScreen();
+        _settings.WindowX = Position.X;
+        _settings.WindowY = Position.Y;
+        _settings.Save();
+    }
+
+    /// <summary>
+    /// 把窗口整个拉回屏幕可用区域内（用户 2026-08-08：向上拖出屏幕会被系统弹回来，
+    /// 希望左/右/下也一样）。Windows 只在上边缘替我们做了这件事，另外三边得自己来。
+    ///
+    /// **拉回的目标是「窗口目前主要待在哪块屏」的工作区**（<c>ScreenFromWindow</c>，
+    /// 工作区 = 扣掉任务栏之后的部分），不是所有屏幕拼起来的大矩形——多屏排布可能
+    /// 不是一个完整矩形，拿外接矩形去判断会把两块屏之间的空洞也算成合法位置。
+    ///
+    /// ⚠️ **为什么必须等拖动停下来再拉，不能一边拖一边拉**：一边拖一边拉的话，窗口
+    /// 永远会被摁在当前这块屏的边界内，就永远到不了「一半以上落在另一块屏上」那个
+    /// 状态，而 <c>ScreenFromWindow</c> 正是按这个来判断该归哪块屏的——结果就是
+    /// **窗口再也拖不到第二块显示器上去**。用户是双屏，这条不是理论风险。所以拖动
+    /// 过程中随便它跨屏、出界，松手之后（<see cref="_settle"/> 计时器）再归位。
+    ///
+    /// 坐标单位要小心：<c>Position</c> 和 <c>Screen.WorkingArea</c> 是**物理像素**，
+    /// 而 <c>FrameSize</c>/<c>ClientSize</c> 是**与 DPI 无关的逻辑单位**，两者之间差
+    /// 一个 <c>Screen.Scaling</c>，不换算的话在缩放不是 100% 的屏幕上会算错窗口多大。
+    /// </summary>
+    private void ClampIntoScreen()
+    {
+        var screen = Screens.ScreenFromWindow(this) ?? Screens.Primary;
+        if (screen is null) return;
+
+        var area = screen.WorkingArea;
+        var size = PixelSize.FromSize(FrameSize ?? ClientSize, screen.Scaling);
+
+        // 窗口比工作区还大时，Math.Max 保证下界不会反超上界（Math.Clamp 那样会直接抛）——
+        // 这种情况下贴着左上角，宁可右边/下边露出去，也不要把标题那头推出屏幕。
+        var x = Math.Clamp(Position.X, area.X, Math.Max(area.X, area.Right - size.Width));
+        var y = Math.Clamp(Position.Y, area.Y, Math.Max(area.Y, area.Bottom - size.Height));
+        if (x == Position.X && y == Position.Y) return;
+
+        _clamping = true;
+        try { Position = new PixelPoint(x, y); }
+        finally { _clamping = false; }
     }
 
     private void InitializeComponent() => AvaloniaXamlLoader.Load(this);

@@ -85,6 +85,18 @@ public sealed class Settings
     [JsonPropertyName("pinned")] public bool Pinned { get; set; }
 
     /// <summary>
+    /// 主窗口上次的位置（物理像素，屏幕坐标）。两个都是 null = 还没被拖动过，启动时
+    /// 走 axaml 里的 <c>WindowStartupLocation="CenterScreen"</c> 居中显示。
+    ///
+    /// 无边框之后窗口没有标题栏，位置全靠拖表盘来定（DECISIONS K），每次启动都跳回
+    /// 屏幕正中太烦人，所以记住它。**读回来的坐标不能直接信**——显示器拔掉、分辨率
+    /// 改了、笔记本外接屏断开之后，上次那个位置可能整个落在屏幕外，窗口就再也看不见
+    /// 也够不着了，所以恢复之后必须过一遍 <c>MainWindow.ClampIntoScreen</c>。
+    /// </summary>
+    [JsonPropertyName("windowX")] public int? WindowX { get; set; }
+    [JsonPropertyName("windowY")] public int? WindowY { get; set; }
+
+    /// <summary>
     /// ActivityWatch's address (§11.1). **Edit this file in a text editor** -- it isn't in
     /// the settings window, which only has room for sounds (§8.3.2).
     ///
