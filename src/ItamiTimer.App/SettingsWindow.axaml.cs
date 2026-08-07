@@ -1,4 +1,3 @@
-using System.Reflection;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Markup.Xaml;
@@ -99,12 +98,6 @@ public partial class SettingsWindow : Window
             if (!_loading) Tick.Play(0, settings.TickVolume);
             Persist();
         };
-
-        // Version, read from the single <Version> in Directory.Build.props at build time --
-        // there's nowhere else in the app that shows this, so it lives here rather than
-        // getting its own About window.
-        var version = Assembly.GetExecutingAssembly().GetName().Version;
-        this.FindControl<TextBlock>("VersionLabel")!.Text = version is null ? "" : $"v{version.ToString(3)}";
 
         _loading = false;
     }

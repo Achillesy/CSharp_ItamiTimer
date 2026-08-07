@@ -6,6 +6,7 @@ using Avalonia.Markup.Xaml;
 using Avalonia.Styling;
 using Avalonia.Threading;
 using System.Linq;
+using System.Reflection;
 using ItamiTimer.Core;
 using ItamiTimer;
 
@@ -124,6 +125,13 @@ public partial class MainWindow : Window
         ApplySliderRange();
         LoadRules();
         RefreshStartButton();
+
+        // Version, read from the single <Version> in Directory.Build.props at build time --
+        // moved here from SettingsWindow (user, 2026-08-07) so the running build is visible
+        // without opening Settings (DESIGN §14).
+        var version = Assembly.GetExecutingAssembly().GetName().Version;
+        F<TextBlock>("VersionLabel").Text = version is null ? "" : $"v{version.ToString(3)}";
+
         var gear = F<Button>("SettingsBtn");
         gear.Content = ChromeIcons.Gear();
         gear.Click += OnSettings;

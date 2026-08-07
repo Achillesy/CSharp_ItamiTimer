@@ -908,7 +908,8 @@ dotnet test  ItamiTimer.slnx
 - **必须限定 RID**：否则所有平台的 Skia/HarfBuzz 原生库全进来（实测 560MB）。
 - csproj 的 `StripPdbFromPublish` 自动删掉两个巨型 pdb：127MB → 27MB。**别删这个 target。**
 - 版本号唯一来源是 `Directory.Build.props` 的 `<Version>`：`pack-macos.sh`/`pack-windows.ps1`
-  和运行时的 `SettingsWindow` 都读它，改版本只改这一处。
+  和运行时的 `MainWindow`（2026-08-07 从 `SettingsWindow` 挪过来，方便不开 Settings 就能
+  确认当前跑的是哪个版本）都读它，改版本只改这一处。
 
 **2026-08-03 起，本地调试验证和对外发布彻底分开**：本地验证就用项目目录内 `bin/Debug`/
 `bin/Release` 的编译产物直接跑（`rules.json` 已经通过 csproj 的 `Content Include` 跟着
