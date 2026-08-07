@@ -11,6 +11,9 @@ count: the grey deadline arc on the clock face slides further away, and you watc
 ![ItamiTimer main window](screenshots/ItamiTimer.png)
 ![ItamiTimer settings window](screenshots/Settings.png)
 
+> ⚠️ The main-window screenshot predates 2.0.0 and still shows the old framed window —
+> see [Window](#window) for what it looks like now.
+
 **All the pain comes from the dial**
 ```
 痛みを感じろ，
@@ -46,6 +49,25 @@ replaces the honor system with an audit:
 | Long break every 4 rounds | Yes | No — one task = one focus + one rest, then the program **stops and waits** |
 | Auto-start next round | Common | **Never.** Starting a task is always your act |
 | Report | Varies | None on screen, ever. The dial's coloured cells are the whole story |
+
+## Window
+
+Since 2.0.0 the window has **no frame and no background** — no title bar, no border, no
+grey backdrop. The clock sits directly on your wallpaper; only the controls below the Start
+button keep a light card behind them so the slider and goal list stay readable.
+
+Losing the title bar changes two everyday things:
+
+- **Move it by dragging the clock face.** Anywhere on the dial works; the controls below it
+  behave normally. (The draggable region follows what is actually painted, so the corners
+  of the dial's bounding box are not part of it.)
+- **Close it from the clock face's right-click menu** (or the taskbar / Dock as before).
+  Closing mid-focus still asks first — quitting abandons the round, as it always has.
+
+The window remembers where you left it. If a position ends up off-screen — you dragged it
+past an edge, or the monitor it was on is gone — it returns to the visible area on its own
+once you let go. Dragging *between* monitors is unaffected: it settles onto whichever
+screen it mostly landed on.
 
 ## Requirements
 
@@ -118,7 +140,7 @@ Runtime data:
 | File | Written by | Contents |
 |---|---|---|
 | `rules.json` | **you**, by hand | your goals, and optionally `executeCommand` |
-| `settings.json` | the program | sound choices, switches, the alarm time |
+| `settings.json` | the program | sound choices, switches, the alarm time, the window position |
 | `during.json` | the program | accumulated focus seconds per goal, and how far that count has been carried |
 | `alarms.md` | **you** (or a script), by hand | scheduled reminders — see below |
 | `itami.log` | the program | 1 MB rolling; the UI is silent, so this is the only place to find out what happened |
