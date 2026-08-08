@@ -212,19 +212,22 @@ the first one**. `itami commands` is how you reorder that list and try an entry 
 waiting for an alarm to actually fire:
 
 ```bash
-itami commands              # pick one, move it to #1 (rewrites rules.json, keeps a .bak)
-itami commands --list       # just print them, change nothing
-itami commands --test       # pick one and run it now, after a y/N confirm
-itami commands --execute N  # run entry N now, no prompt
+itami commands --list       # just print them (* marks #0), change nothing
+itami commands --select N   # move entry N to #0 (rewrites rules.json, keeps a .bak)
+itami commands --select     # same, but print the list and ask for the number
+itami commands --execute    # run #0 now, after a y/N confirm
 ```
 
 It works on **the rules.json the app actually uses** (the three-tier lookup in
-`AppData.RulesPath`) and prints that path on the first line. Reordering takes effect
+`AppData.RulesPath`) and prints that path on the first line. Selecting takes effect
 immediately in a running ItamiTimer — the alarm re-reads rules.json when it fires, so
 there's nothing to restart.
 
-`--test` runs the entry through **exactly the same code the alarm uses** (the source file
-is linked into both projects, not copied), so "it worked here" actually means something.
+**`--execute` takes no number on purpose**: to try a different entry, `--select` it first.
+That way the entry you tested and the entry the alarm will actually run are the same one,
+by construction — there is no "which one was I testing again?" to get wrong. It runs
+through **exactly the same code the alarm uses** (the source file is linked into both
+projects, not copied), so "it worked here" actually means something.
 The reorder is a text-level move, never a JSON round-trip: your comments and indentation
 survive byte for byte, and if the array shape isn't something it can move safely it
 refuses rather than guessing.

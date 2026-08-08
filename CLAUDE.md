@@ -92,7 +92,7 @@ DESIGN.md §14。
 ```
 src/ItamiTimer.Core/   判定与重放（纯函数为主）   ← 逻辑改动优先落这里，可测
 src/ItamiTimer.Cli/    itami 命令行，真实数据干跑  ← 唯一给账单的地方
-                       也管 executeCommand：`itami commands` 换第一条 / 试跑一条
+                       也管 executeCommand：`itami commands --list/--select/--execute`
 src/ItamiTimer.App/    Avalonia 界面              ← 平台差异每处收口在单个文件
 tests/                 xUnit，测试名是中文句子，直接陈述行为
 ```

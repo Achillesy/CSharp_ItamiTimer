@@ -172,19 +172,21 @@ rules.json 里的 `executeCommand` 是一份常用命令收藏夹，**闹钟永�
 `itami commands` 就是用来换第一条、以及在不等闹钟真到点的前提下试跑某一条的：
 
 ```bash
-itami commands              # 选一条，挪到第一位（改写 rules.json，留一份 .bak）
-itami commands --list       # 只看，什么都不改
-itami commands --test       # 选一条，y/N 确认后立即执行
-itami commands --execute N  # 直接跑第 N 条，不问
+itami commands --list       # 只看（* 标出 #0），什么都不改
+itami commands --select N   # 把第 N 条挪成 #0（改写 rules.json，留一份 .bak）
+itami commands --select     # 同上，但先打清单再问你要哪个编号
+itami commands --execute    # 跑 #0，y/N 确认后执行
 ```
 
 它操作的是**程序真正在用的那一份 rules.json**（`AppData.RulesPath` 的三级查找链），
-并且把这个路径打在第一行。换完顺序对正在运行的 ItamiTimer **立刻生效**——闹钟到点那
-一刻会重读 rules.json，不用重启。
+并且把这个路径打在第一行。选完对正在运行的 ItamiTimer **立刻生效**——闹钟到点那一刻
+会重读 rules.json，不用重启。
 
-`--test` 走的是**跟闹钟到点完全同一份代码**（源文件被 link 进两个项目，不是抄一份），
-所以"在这儿试通了"对界面才是有意义的结论。换序是文本级搬运，绝不做 JSON 往返序列化：
-你写的注释和缩进逐字节保留；碰上它拿不准的数组形状会直接拒绝改写，而不是猜。
+**`--execute` 刻意不带编号**：想试别的就先 `--select` 把它选成 #0。这样"你试的那条"和
+"闹钟真正会跑的那条"在设计上就是同一条，不存在"我刚才测的到底是哪条"这种事。它走的是
+**跟闹钟到点完全同一份代码**（源文件被 link 进两个项目，不是抄一份），所以"在这儿试通了"
+对界面才是有意义的结论。换序是文本级搬运，绝不做 JSON 往返序列化：你写的注释和缩进逐
+字节保留；碰上它拿不准的数组形状会直接拒绝改写，而不是猜。
 
 ## 调试出口
 

@@ -375,6 +375,16 @@ public partial class MainWindow : Window
     private bool _minuteBusy;
 
     /// <summary>
+    /// 当前这一分钟工作的取消源。**分钟边界就是截止线**：下一分钟发现上一分钟还没跑完，
+    /// 就取消它（用户 2026-08-09），不另外引入超时常量和第二个计时器——这个程序只有
+    /// 一个钟（DECISIONS L8）。
+    ///
+    /// ⚠️ 取消的是**我们的等待**，不是子进程。子进程可能正是那条执行到一半的关机命令，
+    /// 杀掉它有可能把关机一起撤销；取消之后它继续跑它的，我们只是不再等它的退出码。
+    /// </summary>
+    private CancellationTokenSource? _minuteCts;
+
+    /// <summary>
     /// **这个程序里所有以分钟为单位的事，全在这里、按这个顺序、一件做完再做下一件**
     /// （用户 2026-08-08 定的结构）。
     ///
@@ -417,10 +427,22 @@ public partial class MainWindow : Window
     /// </summary>
     private async void OnMinute(DateTime now)
     {
-        // AW 慢、或者命令挂住不退时，下一个分钟边界照样会到。宁可整分钟跳过也不要两份
-        // 并排跑——那正是这次要消掉的东西。
-        if (_minuteBusy) { Log.Warn("Previous minute's work is still running; skipping this minute"); return; }
+        // 命令挂住不退时，下一个分钟边界照样会到。**这时取消上一分钟的等待**（用户
+        // 2026-08-09）：不取消的话 `_minuteBusy` 永远复位不了——它的 finally 属于那个还
+        // 卡在 await 上的调用——于是之后每一分钟都只打一行日志就返回，AW 查询和判定
+        // 再也不跑，表盘冻住而界面按设计全程沉默。
+        //
+        // 取消之后**本分钟仍然跳过**：上一次调用要等控制权回到消息循环才会真正退栈并
+        // 复位 `_minuteBusy`，在这儿接着往下走会跟它抢。下一分钟就是干净的。
+        if (_minuteBusy)
+        {
+            Log.Warn("Previous minute's work is still running; cancelling it and skipping this minute");
+            _minuteCts?.Cancel();
+            return;
+        }
+
         _minuteBusy = true;
+        var cts = _minuteCts = new CancellationTokenSource();
         try
         {
             // ---- 1) 上一分钟的提示条到期就收起。**排在第 ③ 步画新提示条之前**：
@@ -446,16 +468,27 @@ public partial class MainWindow : Window
             if (now >= _alarmQuietUntil && _alarm.ShouldFire(now))
             {
                 _alarm.MarkFired();   // 一次性：响过即撤，不是每日重复（DECISIONS E5）
-                if (_settings.CommandEnabled) await Command.ExecuteFreshAsync(_rules);
+                if (_settings.CommandEnabled) await Command.ExecuteFreshAsync(_rules, cts.Token);
                 else Sound.Repeat(_settings.CommandSound, AlarmRings);
             }
+        }
+        catch (OperationCanceledException)
+        {
+            // 下一个分钟边界把这一分钟掐了（见开头的注释）。子进程还活着，只是我们不再
+            // 等它——这条是 Warn 不是 Error：它是设计好的退路，不是程序出错。
+            Log.Warn("This minute's work was cancelled at the next minute boundary");
         }
         catch (Exception e)
         {
             // 这一分钟的某件事炸了不能把时钟带走：秒针、滴答、下一分钟都得照常。
             Log.Error("The minute's work threw", e);
         }
-        finally { _minuteBusy = false; }
+        finally
+        {
+            _minuteBusy = false;
+            if (ReferenceEquals(_minuteCts, cts)) _minuteCts = null;
+            cts.Dispose();
+        }
     }
 
     /// <summary>

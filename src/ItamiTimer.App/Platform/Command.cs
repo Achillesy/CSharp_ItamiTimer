@@ -46,7 +46,7 @@ public static class Command
     /// 读失败（用户把文件改坏了）时**退回启动时的快照**并大声记日志：到点什么都不做
     /// 对一个可能是关机的命令来说更糟，而"为什么用的是旧的"必须能在日志里查到（§8.1a）。
     /// </summary>
-    public static Task ExecuteFreshAsync(GroupRules? fallback)
+    public static Task ExecuteFreshAsync(GroupRules? fallback, CancellationToken ct = default)
     {
         GroupRules? rules = null;
         try
@@ -57,7 +57,7 @@ public static class Command
         {
             Log.Error("executeCommand: could not re-read rules.json; falling back to the copy loaded at startup", e);
         }
-        return ExecuteAsync(rules ?? fallback);
+        return ExecuteAsync(rules ?? fallback, ct: ct);
     }
 
     /// <summary>
@@ -66,7 +66,7 @@ public static class Command
     /// specific one). The command table comes from an already-parsed
     /// <see cref="GroupRules"/> -- this **never reads the file itself**.
     /// </summary>
-    public static async Task ExecuteAsync(GroupRules? rules, int index = 0)
+    public static async Task ExecuteAsync(GroupRules? rules, int index = 0, CancellationToken ct = default)
     {
         var key = OsKey;
 
@@ -152,13 +152,28 @@ public static class Command
             //
             // 先读完两个流再 WaitForExit，顺序不能反：管道缓冲区写满时子进程会阻塞在写上，
             // 那样"等它退出"就成了等一件永远不会发生的事。
-            var stdout = await p.StandardOutput.ReadToEndAsync();
-            var stderr = await p.StandardError.ReadToEndAsync();
-            await p.WaitForExitAsync();
+            //
+            // ⚠️ **两个流是串行读的，这留着一个已知的死角**（2026-08-09 记，用户知情）：
+            // 子进程把 stderr 写满一个管道缓冲（Windows 上通常 4KB）就会阻塞在写 stderr
+            // 上，于是永远不关 stdout，我们就卡在下面第一行等一个永远不来的 EOF。改成
+            // 两个流并发读能根治，但用户不要并发（"每分钟的任务是异步执行的，不想引出
+            // 更多意想不到的问题"）。兜底是调用方那一层：分钟边界会取消这次等待
+            // （`MainWindow.OnMinute`），所以最坏是丢掉这一分钟，不会永久卡死。
+            // 现有清单里的命令（关机/锁屏/休眠）输出接近于零，实际撞上的概率很低。
+            var stdout = await p.StandardOutput.ReadToEndAsync(ct);
+            var stderr = await p.StandardError.ReadToEndAsync(ct);
+            await p.WaitForExitAsync(ct);
 
             Log.Info($"executeCommand exited with {p.ExitCode}");
             if (!string.IsNullOrWhiteSpace(stdout)) Log.Info($"  stdout: {stdout.Trim()}");
             if (!string.IsNullOrWhiteSpace(stderr)) Log.Warn($"  stderr: {stderr.Trim()}");
+        }
+        catch (OperationCanceledException)
+        {
+            // 分钟边界把等待掐了。**子进程没被杀，还在跑**——它可能正是那条执行到一半的
+            // 关机命令。这里只是不再等它的退出码。往上抛给 OnMinute 记一条 Warn。
+            Log.Warn($"executeCommand: stopped waiting (still running): {cmd}");
+            throw;
         }
         catch (Exception e)
         {

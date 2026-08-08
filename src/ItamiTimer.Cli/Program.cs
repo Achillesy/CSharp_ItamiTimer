@@ -273,31 +273,23 @@ async Task<int> CommandsAsync()
     // `--rules` 后面没跟值时会是空串（布尔开关的形状），别把空串当路径用。
     var path = opt.GetValueOrDefault("rules") is { Length: > 0 } p ? p : AppData.RulesPath();
 
-    if (opt.TryGetValue("execute", out var raw))
-    {
-        // 非交互出口：给脚本用，也是"我就想跑第 N 条看看"的最短路径。不弹确认——
-        // 明确写下了下标就是明确的意图，跟 --test 里"光标可能停错行"不是一回事。
-        if (!int.TryParse(raw, out var n))
-        {
-            Console.Error.WriteLine($"\n--execute needs an entry number, got \"{raw}\"\n");
-            return 1;
-        }
-        var list = GroupRules.Load(path).CommandsFor(Command.OsKey);
-        if (n < 0 || n >= list.Count)
-        {
-            Console.Error.WriteLine($"\nNo entry #{n} under \"{Command.OsKey}\" ({list.Count} available)\n");
-            return 1;
-        }
-        Console.WriteLine($"\n  {list[n]}\n");
-        await Command.ExecuteAsync(GroupRules.Load(path), n);
-        Console.WriteLine($"  done. Exit code and output are in the log:\n    {Log.Path_}\n");
-        return 0;
-    }
+    // `--execute` 不带下标，永远跑 #0（用户 2026-08-09，DECISIONS L14）：想跑别的先
+    // `--select` 把它挪成 #0。这样"试的那条"和"闹钟真会跑的那条"在设计上就是同一条。
+    if (opt.ContainsKey("execute")) return await CommandPicker.ExecuteFirstAsync(path);
 
-    var mode = opt.ContainsKey("test") ? CommandPicker.Mode.Test
-             : opt.ContainsKey("list") ? CommandPicker.Mode.List
-             : CommandPicker.Mode.Promote;
-    return await CommandPicker.RunAsync(path, mode);
+    if (opt.ContainsKey("list")) return CommandPicker.List(path);
+
+    // `--select N` 直接选 N；裸 `--select`（值是空串）和裸 `commands` 都走"打清单再问一个
+    // 编号"那条路。
+    int? index = opt.GetValueOrDefault("select") is { Length: > 0 } s
+        ? (int.TryParse(s, out var n) ? n : -1)
+        : null;
+    if (index == -1)
+    {
+        Console.Error.WriteLine($"\n--select needs an entry number, got \"{opt["select"]}\"\n");
+        return 1;
+    }
+    return CommandPicker.Select(path, index);
 }
 
 int Help()
@@ -310,19 +302,22 @@ int Help()
           itami replay   --since "2026-07-26 20:00" [--until ...] --minutes 25 --group <goal>
           itami backfill --group <goal> [--since ...] [--until ...]
           itami bench    --minutes 25 [--pattern focused|mixed|slack]
-          itami commands [--list | --test | --execute N]
+          itami commands [--list | --select [N] | --execute]
 
         commands works on executeCommand in the rules.json the app actually uses. The alarm
-        always runs entry #1, and re-reads the file when it fires — so promoting an entry
-        takes effect immediately, without restarting ItamiTimer.
+        always runs entry #0 (marked * in the listing), and re-reads the file when it fires
+        — so selecting an entry takes effect immediately, without restarting ItamiTimer.
 
-          (no flag)   pick an entry, move it to #1   (rewrites rules.json, keeps a .bak)
-          --list      just print them, change nothing
-          --test      pick an entry and run it now, after a y/N confirm
-          --execute N run entry N now, no prompt
+          --list       just print them, change nothing
+          --select N   move entry N to #0   (rewrites rules.json, keeps a .bak)
+          --select     same, but print the list and ask for the number
+          (no flag)    same as --select
+          --execute    run #0 now, after a y/N confirm
 
-        --test runs it through exactly the same code the alarm uses, so "it worked here"
-        actually means something.
+        --execute takes no number on purpose: to try a different entry, --select it first.
+        That way the entry you tested and the entry the alarm will actually run are the
+        same one, by construction. It runs through exactly the same code the alarm uses,
+        so "it worked here" actually means something.
 
         backfill dry-runs the accumulated-time count over real history (fail-closed: only
         what ActivityWatch can actually prove). Omit --since to walk the whole history,
