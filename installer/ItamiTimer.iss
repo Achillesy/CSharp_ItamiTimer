@@ -64,6 +64,10 @@ Source: "{#StageDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs c
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
+; The itami CLI ships alongside the app (DECISIONS L22) and the window deliberately has no
+; button for picking the alarm's command — so the one place that explains it needs to be
+; findable, not just present in the install folder.
+Name: "{group}\Command line tool (Read Me)"; Filename: "{app}\README.txt"
 Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 

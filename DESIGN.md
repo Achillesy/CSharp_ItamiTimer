@@ -650,10 +650,58 @@ buffer 的 7200 秒绘制区**不是内存考虑，是画图考虑**：钟面一
   一个解析器，不违反 §15.4。
 - **挑哪条命令生效、单独试跑一条**，都在命令行里（`itami commands`，DECISIONS L5/L16）：
   界面上不加选择器。三个模式互不重叠——`--list` 只看（`*` 标出 #0）、`--select [N]` 只改
-  文件、`--execute` 只跑 #0 且**不带下标**（想试别的先 `--select` 成 #0）。这样"试的那条"
-  和"闹钟真会跑的那条"在设计上就是同一条。试跑走的是 `Command.Execute` 本尊（csproj 把
-  源文件 link 进 CLI，两边同一份代码），所以"在 CLI 里试通了"对 App 才是有意义的结论
-  ——L1 那个引号 bug 正是只在 App 那条路上犯的。
+  文件、`--execute [--yes]` 只跑 #0 且**不带下标**（想试别的先 `--select` 成 #0）。这样
+  "试的那条"和"闹钟真会跑的那条"在设计上就是同一条。执行细节见 §9.3。
+
+### 9.3 命令怎么被执行：App 只负责开一个窗口（2.2.0，DECISIONS L19~L22）
+
+**App 自己不再执行任何命令。** 到点且 Execute 开着时，它只做一件事——起一个**带控制台
+窗口**的 shell，让那个窗口去跑：
+
+```
+powershell.exe -NoExit -Command "& '<装到哪>\itami.exe' commands --execute --yes"
+```
+
+然后立刻返回。**不重定向、不 await、不看退出码。**
+
+**为什么要这么绕一圈**，起因是一个真实的坑（2026-08-08 用户实测）：`shutdown /h` 在
+休眠被禁用的机器上**退出码 0、stdout 空、stderr 空，机器纹丝不动**——它把
+"此系统上没有启用休眠 (126)"这句话**直接写给控制台**，绕开了我们重定向的那两根管子。
+所以旧架构下这类失败**在程序侧无解**：能观察到的信号全都在说成功（L17）。
+
+换成"在真实控制台里跑"之后，这句话就落在你眼前的窗口里了。**注意起作用的是"有控制台
+窗口"，不是"换了个解释器"**——这两件事一开始被混为一谈过。所以：
+
+- **命令本身仍然由 `cmd.exe /c`（Windows）/ `sh -c`（Unix）解释，一个字没改**。
+  `rules.json` 里所有既有条目语义不变（`start notepad` 照旧是 cmd 的内建 `start`），
+  L1/L2 那两条引号护栏继续有效，`CommandQuotingTests` 不用重写。
+- **`itami` 内部不再重定向 stdout/stderr**，子进程直接继承控制台。没有管道，
+  **L15 那个"串行读 + 写满缓冲 = 死锁"的死角随之消失**——不是修好了，是不成立了。
+- **App 不再 await 命令**，所以 L14 为了防止分钟循环被卡死而加的取消机制整个删掉；
+  `_minuteBusy` 保留，但它现在守的只剩 AW 查询（本来就有 10 秒超时）。
+
+**三个职责的边界**：
+
+| 谁 | 负责什么 | 不负责什么 |
+|---|---|---|
+| App | 起一个 shell 窗口；`Process.Start` 抛异常时记 Error（连 shell 都没起来是我们**唯一**还能真判断的失败） | 命令跑没跑成 |
+| shell 窗口 | 活着、显示输出。`-NoExit` 由**启动方**给（App 给），**`itami` 自己永远不停顿**——否则你在自己终端里手动跑也要被迫按一次键 | 解释命令 |
+| `itami commands --execute` | 读 rules.json、跑 #0、把输出留在控制台上 | 窗口活多久 |
+
+**`--yes`**：`--execute` 默认会先打印要跑什么再等 y/N（清单里躺着 shut down / restart）。
+App 那条路没有人在旁边按键，所以带 `--yes` 跳过确认。**`--yes` 只表示"不用等我按 y"，
+不表示"跑完就关窗"**——窗口一关，这次重构要抢救的那句错误信息又没了（L20）。
+
+**App 到哪儿找 `itami.exe`**：跟 `ItamiTimer.exe` 同目录（`AppContext.BaseDirectory`）。
+这要求**两条路都把 CLI 放到 App 旁边**：
+
+- **安装包**：`pack-windows.ps1` 多 publish 一次 CLI 到同一个 StageDir（L22）——在这之前
+  它只 publish 了 App，装机的机器上根本没有 `itami.exe`。
+- **本地 `bin\Debug` / `bin\Release`**：App 的 csproj 里一个
+  `ProjectReference ReferenceOutputAssembly="false"` + 一个拷贝 target（L23）。
+  **不靠"记得手动拷一下"**——CLAUDE.md 规定本地验证跑的就是 `bin\Debug` 的产物，
+  少了这一步的症状是「闹钟到点，日志里一句 cannot find the itami CLI，命令一条不跑」，
+  看着就像功能没做（F5：凡是"必须记得做"的步骤就是迟早会被忘掉的步骤）。
 
 ### 9.1 Alarms 清单（1.2.0，DECISIONS J）
 

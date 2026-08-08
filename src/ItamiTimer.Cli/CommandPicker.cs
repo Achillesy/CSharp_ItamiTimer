@@ -35,45 +35,42 @@ public static class CommandPicker
     }
 
     /// <summary>
-    /// `--select [N]`：把第 N 条挪到 #0，**只改 rules.json，不执行任何东西**。
-    /// 没给 N 就打出清单再问一次（只读一行数字，不做光标选择——用户 2026-08-09：
-    /// "可以不要上下选择，只要输入编号"）。
+    /// 不合法的形式统统落到这里（DECISIONS L18）：**只打清单，什么都不做**，但先说一句
+    /// 是哪个参数被忽略了——不说的话 `--slect 3`（打错字）会安安静静只列个清单，用户
+    /// 很可能以为已经选好了。退出码非 0，脚本能察觉；屏幕上不摆错误脸。
     /// </summary>
-    public static int Select(string rulesPath, int? index)
+    public static int ListWithNote(string rulesPath, string ignored)
+    {
+        if (!TryLoad(rulesPath, out var os, out var list)) return 2;
+
+        Console.WriteLine($"  ignored: {ignored}");
+        Console.WriteLine("  valid:   --list | --select N | --execute [--yes]\n");
+
+        if (list.Count > 0) { Print(list); Console.WriteLine(); }
+        else Empty(os);
+        return 1;
+    }
+
+    /// <summary>
+    /// `--select N`：把第 N 条挪到 #0，**只改 rules.json，不执行任何东西**。
+    /// N 越界也掉清单（L18）——只有精确合法的形式才做事。
+    /// </summary>
+    public static int Select(string rulesPath, int index)
     {
         if (!TryLoad(rulesPath, out var os, out var list)) return 2;
         if (list.Count == 0) return Empty(os);
 
-        if (index is null)
+        if (index < 0 || index >= list.Count)
         {
+            // 跟 ListWithNote 打一样的两行——越界跟"参数写错了"是同一类事，输出不该长得不一样。
+            Console.WriteLine($"  ignored: --select {index} (out of range, {list.Count} available)");
+            Console.WriteLine("  valid:   --list | --select N | --execute [--yes]\n");
             Print(list);
-
-            // 管道/重定向/CI 里没有键盘可读，别去问一个不会有人回答的问题。
-            if (Console.IsInputRedirected)
-            {
-                Console.Error.WriteLine("\n  (not a terminal — use --select N)\n");
-                return 1;
-            }
-
-            Console.Write("\n  select which one? [0-" + (list.Count - 1) + ", Enter cancels] ");
-            var line = Console.ReadLine();
-            if (string.IsNullOrWhiteSpace(line)) { Console.WriteLine("\n  cancelled\n"); return 0; }
-            if (!int.TryParse(line.Trim(), out var n))
-            {
-                Console.Error.WriteLine($"\n  not a number: \"{line.Trim()}\"\n");
-                return 1;
-            }
-            index = n;
-        }
-
-        var i = index.Value;
-        if (i < 0 || i >= list.Count)
-        {
-            Console.Error.WriteLine($"\n  no entry #{i} under \"{os}\" ({list.Count} available)\n");
+            Console.WriteLine();
             return 1;
         }
 
-        return Promote(rulesPath, os, i, list);
+        return Promote(rulesPath, os, index, list);
     }
 
     /// <summary>
@@ -83,23 +80,30 @@ public static class CommandPicker
     /// restart / shut down / log out，而 `--execute` 现在不带任何参数、最容易从命令行历史
     /// 里翻出来再敲一次。一个按键的摩擦换掉一次不可逆的误操作，值。
     /// </summary>
-    public static async Task<int> ExecuteFirstAsync(string rulesPath)
+    public static async Task<int> ExecuteFirstAsync(string rulesPath, bool yes)
     {
         if (!TryLoad(rulesPath, out var os, out var list)) return 2;
         if (list.Count == 0) return Empty(os);
 
         Console.WriteLine($"  about to run #0:\n\n    {list[0]}\n");
 
-        if (Console.IsInputRedirected)
+        // `--yes` = "不用等我按 y"。**闹钟到点那条路走的就是它**——App 起一个 shell 窗口
+        // 跑 `commands --execute --yes`，那时候没有人在键盘前（DECISIONS L19/L20）。
+        // 它**不表示"跑完就关窗"**：窗口留不留是启动方用 `-NoExit` 决定的，itami 自己
+        // 永远不停顿，否则你在自己终端里手动跑也要被迫按一次键。
+        if (!yes)
         {
-            Console.Error.WriteLine("  (not a terminal — refusing to run unattended)\n");
-            return 1;
-        }
+            if (Console.IsInputRedirected)
+            {
+                Console.Error.WriteLine("  (not a terminal — pass --yes to run unattended)\n");
+                return 1;
+            }
 
-        Console.Write("  run it? [y/N] ");
-        var answer = Console.ReadKey(intercept: true).KeyChar;
-        Console.WriteLine();
-        if (answer is not ('y' or 'Y')) { Console.WriteLine("\n  cancelled\n"); return 0; }
+            Console.Write("  run it? [y/N] ");
+            var answer = Console.ReadKey(intercept: true).KeyChar;
+            Console.WriteLine();
+            if (answer is not ('y' or 'Y')) { Console.WriteLine("\n  cancelled\n"); return 0; }
+        }
 
         // 这一行就是闹钟到点走的那一行（同一份源码，csproj link 进来的），而且跑的是
         // 同一条 #0 —— CLI 试通了对界面才是有意义的结论。

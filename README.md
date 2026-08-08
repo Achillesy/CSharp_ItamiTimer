@@ -212,11 +212,18 @@ the first one**. `itami commands` is how you reorder that list and try an entry 
 waiting for an alarm to actually fire:
 
 ```bash
-itami commands --list       # just print them (* marks #0), change nothing
-itami commands --select N   # move entry N to #0 (rewrites rules.json, keeps a .bak)
-itami commands --select     # same, but print the list and ask for the number
-itami commands --execute    # run #0 now, after a y/N confirm
+itami commands --list          # just print them (* marks #0), change nothing
+itami commands --select N      # move entry N to #0 (rewrites rules.json, keeps a .bak)
+itami commands --execute       # run #0 now, after a y/N confirm
+itami commands --execute --yes # run #0 now, no prompt (this is what the alarm uses)
 ```
+
+`itami` ships alongside the app — it's in the install directory, next to `ItamiTimer.exe`.
+
+Anything that isn't one of those exact forms — an unknown switch, a bare `commands`, a
+`--select` without a number, an out-of-range number, `--execute` with an argument — just
+prints the list and changes nothing. **The only two paths that run something or write to
+a file require an exact form**, so a typo can never do more than show you the list.
 
 It works on **the rules.json the app actually uses** (the three-tier lookup in
 `AppData.RulesPath`) and prints that path on the first line. Selecting takes effect
@@ -225,9 +232,25 @@ there's nothing to restart.
 
 **`--execute` takes no number on purpose**: to try a different entry, `--select` it first.
 That way the entry you tested and the entry the alarm will actually run are the same one,
-by construction — there is no "which one was I testing again?" to get wrong. It runs
-through **exactly the same code the alarm uses** (the source file is linked into both
-projects, not copied), so "it worked here" actually means something.
+by construction — there is no "which one was I testing again?" to get wrong.
+
+### What happens when the alarm fires
+
+The app does **not** run your command itself. It opens a shell window and has *that* run
+`itami commands --execute --yes`, then gets out of the way — no output capture, no exit
+code, no waiting.
+
+That indirection exists for one reason: **some commands report failure only to a console.**
+`shutdown /h` on a machine without hibernation enabled exits with code 0, writes nothing to
+stdout or stderr, and does nothing — the message ("hibernation has not been enabled") goes
+straight to the console, where a captured pipe can never see it. Run it in a real window
+and you simply read what went wrong.
+
+The window is left open on purpose. If your command shuts the machine down, that hardly
+matters; if it fails, the reason is still on screen when you come back.
+
+Your commands are still interpreted by `cmd.exe /c` (Windows) or `sh -c` (macOS) exactly as
+before — nothing in `rules.json` changes meaning. What changed is only *where* they run.
 The reorder is a text-level move, never a JSON round-trip: your comments and indentation
 survive byte for byte, and if the array shape isn't something it can move safely it
 refuses rather than guessing.

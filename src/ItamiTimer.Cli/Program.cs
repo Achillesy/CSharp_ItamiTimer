@@ -270,37 +270,35 @@ async Task<int> BackfillAsync()
 /// </summary>
 async Task<int> CommandsAsync()
 {
-    // 认识的就这四个。**不认识的一律报错，绝不当没看见**（2026-08-09）：`--test` 删掉之后
-    // 它原本会静默掉进 `--select` 的交互分支——用户以为在试跑，实际在改文件，这比直接
-    // 报错糟得多。删掉一个开关就该让它报错，不是让它变成另一条命令。
-    var known = new[] { "list", "select", "execute", "rules" };
-    if (opt.Keys.FirstOrDefault(k => !known.Contains(k)) is { } bad)
-    {
-        Console.Error.WriteLine($"\nunknown option for commands: --{bad}");
-        Console.Error.WriteLine("valid: --list | --select [N] | --execute | --rules <path>\n");
-        return 1;
-    }
-
     // `--rules` 后面没跟值时会是空串（布尔开关的形状），别把空串当路径用。
     var path = opt.GetValueOrDefault("rules") is { Length: > 0 } p ? p : AppData.RulesPath();
 
-    // `--execute` 不带下标，永远跑 #0（用户 2026-08-09，DECISIONS L14）：想跑别的先
-    // `--select` 把它挪成 #0。这样"试的那条"和"闹钟真会跑的那条"在设计上就是同一条。
-    if (opt.ContainsKey("execute")) return await CommandPicker.ExecuteFirstAsync(path);
+    // **只有精确合法的形式才做事，其余一律掉进 `--list`**（用户 2026-08-09，DECISIONS L18）：
+    // 只读、不执行、不改文件，另外在清单前打一行 `ignored:` 说明是哪个参数不对。
+    //
+    // 为什么不是"报错就完事"：**唯一会执行东西和唯一会写文件的两条路都必须是精确形式**，
+    // 这样打错一个字最多只是看到一份清单，而不是留下一个"再试一次"的模糊空间。
+    // 那行 `ignored:` 也不能省——否则 `--slect 3` 会安安静静只列个清单，用户很可能以为
+    // 已经选好了（跟 L12 拒绝内层 try 同一个理由：别把故障粉饰成正常）。
+    var known = new[] { "list", "select", "execute", "rules", "yes" };
+    string? bad =
+        opt.Keys.FirstOrDefault(k => !known.Contains(k)) is { } unknown ? $"--{unknown}"
+        // `--execute` 不带下标，永远跑 #0：想跑别的先 `--select` 把它挪成 #0（L16）。
+        : opt.GetValueOrDefault("execute") is { Length: > 0 } ex ? $"--execute {ex}"
+        // `--yes` 只在 `--execute` 一起出现时有意义。
+        : opt.ContainsKey("yes") && !opt.ContainsKey("execute") ? "--yes (only valid with --execute)"
+        // `--select` 必须带一个数字（越界与否留给 CommandPicker.Select 判断，它认识清单长度）。
+        : opt.ContainsKey("select") && opt.GetValueOrDefault("select") is not { Length: > 0 } ? "--select (needs a number)"
+        : opt.TryGetValue("select", out var sel) && !int.TryParse(sel, out _) ? $"--select {sel}"
+        // 裸 `commands`：什么都没给，也算不合法形式——掉清单。
+        : opt.Keys.Any(k => k is "list" or "select" or "execute") ? null
+        : "(no option)";
 
+    if (bad is not null) return CommandPicker.ListWithNote(path, bad);
+
+    if (opt.ContainsKey("execute")) return await CommandPicker.ExecuteFirstAsync(path, opt.ContainsKey("yes"));
     if (opt.ContainsKey("list")) return CommandPicker.List(path);
-
-    // `--select N` 直接选 N；裸 `--select`（值是空串）和裸 `commands` 都走"打清单再问一个
-    // 编号"那条路。
-    int? index = opt.GetValueOrDefault("select") is { Length: > 0 } s
-        ? (int.TryParse(s, out var n) ? n : -1)
-        : null;
-    if (index == -1)
-    {
-        Console.Error.WriteLine($"\n--select needs an entry number, got \"{opt["select"]}\"\n");
-        return 1;
-    }
-    return CommandPicker.Select(path, index);
+    return CommandPicker.Select(path, int.Parse(opt["select"]));
 }
 
 int Help()

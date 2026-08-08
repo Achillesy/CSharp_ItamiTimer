@@ -30,6 +30,18 @@ try {
     dotnet publish src\ItamiTimer.App -c Release -r win-x64 --self-contained false -o $StageDir --nologo -v quiet
     if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed" }
 
+    # CLI 也要装（2026-08-09，DECISIONS L22）：闹钟到点时 App 起一个 shell 去跑
+    # `itami.exe commands --execute --yes`，那个文件必须真的在安装目录里。在这之前
+    # 这里只 publish 了 App，装机的机器上根本没有 itami.exe。
+    # 发到**同一个 StageDir**：两边共用 ItamiTimer.Core.dll 等程序集（同一次 Release
+    # 构建，内容一致），各自的 .deps.json / .runtimeconfig.json 按程序集名区分，不打架。
+    Write-Host "==> publish itami CLI (same folder)"
+    dotnet publish src\ItamiTimer.Cli -c Release -r win-x64 --self-contained false -o $StageDir --nologo -v quiet
+    if ($LASTEXITCODE -ne 0) { throw "dotnet publish (cli) failed" }
+
+    # 命令行工具不写文档等于不存在——D6"能猜的就让人猜"只管 GUI，不管 CLI（L22）。
+    Copy-Item "installer\README.txt" -Destination $StageDir -Force
+
     $candidates = @(
         "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe",
         "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",

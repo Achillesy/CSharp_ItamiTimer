@@ -60,7 +60,46 @@
 
   <ItemGroup>
     <ProjectReference Include="..\ItamiTimer.Core\ItamiTimer.Core.csproj" />
+
+    <!--
+      闹钟到点时 App 起一个 shell 去跑 **同目录下的** itami.exe（DECISIONS L19/L22，
+      规格见 DESIGN §9.3）。安装包那条路由 pack-windows.ps1 把两个项目 publish 到同一个
+      目录来保证；**本地从 bin\Debug 跑的那条路要靠这个引用 + 下面的拷贝 target**。
+
+      ⚠️ 不加的话症状很温和、也很容易被当成功能没做：闹钟到点，日志里只有一句
+      "cannot find the itami CLI"，命令一条都不执行——而 CLAUDE.md 规定本地验证正是跑
+      bin\Debug 的产物，也就是说**这个功能只在装机之后才能测**。项目自己的 F5 说得很
+      清楚：凡是「必须记得做」的手工步骤（比如"测之前记得把 itami.exe 拷过来"），就是
+      迟早会被忘掉的步骤。
+
+      ReferenceOutputAssembly=false：只要构建顺序，不要把 itami.dll 当程序集引用进来
+      （两个项目各自编译了同一份 Command.cs，真引用进来会撞类型）。
+      没有循环依赖：Cli 是用 <Compile Include> link App 的源文件，不是项目引用。
+    -->
+    <ProjectReference Include="..\ItamiTimer.Cli\ItamiTimer.Cli.csproj"
+                      ReferenceOutputAssembly="false" Private="false" />
   </ItemGroup>
+
+  <!--
+    把 itami.* 拷到 App 的输出目录，让 bin\Debug / bin\Release 的布局跟安装目录一致。
+
+    路径不写死，问 Cli 项目自己的 GetTargetPath 要——写死 bin\$(Configuration)\net10.0
+    在带 RID 的构建里就不对了（那时输出在 …\net10.0\win-x64\）。
+
+    只挂 Build：publish 那条路由打包脚本显式 publish CLI 到同一个 StageDir，不靠这里。
+  -->
+  <Target Name="CopyItamiCliNextToApp" AfterTargets="Build">
+    <MSBuild Projects="$(MSBuildThisFileDirectory)..\ItamiTimer.Cli\ItamiTimer.Cli.csproj"
+             Targets="GetTargetPath"
+             Properties="Configuration=$(Configuration);TargetFramework=$(TargetFramework)">
+      <Output TaskParameter="TargetOutputs" ItemName="_ItamiCliDll" />
+    </MSBuild>
+    <ItemGroup>
+      <_ItamiCliFiles Include="%(_ItamiCliDll.RootDir)%(_ItamiCliDll.Directory)itami.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_ItamiCliFiles)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+    <Message Importance="normal" Text="Copied @(_ItamiCliFiles->Count()) itami CLI file(s) next to the app" />
+  </Target>
 
   <!--
     The rules file needs to travel with the exe, otherwise the published program can't find

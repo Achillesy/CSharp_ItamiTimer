@@ -104,13 +104,19 @@ public static class Command
 
         var shell = OperatingSystem.IsWindows() ? "cmd.exe" : "/bin/sh";
 
-        var psi = new ProcessStartInfo(shell)
-        {
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-        };
+        // ⚠️ **不重定向 stdout/stderr**（2026-08-09 改，DECISIONS L19/L21）：子进程直接继承
+        // 本进程的控制台，输出就落在用户眼前那个窗口里。
+        //
+        // 为什么这很重要，而不是"少写两行"：`shutdown /h` 在休眠被禁用的机器上**退出码 0、
+        // stdout 空、stderr 空、机器纹丝不动**——它把"此系统上没有启用休眠 (126)"这句话
+        // **直接写给控制台**，绕开了管道。重定向的那一版因此完全看不见失败（L17）。
+        //
+        // 附带好处：没有管道就没有 L15 那个"串行读 + 缓冲写满 = 死锁"的死角，也就不再需要
+        // L14 那套分钟边界取消——那两条护栏都随之作废。
+        //
+        // `CreateNoWindow` 也不设了：这个方法现在只由 `itami`（控制台程序）调用，它本来就
+        // 有窗口；App 那边不再走这里，改成起一个 shell 去跑 `itami commands --execute --yes`。
+        var psi = new ProcessStartInfo(shell) { UseShellExecute = false };
 
         if (OperatingSystem.IsWindows())
         {
@@ -146,38 +152,83 @@ public static class Command
             var p = Process.Start(psi);
             if (p is null) { Log.Warn("executeCommand: the shell process did not start"); return; }
 
-            // **等它真正跑完再返回**（用户 2026-08-08）。调用方是 MainWindow.OnMinute 那段
-            // 直线代码，这一分钟的其余事情要排在命令之后——命令多半是关机/重启，等不到
-            // 结果才是正常情况（进程被系统杀掉，下面这几行根本不会执行）。
-            //
-            // 先读完两个流再 WaitForExit，顺序不能反：管道缓冲区写满时子进程会阻塞在写上，
-            // 那样"等它退出"就成了等一件永远不会发生的事。
-            //
-            // ⚠️ **两个流是串行读的，这留着一个已知的死角**（2026-08-09 记，用户知情）：
-            // 子进程把 stderr 写满一个管道缓冲（Windows 上通常 4KB）就会阻塞在写 stderr
-            // 上，于是永远不关 stdout，我们就卡在下面第一行等一个永远不来的 EOF。改成
-            // 两个流并发读能根治，但用户不要并发（"每分钟的任务是异步执行的，不想引出
-            // 更多意想不到的问题"）。兜底是调用方那一层：分钟边界会取消这次等待
-            // （`MainWindow.OnMinute`），所以最坏是丢掉这一分钟，不会永久卡死。
-            // 现有清单里的命令（关机/锁屏/休眠）输出接近于零，实际撞上的概率很低。
-            var stdout = await p.StandardOutput.ReadToEndAsync(ct);
-            var stderr = await p.StandardError.ReadToEndAsync(ct);
+            // 等它跑完再返回。**没有管道了，所以这里不可能再卡在读流上**——唯一的等待是
+            // 进程本身退出，而关机/重启等不到结果才是正常情况（进程被系统杀掉，下面这
+            // 几行根本不会执行）。
             await p.WaitForExitAsync(ct);
 
+            // 退出码仍然记一笔，但**别把它当成"命令成功了"的证据**：`shutdown /h` 在休眠
+            // 被禁用时就是退出码 0（L17）。真正的失败信息在屏幕上，不在这行日志里。
             Log.Info($"executeCommand exited with {p.ExitCode}");
-            if (!string.IsNullOrWhiteSpace(stdout)) Log.Info($"  stdout: {stdout.Trim()}");
-            if (!string.IsNullOrWhiteSpace(stderr)) Log.Warn($"  stderr: {stderr.Trim()}");
         }
         catch (OperationCanceledException)
         {
-            // 分钟边界把等待掐了。**子进程没被杀，还在跑**——它可能正是那条执行到一半的
-            // 关机命令。这里只是不再等它的退出码。往上抛给 OnMinute 记一条 Warn。
             Log.Warn($"executeCommand: stopped waiting (still running): {cmd}");
             throw;
         }
         catch (Exception e)
         {
             Log.Error($"Failed to run executeCommand ({cmd})", e);
+        }
+    }
+
+    /// <summary>
+    /// **App 到点时走的就是这一个方法**（2026-08-09，DECISIONS L19，规格见 DESIGN §9.3）：
+    /// 起一个**带控制台窗口**的 shell，让它去跑 `itami commands --execute --yes`，然后
+    /// 立刻返回。不重定向、不 await、不看退出码。
+    ///
+    /// ⚠️ 起作用的是**"有一个真实控制台"**，不是"换了个解释器"——命令本身仍然由
+    /// <see cref="ExecuteAsync"/> 里的 `cmd.exe /c` / `sh -c` 解释，`rules.json` 里的条目
+    /// 语义一个字没变（L21）。绕这一圈只为让 `shutdown /h` 那类**只讲给控制台听**的
+    /// 失败信息能被人看见（L17）。
+    ///
+    /// ⚠️ `-NoExit` 由这里给，**`itami` 自己永远不停顿**（L20）：窗口活多久是启动方的事。
+    /// `--yes` 只表示"不用等人按 y"，不表示"跑完就关窗"。
+    ///
+    /// 返回 false = 连 shell 都没起来（多半是找不到 `itami.exe`）。**这是新架构下我们
+    /// 唯一还能真正判断的失败**，跟"命令跑得对不对"是两回事，所以它值得单独记一条 Error。
+    /// </summary>
+    public static bool LaunchInShell()
+    {
+        // 跟 ItamiTimer.exe 同目录。安装包必须把 CLI 一起打进去（L22）——在 2.2.0 之前
+        // 打包脚本只 publish 了 App，装机的机器上根本没有这个文件。
+        var exe = Path.Combine(AppContext.BaseDirectory,
+            OperatingSystem.IsWindows() ? "itami.exe" : "itami");
+
+        if (!File.Exists(exe))
+        {
+            // `Log.Error` 要一个异常，这条路上没有——但级别本来也该是 Warn：文件不在
+            // 是个可以看懂的状况（多半是从项目目录直接跑 App、CLI 没编），不是崩溃。
+            Log.Warn($"executeCommand: cannot find the itami CLI next to the app ({exe}); nothing was run");
+            return false;
+        }
+
+        var psi = OperatingSystem.IsWindows()
+            ? new ProcessStartInfo("powershell.exe")
+            {
+                // `-NoExit` 让窗口留着；`&` 是 PowerShell 的调用运算符，路径带空格时必须有它。
+                Arguments = $"-NoExit -Command \"& '{exe}' commands --execute --yes\"",
+                UseShellExecute = true,   // true 才会真的开一个控制台窗口
+            }
+            // macOS 待做（用户 2026-08-09：那边单独做，思路一样，也只负责起 shell）。
+            // 这里先按 Unix 的通用做法起一个 shell，**它不会弹出可见窗口**——所以 macOS
+            // 上"能看见错误信息"这半个收益暂时拿不到，等那边单独实现 Terminal.app 那条路。
+            : new ProcessStartInfo("/bin/sh")
+            {
+                ArgumentList = { "-c", $"'{exe}' commands --execute --yes" },
+                UseShellExecute = false,
+            };
+
+        try
+        {
+            Log.Info($"Alarm fired; launching a shell to run: itami commands --execute --yes");
+            Process.Start(psi);
+            return true;
+        }
+        catch (Exception e)
+        {
+            Log.Error("executeCommand: could not start the shell", e);
+            return false;
         }
     }
 }
