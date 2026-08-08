@@ -166,6 +166,26 @@ itami replay --since "2026-07-27 14:00" --until "2026-07-27 15:30" --minutes 25 
 
 `itami start` 在终端里跑一轮真实计时；`itami bench` 完全不连 ActivityWatch，用合成事件跑引擎。
 
+## 挑选和试跑闹钟要执行的命令
+
+rules.json 里的 `executeCommand` 是一份常用命令收藏夹，**闹钟永远只跑第一条**。
+`itami commands` 就是用来换第一条、以及在不等闹钟真到点的前提下试跑某一条的：
+
+```bash
+itami commands              # 选一条，挪到第一位（改写 rules.json，留一份 .bak）
+itami commands --list       # 只看，什么都不改
+itami commands --test       # 选一条，y/N 确认后立即执行
+itami commands --execute N  # 直接跑第 N 条，不问
+```
+
+它操作的是**程序真正在用的那一份 rules.json**（`AppData.RulesPath` 的三级查找链），
+并且把这个路径打在第一行。换完顺序对正在运行的 ItamiTimer **立刻生效**——闹钟到点那
+一刻会重读 rules.json，不用重启。
+
+`--test` 走的是**跟闹钟到点完全同一份代码**（源文件被 link 进两个项目，不是抄一份），
+所以"在这儿试通了"对界面才是有意义的结论。换序是文本级搬运，绝不做 JSON 往返序列化：
+你写的注释和缩进逐字节保留；碰上它拿不准的数组形状会直接拒绝改写，而不是猜。
+
 ## 调试出口
 
 三个渲染完就退出、不开窗口的命令行开关（对 CI 安全）：

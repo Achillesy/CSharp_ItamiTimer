@@ -205,6 +205,30 @@ whether your rules actually match what you do.
 `itami start` runs a live round in the terminal; `itami bench` exercises the engine on
 synthetic events with no ActivityWatch at all.
 
+## Picking and testing the alarm's command
+
+`executeCommand` in rules.json is a shortlist of shell commands; **the alarm always runs
+the first one**. `itami commands` is how you reorder that list and try an entry out without
+waiting for an alarm to actually fire:
+
+```bash
+itami commands              # pick one, move it to #1 (rewrites rules.json, keeps a .bak)
+itami commands --list       # just print them, change nothing
+itami commands --test       # pick one and run it now, after a y/N confirm
+itami commands --execute N  # run entry N now, no prompt
+```
+
+It works on **the rules.json the app actually uses** (the three-tier lookup in
+`AppData.RulesPath`) and prints that path on the first line. Reordering takes effect
+immediately in a running ItamiTimer — the alarm re-reads rules.json when it fires, so
+there's nothing to restart.
+
+`--test` runs the entry through **exactly the same code the alarm uses** (the source file
+is linked into both projects, not copied), so "it worked here" actually means something.
+The reorder is a text-level move, never a JSON round-trip: your comments and indentation
+survive byte for byte, and if the array shape isn't something it can move safely it
+refuses rather than guessing.
+
 ## Debug exits
 
 Three CLI switches that render off-screen and exit (no window, safe for CI):
