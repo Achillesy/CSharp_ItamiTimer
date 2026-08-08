@@ -55,6 +55,16 @@ echo "==> publish (${RID}, framework-dependent)"
 dotnet publish src/ItamiTimer.App -c Release -r "$RID" --self-contained false \
     -o "$STAGE/publish" --nologo -v quiet
 
+# CLI 也要装（2026-08-09，DECISIONS L22）：闹钟到点时 App 用 `open -a Terminal` 起一个
+# 窗口去跑 `itami commands --execute --yes`，那个文件必须真的在 .app 里。在这之前这里
+# 只 publish 了 App，装机的机器上根本没有 itami，日志里只会留一句 "cannot find the
+# itami CLI"、命令一条都不跑。
+# 发到**同一个 publish 目录**：两边共用 ItamiTimer.Core.dll 等程序集（同一次 Release
+# 构建，内容一致），各自的 .deps.json / .runtimeconfig.json 按程序集名区分，不打架。
+echo "==> publish itami CLI (same folder)"
+dotnet publish src/ItamiTimer.Cli -c Release -r "$RID" --self-contained false \
+    -o "$STAGE/publish" --nologo -v quiet
+
 # .pdb files are automatically deleted by the csproj's StripPdbFromPublish, on
 # AfterTargets="Publish". macOS's native packages don't ship a .dSYM either, so there's
 # nothing else to clean up here.
@@ -150,6 +160,76 @@ This build isn't notarized by Apple. The first time you open it, Gatekeeper
 will say it's from an unidentified developer -- right-click (or Control-click)
 ItamiTimer.app and choose "Open", then confirm once. After that it opens
 normally, including by double-click.
+
+
+The itami command line tool
+===========================
+
+Inside the app bundle there is a second program:
+
+  ItamiTimer.app/Contents/MacOS/itami
+
+You never have to use it. It exists for one job the window deliberately has no
+buttons for: choosing, and testing, the command the alarm runs.
+
+rules.json (in ~/Library/Application Support/ItamiTimer/) can hold a shortlist
+of shell commands under "executeCommand". When the Execute switch in Settings
+is on and the alarm goes off, ItamiTimer runs THE FIRST ONE -- always #0, never
+any other. The list is a shortlist, not a menu: to change which command is
+armed, you move one to the top.
+
+In Terminal, with the app in /Applications:
+
+  ITAMI=/Applications/ItamiTimer.app/Contents/MacOS/itami
+
+  \$ITAMI commands --list
+        Print the list. The * marks #0 -- the one the alarm will run.
+        Changes nothing.
+
+  \$ITAMI commands --select 3
+        Move entry 3 to the top, so it becomes #0.
+        Rewrites rules.json and keeps a .bak copy next to it. Your comments and
+        indentation survive exactly as you wrote them.
+        A running ItamiTimer picks this up on its own -- no restart needed.
+
+  \$ITAMI commands --execute
+        Run #0 right now, so you can see whether it actually works without
+        waiting for an alarm. Asks y/N first, because that list usually has
+        "shut down" and "restart" in it.
+
+Anything else -- a misspelled switch, --select with no number, a number that
+isn't in the list -- just prints the list and changes nothing. Only those exact
+forms do anything, so a typo can never run or rewrite something by accident.
+
+
+Why a Terminal window opens when the alarm fires
+------------------------------------------------
+
+The alarm doesn't run your command directly. It opens a Terminal window, and
+that window runs "itami commands --execute --yes" (--yes just means "don't wait
+for me to press y" -- nobody is at the keyboard when an alarm goes off).
+
+The window stays open on purpose. Some commands only report failure to a
+console, where no program can capture it. In a real window you just read it.
+If the command shuts the machine down, the window goes with it; if it fails,
+the reason is still on screen when you get back.
+
+Most of the default macOS commands drive System Events (restart, sleep, log
+out, shut down). The first time one runs, macOS asks whether to allow it --
+System Settings > Privacy & Security > Automation. Until it is allowed, those
+commands fail with "Not authorized to send Apple events (-1743)", and the
+Terminal window is where you will see that.
+
+
+Where things live
+-----------------
+
+  ~/Library/Application Support/ItamiTimer/rules.json      goals + executeCommand
+  ~/Library/Application Support/ItamiTimer/settings.json   sounds, switches, position
+  ~/Library/Application Support/ItamiTimer/itami.log       what happened, and why
+
+The window itself never explains anything and never shows a report -- that is
+deliberate. itami.log is where you look afterwards.
 NOTE
 
     mkdir -p dist

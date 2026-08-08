@@ -447,8 +447,9 @@ public partial class MainWindow : Window
 
             // ---- 4) 闹钟：判断 + 执行/响铃**在同一处**，且是整分钟的最后一件事。
             //         Execute 和响铃互斥（DECISIONS E8/E9），所以这里是二选一。
-            //         `Command.ExecuteFresh` 重读 rules.json，不用启动时那份快照——用户
-            //         可能刚用 `itami commands` 换过第一条；`_rules` 只当读失败的兜底。
+            //         "重读 rules.json"这件事仍然成立，只是**不再由 App 做**：跑起来的
+            //         `itami commands --execute` 在它自己的进程里现读一次，所以用户刚用
+            //         `itami commands --select` 换过的第一条立刻生效，不用重启（L19）。
             if (now >= _alarmQuietUntil && _alarm.ShouldFire(now))
             {
                 _alarm.MarkFired();   // 一次性：响过即撤，不是每日重复（DECISIONS E5）

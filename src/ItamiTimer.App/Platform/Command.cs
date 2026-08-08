@@ -203,24 +203,9 @@ public static class Command
             return false;
         }
 
-        var psi = OperatingSystem.IsWindows()
-            ? new ProcessStartInfo("powershell.exe")
-            {
-                // `-NoExit` 让窗口留着；`&` 是 PowerShell 的调用运算符，路径带空格时必须有它。
-                Arguments = $"-NoExit -Command \"& '{exe}' commands --execute --yes\"",
-                UseShellExecute = true,   // true 才会真的开一个控制台窗口
-            }
-            // macOS 待做（用户 2026-08-09：那边单独做，思路一样，也只负责起 shell）。
-            // 这里先按 Unix 的通用做法起一个 shell，**它不会弹出可见窗口**——所以 macOS
-            // 上"能看见错误信息"这半个收益暂时拿不到，等那边单独实现 Terminal.app 那条路。
-            : new ProcessStartInfo("/bin/sh")
-            {
-                ArgumentList = { "-c", $"'{exe}' commands --execute --yes" },
-                UseShellExecute = false,
-            };
-
         try
         {
+            var psi = OperatingSystem.IsWindows() ? WindowsShell(exe) : MacTerminal(exe);
             Log.Info($"Alarm fired; launching a shell to run: itami commands --execute --yes");
             Process.Start(psi);
             return true;
@@ -231,4 +216,48 @@ public static class Command
             return false;
         }
     }
+
+    private static ProcessStartInfo WindowsShell(string exe) => new("powershell.exe")
+    {
+        // `-NoExit` 让窗口留着；`&` 是 PowerShell 的调用运算符，路径带空格时必须有它。
+        Arguments = $"-NoExit -Command \"& '{exe}' commands --execute --yes\"",
+        UseShellExecute = true,   // true 才会真的开一个控制台窗口
+    };
+
+    /// <summary>
+    /// macOS 侧的"开一个看得见的窗口"（2026-08-09，DECISIONS L24）：写一个临时
+    /// <c>.command</c> 脚本，再用 <c>open -a Terminal</c> 让 Terminal.app 去跑它。
+    ///
+    /// ⚠️ **不用 `osascript -e 'tell application "Terminal" to do script ...'`**——那条路
+    /// 要「自动化」权限（隐私与安全性 → 自动化），本机实测拿到的是
+    /// <c>-1743 Not authorized to send Apple events</c>：**API 不报错、窗口不出现**，
+    /// 正好是这个项目最怕的那种安静失效，而且用户不点那个授权框就永远修不好。
+    /// <c>open</c> 走的是 LaunchServices，不需要任何授权。
+    ///
+    /// 脚本末尾的 <c>exec $SHELL -i</c> 是 Windows 那边 <c>-NoExit</c> 的对应物：命令跑完
+    /// 之后留一个交互 shell，窗口不会自己消失，那句只讲给控制台听的错误信息才留得住
+    /// （L17/L20）。**停顿由启动方给，`itami` 自己仍然永不停顿**（L20）——手动在自己的
+    /// 终端里跑 `itami commands --execute` 时不会被迫按键。
+    /// </summary>
+    private static ProcessStartInfo MacTerminal(string exe)
+    {
+        // 固定文件名而不是每次一个新的：这是启动器的一次性跳板，不是用户数据，
+        // 攒一堆临时文件没有意义。
+        var script = Path.Combine(Path.GetTempPath(), "itami-execute.command");
+        File.WriteAllText(script,
+            "#!/bin/sh\n"
+            + $"{SingleQuote(exe)} commands --execute --yes\n"
+            + "exec \"${SHELL:-/bin/sh}\" -i\n");
+        if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(script,
+            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+
+        return new ProcessStartInfo("open")
+        {
+            ArgumentList = { "-a", "Terminal", script },
+            UseShellExecute = false,
+        };
+    }
+
+    /// <summary>套一层单引号交给 sh，路径里真有单引号时按 <c>'\''</c> 的老办法拆开。</summary>
+    private static string SingleQuote(string s) => "'" + s.Replace("'", "'\\''") + "'";
 }

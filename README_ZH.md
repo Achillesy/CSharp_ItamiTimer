@@ -204,7 +204,12 @@ itami commands --execute --yes # 跑 #0，不问（闹钟到点走的就是这�
 你直接就能读到哪里出了问题。
 
 窗口是**故意不关**的。命令要是把机器关了，窗口留不留无所谓；命令要是失败了，你回来时
-原因还在屏幕上。
+原因还在屏幕上。Windows 上那个窗口是 PowerShell（`-NoExit`）；macOS 上是 Terminal，
+用 `open -a Terminal` 打开一个末尾是 `exec $SHELL -i` 的小脚本。
+
+macOS 上默认那几条大多要指挥 System Events（重启、睡眠、注销、关机），这需要「自动化」
+权限——系统设置 → 隐私与安全性 → 自动化。没授权之前它们会以
+`Not authorized to send Apple events` 失败，而那个 Terminal 窗口正是你能看到这句话的地方。
 
 你的命令仍然由 `cmd.exe /c`（Windows）/ `sh -c`（macOS）解释，跟以前**一模一样**——
 `rules.json` 里的东西没有一条改变含义。变的只是它们**在哪里**跑。

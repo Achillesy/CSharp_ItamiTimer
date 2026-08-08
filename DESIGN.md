@@ -656,13 +656,21 @@ buffer 的 7200 秒绘制区**不是内存考虑，是画图考虑**：钟面一
 ### 9.3 命令怎么被执行：App 只负责开一个窗口（2.2.0，DECISIONS L19~L22）
 
 **App 自己不再执行任何命令。** 到点且 Execute 开着时，它只做一件事——起一个**带控制台
-窗口**的 shell，让那个窗口去跑：
+窗口**的 shell，让那个窗口去跑 `itami commands --execute --yes`，然后立刻返回。
+**不重定向、不 await、不看退出码。**
 
-```
-powershell.exe -NoExit -Command "& '<装到哪>\itami.exe' commands --execute --yes"
-```
+两个平台起窗口的方式不同，**要的效果是同一个：一个人眼看得见、且不会自己消失的窗口**。
 
-然后立刻返回。**不重定向、不 await、不看退出码。**
+| | 怎么起 | 窗口靠什么留住 |
+|---|---|---|
+| Windows | `powershell.exe -NoExit -Command "& '<装到哪>\itami.exe' commands --execute --yes"`，`UseShellExecute = true`（true 才会真开一个控制台窗口） | `-NoExit` |
+| macOS | 往临时目录写一个 `.command` 脚本，再 `open -a Terminal <脚本>` | 脚本末尾 `exec "$SHELL" -i` |
+
+⚠️ **macOS 上不要用 `osascript -e 'tell application "Terminal" to do script ...'`**
+（2026-08-09，DECISIONS L24）：那条路要「自动化」权限，本机实测拿到的是
+`-1743 Not authorized to send Apple events`——**API 不报错、窗口不出现**，正是这个项目
+最怕的那种安静失效，而且用户不点那个授权框就永远修不好。`open` 走 LaunchServices，
+不需要任何授权。
 
 **为什么要这么绕一圈**，起因是一个真实的坑（2026-08-08 用户实测）：`shutdown /h` 在
 休眠被禁用的机器上**退出码 0、stdout 空、stderr 空，机器纹丝不动**——它把
@@ -685,7 +693,7 @@ powershell.exe -NoExit -Command "& '<装到哪>\itami.exe' commands --execute --
 | 谁 | 负责什么 | 不负责什么 |
 |---|---|---|
 | App | 起一个 shell 窗口；`Process.Start` 抛异常时记 Error（连 shell 都没起来是我们**唯一**还能真判断的失败） | 命令跑没跑成 |
-| shell 窗口 | 活着、显示输出。`-NoExit` 由**启动方**给（App 给），**`itami` 自己永远不停顿**——否则你在自己终端里手动跑也要被迫按一次键 | 解释命令 |
+| shell 窗口 | 活着、显示输出。留住窗口的那一下（Windows 的 `-NoExit` / macOS 的 `exec $SHELL -i`）由**启动方**给，**`itami` 自己永远不停顿**——否则你在自己终端里手动跑也要被迫按一次键 | 解释命令 |
 | `itami commands --execute` | 读 rules.json、跑 #0、把输出留在控制台上 | 窗口活多久 |
 
 **`--yes`**：`--execute` 默认会先打印要跑什么再等 y/N（清单里躺着 shut down / restart）。
@@ -695,8 +703,11 @@ App 那条路没有人在旁边按键，所以带 `--yes` 跳过确认。**`--ye
 **App 到哪儿找 `itami.exe`**：跟 `ItamiTimer.exe` 同目录（`AppContext.BaseDirectory`）。
 这要求**两条路都把 CLI 放到 App 旁边**：
 
-- **安装包**：`pack-windows.ps1` 多 publish 一次 CLI 到同一个 StageDir（L22）——在这之前
-  它只 publish 了 App，装机的机器上根本没有 `itami.exe`。
+- **安装包**：两个打包脚本各多 publish 一次 CLI 到同一个目录（L22）——`pack-windows.ps1`
+  发到 StageDir，`pack-macos.sh` 发到 `$STAGE/publish`（随后整个拷进
+  `ItamiTimer.app/Contents/MacOS/`）。在这之前两边都只 publish 了 App，装机的机器上
+  根本没有这个文件。两个安装包各附一份讲 CLI 怎么用的说明（Windows 的
+  `installer/README.txt`、macOS 的 dmg 里那份 `Read Me.txt`）。
 - **本地 `bin\Debug` / `bin\Release`**：App 的 csproj 里一个
   `ProjectReference ReferenceOutputAssembly="false"` + 一个拷贝 target（L23）。
   **不靠"记得手动拷一下"**——CLAUDE.md 规定本地验证跑的就是 `bin\Debug` 的产物，
@@ -775,7 +786,7 @@ App 那条路没有人在旁边按键，所以带 `--yes` 跳过确认。**`--ye
   2. AW 查询 + 判定 + 三声通知          （§4.2 那五件事在 TaskSession.TickMinuteAsync 里）
   3. Alarms 清单 → 提示条 + 系统通知 + 响铃   （§9.1）
   4. 闹钟到点？ → MarkFired，然后二选一：
-        Execute 开 → 执行命令，await 到子进程退出
+        Execute 开 → 起一个带窗口的 shell 去跑命令，起完就走（§9.3，不 await）
         Execute 关 → 响铃
 ```
 
@@ -811,8 +822,9 @@ App 那条路没有人在旁边按键，所以带 `--yes` 跳过确认。**`--ye
 下一分钟 `ShouldFire` 仍为真、会重试，预约的关机不会被静悄悄吃掉——闹钟排第 1 步的那一版
 才有"异常一次、关机永远不发生"的问题。
 
-**命令等不到结果仍然是正常情况**（macOS 上进程被系统杀掉）；Windows 上它会立刻返回，
-那也没关系——这一分钟该做的事已经全部做完了。
+**2.2.0 起 App 根本不等命令**（§9.3：只负责起窗口，起完立刻返回），所以"命令跑多久"
+再也影响不到这一分钟。闹钟排在最后这个决定本身仍然成立、而且理由没变：命令多半是关机，
+让它当最后一件事，前面该做的都已经做完。
 
 **`_minuteBusy` 闸门**：AW 慢或命令挂住不退时，下一个分钟边界照样会到；这时整分钟
 直接跳过并记一条日志，**绝不让两份并排跑**——那正是这次要消掉的东西。

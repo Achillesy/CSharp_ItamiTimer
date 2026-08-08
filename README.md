@@ -247,7 +247,14 @@ straight to the console, where a captured pipe can never see it. Run it in a rea
 and you simply read what went wrong.
 
 The window is left open on purpose. If your command shuts the machine down, that hardly
-matters; if it fails, the reason is still on screen when you come back.
+matters; if it fails, the reason is still on screen when you come back. On Windows that
+window is PowerShell (`-NoExit`); on macOS it's Terminal, opened with `open -a Terminal`
+on a small throwaway script that ends in `exec $SHELL -i`.
+
+On macOS most of the default entries drive System Events (restart, sleep, log out, shut
+down), which needs Automation permission — System Settings → Privacy & Security →
+Automation. Until it's granted they fail with `Not authorized to send Apple events`, and
+that Terminal window is exactly where you'll see it.
 
 Your commands are still interpreted by `cmd.exe /c` (Windows) or `sh -c` (macOS) exactly as
 before — nothing in `rules.json` changes meaning. What changed is only *where* they run.
