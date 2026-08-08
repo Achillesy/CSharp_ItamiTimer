@@ -270,6 +270,17 @@ async Task<int> BackfillAsync()
 /// </summary>
 async Task<int> CommandsAsync()
 {
+    // 认识的就这四个。**不认识的一律报错，绝不当没看见**（2026-08-09）：`--test` 删掉之后
+    // 它原本会静默掉进 `--select` 的交互分支——用户以为在试跑，实际在改文件，这比直接
+    // 报错糟得多。删掉一个开关就该让它报错，不是让它变成另一条命令。
+    var known = new[] { "list", "select", "execute", "rules" };
+    if (opt.Keys.FirstOrDefault(k => !known.Contains(k)) is { } bad)
+    {
+        Console.Error.WriteLine($"\nunknown option for commands: --{bad}");
+        Console.Error.WriteLine("valid: --list | --select [N] | --execute | --rules <path>\n");
+        return 1;
+    }
+
     // `--rules` 后面没跟值时会是空串（布尔开关的形状），别把空串当路径用。
     var path = opt.GetValueOrDefault("rules") is { Length: > 0 } p ? p : AppData.RulesPath();
 
