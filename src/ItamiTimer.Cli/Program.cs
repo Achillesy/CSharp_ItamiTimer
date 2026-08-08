@@ -1,4 +1,5 @@
 using ItamiTimer;
+using ItamiTimer.App;   // Command / Log / AppData：csproj 里 link 进来的同一份源文件
 using ItamiTimer.Cli;
 using ItamiTimer.Core;
 
@@ -24,6 +25,7 @@ try
         "replay" => await ReplayPastAsync(),
         "backfill" => await BackfillAsync(),
         "bench" => Bench(),
+        "commands" => await CommandsAsync(),
         _ => Help(),
     };
 }
@@ -260,6 +262,44 @@ async Task<int> BackfillAsync()
     return 0;
 }
 
+/// <summary>
+/// `executeCommand` 收藏夹的三个模式（用户 2026-08-08）。默认操作的是**程序真正在用的
+/// 那一份 rules.json**（<see cref="AppData.RulesPath"/> 的三级查找链），不是当前目录下的
+/// ——其它子命令沿用旧的 `./rules.json` 默认值，这里刻意不同：改命令的人要改的必然是
+/// 生效的那一份。
+/// </summary>
+async Task<int> CommandsAsync()
+{
+    // `--rules` 后面没跟值时会是空串（布尔开关的形状），别把空串当路径用。
+    var path = opt.GetValueOrDefault("rules") is { Length: > 0 } p ? p : AppData.RulesPath();
+
+    if (opt.TryGetValue("execute", out var raw))
+    {
+        // 非交互出口：给脚本用，也是"我就想跑第 N 条看看"的最短路径。不弹确认——
+        // 明确写下了下标就是明确的意图，跟 --test 里"光标可能停错行"不是一回事。
+        if (!int.TryParse(raw, out var n))
+        {
+            Console.Error.WriteLine($"\n--execute needs an entry number, got \"{raw}\"\n");
+            return 1;
+        }
+        var list = GroupRules.Load(path).CommandsFor(Command.OsKey);
+        if (n < 0 || n >= list.Count)
+        {
+            Console.Error.WriteLine($"\nNo entry #{n} under \"{Command.OsKey}\" ({list.Count} available)\n");
+            return 1;
+        }
+        Console.WriteLine($"\n  {list[n]}\n");
+        await Command.ExecuteAsync(GroupRules.Load(path), n);
+        Console.WriteLine($"  done. Exit code and output are in the log:\n    {Log.Path_}\n");
+        return 0;
+    }
+
+    var mode = opt.ContainsKey("test") ? CommandPicker.Mode.Test
+             : opt.ContainsKey("list") ? CommandPicker.Mode.List
+             : CommandPicker.Mode.Promote;
+    return await CommandPicker.RunAsync(path, mode);
+}
+
 int Help()
 {
     Console.WriteLine("""
@@ -270,6 +310,19 @@ int Help()
           itami replay   --since "2026-07-26 20:00" [--until ...] --minutes 25 --group <goal>
           itami backfill --group <goal> [--since ...] [--until ...]
           itami bench    --minutes 25 [--pattern focused|mixed|slack]
+          itami commands [--list | --test | --execute N]
+
+        commands works on executeCommand in the rules.json the app actually uses. The alarm
+        always runs entry #1, and re-reads the file when it fires — so promoting an entry
+        takes effect immediately, without restarting ItamiTimer.
+
+          (no flag)   pick an entry, move it to #1   (rewrites rules.json, keeps a .bak)
+          --list      just print them, change nothing
+          --test      pick an entry and run it now, after a y/N confirm
+          --execute N run entry N now, no prompt
+
+        --test runs it through exactly the same code the alarm uses, so "it worked here"
+        actually means something.
 
         backfill dry-runs the accumulated-time count over real history (fail-closed: only
         what ActivityWatch can actually prove). Omit --since to walk the whole history,
@@ -397,11 +450,23 @@ GroupRules LoadRules()
     return GroupRules.Load(path);
 }
 
+/// <summary>
+/// `--key value` 成对参数，外加**不带值的布尔开关**（`--list` / `--test`）。
+///
+/// 开关的判定是"下一个参数不存在、或者它自己也是 `--` 开头"——2026-08-08 加 `commands`
+/// 时发现原来的版本会把结尾的 `--list` **整个丢掉**（它要求后面必须跟一个值），于是
+/// `itami commands --list` 悄悄退化成了默认的"挪到第一位"模式：**不报错，只是干了另一件事**，
+/// 而且是会写文件的那件。现有的 `--minutes 25` 这类调用不受影响，它们的值从不以 `--` 开头。
+/// </summary>
 static Dictionary<string, string> ParseOptions(string[] args)
 {
     var d = new Dictionary<string, string>();
     for (var i = 1; i < args.Length; i++)
-        if (args[i].StartsWith("--") && i + 1 < args.Length)
-            d[args[i][2..]] = args[++i];
+    {
+        if (!args[i].StartsWith("--")) continue;
+        var key = args[i][2..];
+        var hasValue = i + 1 < args.Length && !args[i + 1].StartsWith("--");
+        d[key] = hasValue ? args[++i] : "";
+    }
     return d;
 }

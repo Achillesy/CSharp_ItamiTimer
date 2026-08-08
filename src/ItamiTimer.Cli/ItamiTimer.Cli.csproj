@@ -23,6 +23,15 @@
     <!-- Keyboard/mouse idle reading (§8.3.6) is needed by both App and Cli. The source
          lives in App (§8.5: platform-specific code belongs to that layer), and is linked
          in here — the same file compiled on both sides, not copied. -->
+
+    <!-- executeCommand 的执行、日志、数据目录：`itami commands` 试跑功能的**全部价值**
+         就在于它跑的必须是 App 到点时跑的那一条路径。这里 link 的是同一份源文件，不是抄
+         一份：抄一份的话两边会各自漂移，CLI 测过了 App 照样能坏，2026-08-08 那个引号
+         bug（DECISIONS L1）就正好是这种「只在 App 那条路上才犯」的错。
+         三个文件都零 Avalonia 依赖，链条是 Command → Log → AppData。 -->
+    <Compile Include="..\ItamiTimer.App\Platform\Command.cs" Link="Shared\Command.cs" />
+    <Compile Include="..\ItamiTimer.App\Log.cs" Link="Shared\Log.cs" />
+    <Compile Include="..\ItamiTimer.App\AppData.cs" Link="Shared\AppData.cs" />
   </ItemGroup>
 
 </Project>

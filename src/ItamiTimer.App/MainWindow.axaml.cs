@@ -367,32 +367,80 @@ public partial class MainWindow : Window
             : _settings.TickEnabled;
         if (ticking) Tick.Play(sec, _settings.TickVolume);
 
-        // Alarms 清单每分钟查一次（DESIGN §17）——蹭同一个整分钟节拍，跟闹钟的每秒检查
-        // 粒度不同，不需要闹钟那种跨会话持久的 `_fired`。
-        //
-        // ⚠️ **必须排在闹钟检查之前**：同一分钟内两边都到点时，闹钟的响铃调用要晚发生，
-        // Windows 上 winmm 单通道谁后响谁把前一个截断，闹钟响完真的什么都不留，Alarms
-        // 清单响完还有系统通知兜底，让闹钟赢这一下代价更小（DESIGN §17，延伸 E12/E13）。
-        if (sec == 0) CheckAlarmsList(DateTime.Now);
+        // 整分钟：所有"以分为单位"的功能都在 OnMinute 里按固定顺序走一遍。
+        if (sec == 0) OnMinute(DateTime.Now);
+    }
 
-        // Alarms 清单提示条：显示满一分钟就自动收起，不用等下一次整分钟检查——这里跟
-        // 秒针共用的心跳一样每秒都看一眼，到点就关，用户不需要手动点掉。
-        if (_alarmBannerHideAt is { } hideAt && DateTime.Now >= hideAt)
-        {
-            F<Grid>("AlarmBanner").IsVisible = false;
-            _alarmBannerHideAt = null;
-        }
+    /// <summary>上一分钟的处理还没跑完的闸门（见 <see cref="OnMinute"/>）。</summary>
+    private bool _minuteBusy;
 
-        // Alarm check: the target moment is fixed the instant the yellow hand was set ->
-        // fire once (not while it's being adjusted). The check runs **once per second**
-        // (the second-boundary gate above), so it's at most 1 second late.
-        if (DateTime.Now >= _alarmQuietUntil && _alarm.ShouldFire(DateTime.Now))
+    /// <summary>
+    /// **这个程序里所有以分钟为单位的事，全在这里、按这个顺序、一件做完再做下一件**
+    /// （用户 2026-08-08 定的结构）。
+    ///
+    /// 为什么要收成一段直线代码：在这之前，分钟级的事分散在**两个各走各的定时器**上——
+    /// 闹钟和 Alarms 清单挂在 33ms 的 <see cref="_frame"/>（分钟边界后 ≤33ms 触发），
+    /// AW 查询和判定挂在 <see cref="TaskSession"/> 自己的 1 秒定时器上，而那个定时器锚在
+    /// **任务开始那一刻**，所以它在边界后 0~1000ms 的任意位置触发。两者之间没有任何协调，
+    /// 结果就是：闹钟已经把关机/重启命令发出去了，同一分钟里 AW 查询随后才到——
+    /// 等于一边拆机器一边还在敲 aw-server（用户 2026-08-08 报：两次重启后 AW 报警）。
+    /// 这不是哪一行写了并行，是两个时钟没有合并，所以光把闹钟从每秒改成每分钟解决不了。
+    ///
+    /// 现在 <see cref="_frame"/> 是唯一的钟：秒针和滴答仍然吃它的秒级节拍，其余全部
+    /// 收到这里。<see cref="TaskSession"/> 不再持有定时器，由这里在分钟边界调它一次。
+    ///
+    /// ⚠️ **顺序是有讲究的，别随手调**：
+    /// 1. 闹钟排第一且**等命令跑完**（用户："一旦 command 开启，首先执行"）——命令多半是
+    ///    关机/重启，等不到结果才是正常情况（进程被系统杀掉）。这一分钟的判定就算没做完
+    ///    也不可惜：账本本来就是下次启动时按 AW fail-closed 重数的（§11.2）。
+    /// 2. 闹钟**响铃**却排在最后、在 Alarms 清单之后——DESIGN §17：Windows 的 winmm 是
+    ///    单通道，谁后响谁把前一个截断；闹钟响完什么都不留，清单响完还留着一分钟的提示条，
+    ///    所以让闹钟赢这一下代价更小。**"闹钟先判断"和"闹钟后响铃"不矛盾，是两件事。**
+    /// </summary>
+    private async void OnMinute(DateTime now)
+    {
+        // AW 慢、或者命令挂住不退时，下一个分钟边界照样会到。宁可整分钟跳过也不要两份
+        // 并排跑——那正是这次要消掉的东西。
+        if (_minuteBusy) { Log.Warn("Previous minute's work is still running; skipping this minute"); return; }
+        _minuteBusy = true;
+        try
         {
-            _alarm.MarkFired();   // One-shot — fires once and is done, not a daily repeating alarm.
-                                  // Clearing it in memory is enough; SaveAlarmOnExit writes it back to null on exit.
-            if (_settings.CommandEnabled) Command.Execute(_rules);
-            else Sound.Repeat(_settings.CommandSound, AlarmRings);
+            // ---- 1) 闹钟到点判断。Execute 开着就执行命令并等它结束。
+            var ringAlarm = false;
+            if (now >= _alarmQuietUntil && _alarm.ShouldFire(now))
+            {
+                _alarm.MarkFired();   // 一次性：响过即撤，不是每日重复（DECISIONS E5）
+                if (_settings.CommandEnabled)
+                    // 重读 rules.json，不用启动时那份快照——用户可能刚用 `itami commands`
+                    // 换过第一条。_rules 只当读失败时的兜底。
+                    await Command.ExecuteFreshAsync(_rules);
+                else
+                    ringAlarm = true;   // 响铃排到最后，见上面的注释
+            }
+
+            // ---- 2) AW 查询 + 判定 + 三声通知（专注达成/休息结束/键鼠空闲在里面触发）
+            if (_session is { } session) await session.TickMinuteAsync(now);
+
+            // ---- 3) Alarms 清单：提示条 + 系统通知 + 响铃
+            CheckAlarmsList(now);
+
+            // ---- 4) 闹钟响铃（必须在清单之后）
+            if (ringAlarm) Sound.Repeat(_settings.CommandSound, AlarmRings);
+
+            // ---- 5) 提示条显示满一分钟就收起。到点时刻本身是整分钟，+1 分钟仍是整分钟，
+            //         所以在这里判断跟原来每秒判断的效果完全一样。
+            if (_alarmBannerHideAt is { } hideAt && now >= hideAt)
+            {
+                F<Grid>("AlarmBanner").IsVisible = false;
+                _alarmBannerHideAt = null;
+            }
         }
+        catch (Exception e)
+        {
+            // 这一分钟的某件事炸了不能把时钟带走：秒针、滴答、下一分钟都得照常。
+            Log.Error("The minute's work threw", e);
+        }
+        finally { _minuteBusy = false; }
     }
 
     /// <summary>

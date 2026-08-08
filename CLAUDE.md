@@ -37,6 +37,9 @@ DECISIONS.md 有没有这条；有，就先跟用户确认再动；没有，也�
   平台调用一律收口在 `App/Platform/` 的单个文件里。
 - 仓库不放位图和音频；界面文字英文（窗口标题中文是产品名）；`rules.json` 是用户数据
   不翻译。
+- **`itami commands` 的试跑跑的必须是 App 到点时跑的那份代码**：`Command.cs`/`Log.cs`/
+  `AppData.cs` 由 Cli 的 csproj 用 `<Compile Include>` **link** 进去，不是抄一份。
+  抄一份 = CLI 测过了 App 照样能坏（DECISIONS L5），这个工具的意义就没了。
 
 ## ⚠️ 2.0.x 的无边框透明窗口：macOS 侧一次都没跑过
 
@@ -78,6 +81,7 @@ DESIGN.md §14。
 ```
 src/ItamiTimer.Core/   判定与重放（纯函数为主）   ← 逻辑改动优先落这里，可测
 src/ItamiTimer.Cli/    itami 命令行，真实数据干跑  ← 唯一给账单的地方
+                       也管 executeCommand：`itami commands` 换第一条 / 试跑一条
 src/ItamiTimer.App/    Avalonia 界面              ← 平台差异每处收口在单个文件
 tests/                 xUnit，测试名是中文句子，直接陈述行为
 ```

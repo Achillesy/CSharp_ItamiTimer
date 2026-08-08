@@ -42,7 +42,6 @@ public sealed class TaskSession : IDisposable
 
     private readonly GroupRules _rules;
     private readonly AwClient _aw;
-    private readonly DispatcherTimer _tick = new();
     private readonly JudgmentBuffer _buffer;
     private string? _winBucket, _afkBucket;
     private bool _busy;
@@ -102,9 +101,6 @@ public sealed class TaskSession : IDisposable
         // The rest wedge gets its preview at the same instant: the deficit is still the
         // full commitment right now, and projecting it lands exactly on start + focus length.
         RestFrom = _buffer.TaskStart.AddSeconds(_buffer.ElapsedSeconds + _deficitSeconds);
-        _tick.Interval = TimeSpan.FromSeconds(1);
-        _tick.Tick += OnTick;
-        _tick.Start();
         Log.Info($"Task started. Goal: {task.Group}  focus {task.FocusMinutes} min  " +
                  $"from {task.StartedAt:HH:mm:ss}  break {task.RestMinutes} min");
     }
@@ -112,10 +108,24 @@ public sealed class TaskSession : IDisposable
     private DateTimeOffset _lastAwMinute;
     private int _lastCellCount = -1;
 
-    private async void OnTick(object? sender, EventArgs e)
+    /// <summary>
+    /// 这一分钟该做的事。**由 <c>MainWindow.OnMinute</c> 在整分钟边界调用，这个类自己
+    /// 不再持有定时器**（用户 2026-08-08：所有以分为单位的功能收到一条直线上）。
+    ///
+    /// 原来这里挂着一个 1 秒的 <c>DispatcherTimer</c>，而它锚在**任务开始那一刻**，跟
+    /// MainWindow 那个 33ms 的钟各走各的——分钟边界到来时，闹钟/清单在 ≤33ms 内触发，
+    /// 这边的 AW 查询却在 0~1000ms 后才到，两者没有任何协调。闹钟发出关机命令之后
+    /// AW 查询紧跟着到，就是这么来的（见 <c>MainWindow.OnMinute</c> 的注释）。
+    ///
+    /// 休息阶段原来是**每秒**跑一遍的，现在也在这里：`RestFrom` 在休息期间恒等于
+    /// `done`，每秒重复赋同一个值再触发一次 `Updated`（重画表盘 + 重算任务栏图标）本来
+    /// 就是白做；而 `done` 是整分钟、`RestMinutes` 是整数，`done + rest` 必然落在整分钟上，
+    /// 所以按分钟判断"休息结束了没有"跟按秒判断的结果**完全一样**，一秒都不会晚。
+    /// </summary>
+    public async Task TickMinuteAsync(DateTime nowLocal)
     {
         if (_busy || Finished) return;
-        var now = DateTimeOffset.Now;
+        var now = new DateTimeOffset(nowLocal);
 
         // ---- Rest phase: purely local timing
         if (_focusDoneAt is { } done)
@@ -127,7 +137,6 @@ public sealed class TaskSession : IDisposable
             {
                 Finished = true;
                 RestFrom = null;
-                _tick.Stop();
                 Log.Info("Break over; task finished.");
                 Interrupted?.Invoke(Interrupt.RestDone);
             }
@@ -269,14 +278,9 @@ public sealed class TaskSession : IDisposable
     {
         if (Finished) return;
         Finished = true;
-        _tick.Stop();
         Task = Task with { Status = RecordStatus.Abandoned, AbandonedAt = DateTimeOffset.Now };
         Log.Info($"Task abandoned. Focused {FocusedSeconds() / 60.0:F1}/{Task.FocusMinutes} min");
     }
 
-    public void Dispose()
-    {
-        _tick.Stop();
-        _aw.Dispose();
-    }
+    public void Dispose() => _aw.Dispose();
 }
