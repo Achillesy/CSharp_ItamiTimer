@@ -389,28 +389,31 @@ public partial class MainWindow : Window
     /// 现在 <see cref="_frame"/> 是唯一的钟：秒针和滴答仍然吃它的秒级节拍，其余全部
     /// 收到这里。<see cref="TaskSession"/> 不再持有定时器，由这里在分钟边界调它一次。
     ///
-    /// ⚠️ **顺序是有讲究的，别随手调**：
-    /// 1. 闹钟到点**判断**排第一（`MarkFired` 必须在这儿），但**命令执行排在最后一步**
-    ///    （2026-08-08 改，推翻了同日早些时候的"命令优先"，见下）。
-    /// 2. 闹钟**响铃**排在 Alarms 清单之后——DESIGN §17：Windows 的 winmm 是单通道，
-    ///    谁后响谁把前一个截断；闹钟响完什么都不留，清单响完还留着一分钟的提示条，
-    ///    所以让闹钟赢这一下代价更小。**"闹钟先判断"和"闹钟后响铃"不矛盾，是两件事。**
+    /// ⚠️ **顺序是有讲究的，别随手调**（2026-08-08 定稿，DECISIONS L13）：
+    /// ① 提示条到期收起 ② AW 查询+判定+三声通知 ③ Alarms 清单 ④ 闹钟（判断+执行/响铃）
     ///
-    /// ⚠️ **为什么命令从第 ① 步挪到了最后**（用户 2026-08-08 提出，推翻 DECISIONS L9
-    /// 里"不要把命令挪到最后"那条护栏）：原来的理由是"命令多半是关机，进程会被系统
-    /// 杀掉，后面几步根本不会执行"——**这个前提只在 macOS 成立**。Windows 的
-    /// `shutdown /s /t 0` 是提交关机请求就返回，`await` 会立刻回来，后面的 AW 查询照跑，
-    /// 正好落在系统正在关机的时候——**那就是 2.0.7 本来要修的那个 bug（"一边拆机器一边
-    /// 还在敲 aw-server"），在 Windows 上等于没修**。把命令放到最后，这个修复不再依赖
-    /// "进程会被杀掉"这个平台特性，两个平台都成立。代价是关机比原来晚一点（最坏是这一
-    /// 分钟 AW 查询的 10 秒超时），对预约关机可以忽略。
+    /// 三条理由，每条都对应一个真踩过或差点踩到的坑：
     ///
-    /// ⚠️ **整段只有一层 try，第 ②~⑤ 步不单独包**（用户 2026-08-08 明确要求）：那里面
-    /// 抛异常这一分钟就到此为止，第 ⑥ 步的命令**不会执行**，而闹钟已经 `MarkFired`
-    /// （一次性，DECISIONS E5），这次不跑就永远不跑——预约的关机不会发生。**这是知情
-    /// 接受的**：真出这种事，下面 `catch` 里那行 Error 日志就是唯一也是应该被看到的信号。
-    /// 曾经写过一版内层 `try`，让命令"就算前面炸了也照跑"，用户当场否掉——理由是那样
-    /// 会**把一次真正的故障粉饰成已处理**，反而让人略过日志里那一行。
+    /// 1. **闹钟整体排最后**，判断和动作不再分开。命令多半是关机/重启，让它成为这一分钟
+    ///    的最后一件事，前面该做的都已经做完。原来的写法是"第 ① 步判断并执行命令"，
+    ///    理由是"关机会把本进程杀掉，后面几步根本不会执行"——**那个前提只在 macOS 成立**：
+    ///    Windows 的 `shutdown /s /t 0` 提交请求就返回，`await` 立刻回来，后面的 AW 查询
+    ///    照跑，正好落在系统正在关机的时候，也就是 2.0.7 本来要修的那个 bug（"一边拆机器
+    ///    一边还在敲 aw-server"）在 Windows 上等于没修。放到最后，这个修复不再依赖
+    ///    "进程会被杀掉"这个平台特性。代价：关机比原来晚一点（最坏是这一分钟 AW 查询的
+    ///    10 秒超时），对预约关机可以忽略。
+    /// 2. **闹钟响铃因此天然排在 Alarms 清单之后**，正合 DESIGN §17 的要求：Windows 的
+    ///    winmm 是单通道，谁后响谁把前一个截断；闹钟响完什么都不留，清单响完还留着一分钟
+    ///    的提示条，所以让闹钟赢这一下代价更小。
+    /// 3. **提示条收起排在第 ① 步**，即"先清旧的、再画新的"（新提示条在第 ③ 步画）。
+    ///    反过来也能工作，但只是因为 `hideAt = now + 1分钟` 恰好躲过判断——哪天有人把它
+    ///    改成 59 秒，收起那步就会把刚画上的提示条当场擦掉。这个顺序结构上不可能有那个 bug。
+    ///
+    /// ⚠️ **整段只有一层 try，不给中间几步单独包**（用户 2026-08-08 明确要求）：那样会
+    /// 把一次真正的故障粉饰成已处理，反而让人略过日志里那行 Error（用户原话："加了 log
+    /// 反而让我忽略了"）。**而且闹钟排到最后之后，不加 try 反而更安全**：前面几步抛异常时
+    /// `MarkFired` 根本没执行，闹钟没被消费掉，下一分钟 `ShouldFire` 仍为真、会重试——
+    /// 预约的关机不会被静悄悄吃掉。（闹钟排第 ① 步的那一版才有这个问题。）
     /// </summary>
     private async void OnMinute(DateTime now)
     {
@@ -420,15 +423,14 @@ public partial class MainWindow : Window
         _minuteBusy = true;
         try
         {
-            // ---- 1) 闹钟到点**判断**。这一步只决定"这分钟要不要执行命令 / 要不要响铃"，
-            //         两件事都不在这儿做（命令在最后，响铃在第 ④ 步）。
-            var runCommand = false;
-            var ringAlarm = false;
-            if (now >= _alarmQuietUntil && _alarm.ShouldFire(now))
+            // ---- 1) 上一分钟的提示条到期就收起。**排在第 ③ 步画新提示条之前**：
+            //         先清旧的、再画新的，第 ③ 步刚画上的那条结构上不可能被这里擦掉。
+            //         到点时刻本身是整分钟，+1 分钟仍是整分钟，所以按分钟判断跟原来
+            //         每秒判断的效果完全一样。
+            if (_alarmBannerHideAt is { } hideAt && now >= hideAt)
             {
-                _alarm.MarkFired();   // 一次性：响过即撤，不是每日重复（DECISIONS E5）
-                if (_settings.CommandEnabled) runCommand = true;
-                else ringAlarm = true;
+                F<Grid>("AlarmBanner").IsVisible = false;
+                _alarmBannerHideAt = null;
             }
 
             // ---- 2) AW 查询 + 判定 + 三声通知（专注达成/休息结束/键鼠空闲在里面触发）
@@ -437,23 +439,16 @@ public partial class MainWindow : Window
             // ---- 3) Alarms 清单：提示条 + 系统通知 + 响铃
             CheckAlarmsList(now);
 
-            // ---- 4) 闹钟响铃（必须在清单之后）
-            if (ringAlarm) Sound.Repeat(_settings.CommandSound, AlarmRings);
-
-            // ---- 5) 提示条显示满一分钟就收起。到点时刻本身是整分钟，+1 分钟仍是整分钟，
-            //         所以在这里判断跟原来每秒判断的效果完全一样。
-            if (_alarmBannerHideAt is { } hideAt && now >= hideAt)
+            // ---- 4) 闹钟：判断 + 执行/响铃**在同一处**，且是整分钟的最后一件事。
+            //         Execute 和响铃互斥（DECISIONS E8/E9），所以这里是二选一。
+            //         `Command.ExecuteFresh` 重读 rules.json，不用启动时那份快照——用户
+            //         可能刚用 `itami commands` 换过第一条；`_rules` 只当读失败的兜底。
+            if (now >= _alarmQuietUntil && _alarm.ShouldFire(now))
             {
-                F<Grid>("AlarmBanner").IsVisible = false;
-                _alarmBannerHideAt = null;
+                _alarm.MarkFired();   // 一次性：响过即撤，不是每日重复（DECISIONS E5）
+                if (_settings.CommandEnabled) await Command.ExecuteFreshAsync(_rules);
+                else Sound.Repeat(_settings.CommandSound, AlarmRings);
             }
-
-            // ---- 6) **最后**才执行命令，并等它跑完。等不到结果（进程被系统杀掉）是
-            //         macOS 上的正常情况；Windows 上它会立刻返回，那也没关系——这一分钟
-            //         该做的事已经全部做完了。
-            //         重读 rules.json，不用启动时那份快照——用户可能刚用 `itami commands`
-            //         换过第一条。_rules 只当读失败时的兜底。
-            if (runCommand) await Command.ExecuteFreshAsync(_rules);
         }
         catch (Exception e)
         {
