@@ -1030,7 +1030,7 @@ csproj 的 `AssemblyName=ItamiTimer`。macOS 上 AW 报的 `data.app` 就是前�
 |---|---|---|
 | 编译 | ✅ **通过** | Windows 上 `dotnet build` 0 警告 0 错误（2.0.7 的代码首次在 Windows 编译） |
 | 单元测试 | ✅ **通过** | 134 个全过（Core 98 + App 36，含 macOS 侧新加的 `RulesTextTests`/`CommandQuotingTests`） |
-| `itami commands --list` | ✅ **通过** | 正确解析到 `%LOCALAPPDATA%\ItamiTimerules.json`、正确走 `executeCommand.windows` 分支、正确提示"闹钟永远跑 #1" |
+| `itami commands --list` | ✅ **通过** | 正确解析到 `%LOCALAPPDATA%\ItamiTimer\rules.json`、正确走 `executeCommand.windows` 分支、正确提示"闹钟永远跑 #1" |
 | `shutdown /s /t 0` 的 `await` 行为 | ❌ **未验证，且不打算直接测** | 那条命令真的会关机。**2.0.8 把命令挪到最后一步之后，这一条不再是正确性的前提**——就算它立刻返回，后面也没有别的步骤了 |
 | winmm 单通道的截断顺序 | ❌ **未验证** | 要同一分钟内让闹钟和 Alarms 清单都到点，且得用耳朵听 |
 
