@@ -653,86 +653,81 @@ buffer 的 7200 秒绘制区**不是内存考虑，是画图考虑**：钟面一
   文件、`--execute [--yes]` 只跑 #0 且**不带下标**（想试别的先 `--select` 成 #0）。这样
   "试的那条"和"闹钟真会跑的那条"在设计上就是同一条。执行细节见 §9.3。
 
-### 9.3 命令怎么被执行：两个平台两条路（2.2.3，DECISIONS L19~L22 / L25~L27）
+### 9.3 命令怎么被执行：两个平台同一条路（2.2.4，DECISIONS L17/L21/L25~L29）
 
-到点且 Execute 开着时，**两个平台都是"起完就返回、绝不 await"**，但走的路不同——
-**理由不对称，不是随手分的**：
+到点且 Execute 开着时，**两个平台都走 `Command.LaunchDetached`**：直接把命令跑起来、
+**起完就返回**，输出交给后台任务收进 `itami.log`。**不起任何窗口。**
 
-| | 怎么执行 | 输出去哪 | 为什么 |
+```
+分钟序列第 ④ 步 → LaunchDetached
+    ├─ 现读 rules.json，取 #0（刚 --select 换过的立刻生效，不用重启）
+    ├─ Process.Start(cmd.exe /c … | /bin/sh -c …)   ← 解释器两边各自沿用，见下
+    └─ 立刻 return；后台 Task 并发读两个流、等退出、写日志
+```
+
+**中途存在过一版"Windows 另开一个控制台窗口"**（2.2.0~2.2.3），唯一理由是
+`shutdown /h` 在休眠被禁用时**退出码 0、stdout 空、stderr 空、机器纹丝不动**——那句
+"此系统上没有启用休眠 (126)"只讲给控制台听（L17）。2026-08-09 把这个现象的**范围**
+测清楚之后推翻了（L29）：
+
+| 命令（`cmd /c`，两个流都重定向） | 退出码 | stdout | stderr |
 |---|---|---|---|
-| Windows | 起一个**带控制台窗口**的 shell 跑 `itami commands --execute --yes`（`powershell.exe -NoExit -Command "& '<装到哪>\itami.exe' …"`，`UseShellExecute = true`） | 那个窗口 | `shutdown /h` 会**绕过管道**、只把失败讲给控制台听（L17），不给它真控制台就永远看不见 |
-| macOS | **直接 `sh -c` 跑**（`Command.LaunchDetached`），后台任务并发收两个流 | `itami.log` | **实测 macOS 没有那个病**：失败信息老实走 stdout/stderr，管道全抓得到（见下） |
+| `shutdown /h`（真失败） | **0** | **0 B** | **0 B** |
+| `shutdown /?` | 1 | 4390 B | 0 |
+| `shutdown /x`（无效参数） | 1 | 4390 B | 0 |
+| `nosuchcommand123` | 1 | 0 | 107 B |
+| `dir C:\不存在的路径` | 1 | 91 B | 16 B |
 
-**macOS 为什么在 2.2.3 砍掉了窗口**（用户 2026-08-09："这么一层套一层，其实我很不喜欢"）。
-原来是 `open → Terminal → 临时 .command → exec $SHELL -i → itami → sh -c → 命令` 六层，
-而它们全部服务于一个 **Windows 特有**的理由。实测四条会失败的命令：
+**不是"Windows 的失败信息普遍绕过管道"，是一条命令的一个分支**——`shutdown.exe` 连
+4390 字节的帮助文本都老实走 stdout。为这一个罕见分支让每次到点都闪一个黑窗、还多养
+一条平台专有代码，不划算。macOS 侧本来就没有这个病（`pmset -x` → stdout、
+`shutdown`（非 root）/ `open /nonexistent` / 找不到的命令 → stderr，**没有一条是两个流
+都空的**）。
 
-| 命令 | 失败信息去了哪 |
-|---|---|
-| `pmset -x` | stdout ✅ |
-| `shutdown`（非 root） | stderr ✅ |
-| `open /nonexistent` | stderr ✅ |
-| 不存在的命令 | stderr ✅ |
+⚠️ **知情接受的代价**：`shutdown /h` 那一类失败在 App 日志里只剩 `exited with 0`。
+**诊断手段是在真实终端里跑 `itami commands --execute`**——那里有真控制台，那句话就出来
+了。三份 README 都写了这条指引。
 
-**没有一条是"两个流都空"的**，所以捕获进日志就够了，跟这个项目"界面全程沉默、日志是
-唯一能事后查的地方"（§8.1a）也更一致。
+**几条不能动的实现细节**：
 
-⚠️ **已知代价，用户知情接受（L26）**：走 Terminal 时 Apple 事件授权记在 **Terminal**
-头上（实测它已获 System Events 授权）；直接执行则记在 **ItamiTimer** 头上，而它**不在
-系统设置的自动化列表里**，且 `pack-macos.sh` 是 ad-hoc 签名、每次重装身份都变。所以
-`osascript ... System Events` 那几条**第一次会弹授权框**，到点时多半没人在键盘前——
-表现是命令卡着不动，60 秒后日志出现 `still running`。点一次"允许"即可。
-`pmset`、`open` 这类不碰 System Events 的命令不受影响。
+- **命令解释器一个字没改**：`cmd.exe /c`（Windows）/ `sh -c`（Unix），`rules.json` 里
+  所有既有条目语义不变（`start notepad` 照旧是 cmd 的内建 `start`），L1/L2 那两条引号
+  护栏继续有效，`CommandQuotingTests` 不用重写（L21）。中途认真考虑过换成默认 shell
+  （PowerShell/zsh），代价是重新解释用户所有既有条目——**能不能看见输出跟解释器是谁
+  无关**，这两件事被混为一谈过一次。
+- ⚠️ **`CreateNoWindow` 必须跟着 `redirect` 走，不能无条件设 `true`**（L29，2026-08-09
+  实测）：
+  - App 那条路（`redirect: true`）**必须设**——App 是 GUI 进程、自己没有控制台，
+    `UseShellExecute = false` 起 `cmd.exe` 时 Windows 会**给子进程新建一个控制台窗口**，
+    正是这次要消掉的那个黑窗。
+  - CLI 那条路（`redirect: false`）**绝不能设**——实测 `echo HELLO && dir C:\不存在`：
+    设了之后**退出码 1 收得到、输出一个字都没有**；不设则 `HELLO`、目录清单、
+    `File Not Found` 全在。而 CLI 的全部意义就是让输出落在真控制台上，设上去等于
+    **把本节唯一的诊断手段废掉**。
+- ⚠️ **后台收尾必须 `Task.WhenAll` 并发读两个流**（L27）：串行读（先读完 stdout 再读
+  stderr）在 300KB stderr 下 **macOS 实测必死锁**；Windows 的管道缓冲区更小（约 4KB
+  vs 64KB），**只会更容易撞上**。`redirect: false` 的 CLI 那条路没有管道，不受影响。
+- **卡住时只记一行，不杀进程**：60 秒后日志出现 `still running`。命令合法地跑很久
+  （关机流程）跟卡在权限框上，从外面分辨不了，杀错了比等着糟。
+- **绝不 await**：分钟序列调完立刻往下走，命令挂死也只是线程池里停着一个任务。
+  L14 那套"分钟边界取消"因此整个删掉；`_minuteBusy` 保留，但它守的只剩 AW 查询
+  （本来就有 10 秒超时）。
 
-⚠️ **macOS 上不要用 `osascript -e 'tell application "Terminal" to do script ...'`**
-（L24，虽然这条路现在已经不走了，结论仍然成立）：那要「自动化」权限，本机实测拿到的是
-`-1743 Not authorized to send Apple events`——**API 不报错、窗口不出现**。
-
-**为什么要这么绕一圈**，起因是一个真实的坑（2026-08-08 用户实测）：`shutdown /h` 在
-休眠被禁用的机器上**退出码 0、stdout 空、stderr 空，机器纹丝不动**——它把
-"此系统上没有启用休眠 (126)"这句话**直接写给控制台**，绕开了我们重定向的那两根管子。
-所以旧架构下这类失败**在程序侧无解**：能观察到的信号全都在说成功（L17）。
-
-换成"在真实控制台里跑"之后，这句话就落在你眼前的窗口里了。**注意起作用的是"有控制台
-窗口"，不是"换了个解释器"**——这两件事一开始被混为一谈过。所以：
-
-- **命令本身仍然由 `cmd.exe /c`（Windows）/ `sh -c`（Unix）解释，一个字没改**。
-  `rules.json` 里所有既有条目语义不变（`start notepad` 照旧是 cmd 的内建 `start`），
-  L1/L2 那两条引号护栏继续有效，`CommandQuotingTests` 不用重写。
-- **`itami` 内部不再重定向 stdout/stderr**，子进程直接继承控制台。
-  ⚠️ 但"死锁不成立了"这句话**只对 `itami` 这条路成立**：macOS 的 `LaunchDetached`
-  为了把输出收进日志**必须重定向**，管道又回来了。那边靠 `Task.WhenAll` **并发**读两个
-  流来避开——2026-08-09 实测确认：串行读（先读完 stdout 再读 stderr）在 300KB stderr 下
-  **必死锁**，并发读全部拿到（L27）。**别再把 L15 当成"已经不存在的问题"。**
-- **App 不再 await 命令**，所以 L14 为了防止分钟循环被卡死而加的取消机制整个删掉；
-  `_minuteBusy` 保留，但它现在守的只剩 AW 查询（本来就有 10 秒超时）。
-
-**三个职责的边界**：
+**职责边界**：
 
 | 谁 | 负责什么 | 不负责什么 |
 |---|---|---|
-| App（Windows） | 起一个 shell 窗口；`Process.Start` 抛异常时记 Error（连 shell 都没起来是我们**唯一**还能真判断的失败） | 命令跑没跑成 |
-| App（macOS） | 直接跑命令并**立刻返回**；后台任务收输出、等退出、写日志（退出码 + stdout + stderr）。卡住时 60 秒记一行 `still running`，**不杀进程**——命令合法地跑很久跟卡在授权框上从外面分辨不了，杀错了比等着糟 | 阻塞分钟序列（结构上就不 await） |
-| shell 窗口 | 活着、显示输出。留住窗口的那一下（Windows 的 `-NoExit` / macOS 的 `exec $SHELL -i`）由**启动方**给，**`itami` 自己永远不停顿**——否则你在自己终端里手动跑也要被迫按一次键 | 解释命令 |
-| `itami commands --execute` | 读 rules.json、跑 #0、把输出留在控制台上 | 窗口活多久 |
+| App | 把命令起起来；`Process.Start` 抛异常时记 Error（**这是唯一还能真判断的失败**）；后台收输出写日志 | 命令跑没跑成——退出码在 `shutdown /h` 上就是撒谎的（L17） |
+| `itami commands --execute` | 读 rules.json、跑 #0、**输出留在真控制台上** | 窗口活多久（`itami` 自己永远不停顿，L20） |
 
-**`--yes`**：`--execute` 默认会先打印要跑什么再等 y/N（清单里躺着 shut down / restart）。
-App 那条路没有人在旁边按键，所以带 `--yes` 跳过确认。**`--yes` 只表示"不用等我按 y"，
-不表示"跑完就关窗"**——窗口一关，这次重构要抢救的那句错误信息又没了（L20）。
+**`--yes`**：`--execute` 默认先打印要跑什么再等 y/N（清单里躺着 shut down / restart）。
+L29 之后 App 不再调用 CLI，所以 `--yes` 只剩"手动跑时跳过确认"这一个用途。
 
-**App 到哪儿找 `itami.exe`**：跟 `ItamiTimer.exe` 同目录（`AppContext.BaseDirectory`）。
-这要求**两条路都把 CLI 放到 App 旁边**：
-
-- **安装包**：两个打包脚本各多 publish 一次 CLI 到同一个目录（L22）——`pack-windows.ps1`
-  发到 StageDir，`pack-macos.sh` 发到 `$STAGE/publish`（随后整个拷进
-  `ItamiTimer.app/Contents/MacOS/`）。在这之前两边都只 publish 了 App，装机的机器上
-  根本没有这个文件。两个安装包各附一份讲 CLI 怎么用的说明（Windows 的
-  `installer/README.txt`、macOS 的 dmg 里那份 `Read Me.txt`）。
-- **本地 `bin\Debug` / `bin\Release`**：App 的 csproj 里一个
-  `ProjectReference ReferenceOutputAssembly="false"` + 一个拷贝 target（L23）。
-  **不靠"记得手动拷一下"**——CLAUDE.md 规定本地验证跑的就是 `bin\Debug` 的产物，
-  少了这一步的症状是「闹钟到点，日志里一句 cannot find the itami CLI，命令一条不跑」，
-  看着就像功能没做（F5：凡是"必须记得做"的步骤就是迟早会被忘掉的步骤）。
+**CLI 仍然跟 App 一起装**（L22/L23/L25a）：两个打包脚本各多 publish 一次 CLI 到同一个
+目录，App 的 csproj 用 `ProjectReference ReferenceOutputAssembly="false"` + 拷贝 target
+让 `bin\Debug` 的布局跟安装目录一致。**L29 之后这不再是"不装就坏"**——App 到点已经不
+调用 CLI 了——**而是"装了用户才有诊断手段"**：上面那条"命令看着没生效就去终端里跑
+`itami commands --execute`"的指引，得有那个 exe 才成立。
 
 ### 9.1 Alarms 清单（1.2.0，DECISIONS J）
 

@@ -135,6 +135,18 @@ public static class Command
             UseShellExecute = false,
             RedirectStandardOutput = redirect,
             RedirectStandardError = redirect,
+
+            // ⚠️ **跟着 redirect 走，不能无条件设 true**（2026-08-09 实测，DECISIONS L29）。
+            //
+            // App 那条路（redirect: true）必须设：App 是 GUI 进程、自己没有控制台，用
+            // UseShellExecute=false 起 `cmd.exe` 时 Windows 会**给子进程新建一个控制台
+            // 窗口**——正是统一执行方式要消掉的那个黑窗。
+            //
+            // CLI 那条路（redirect: false）绝不能设：**实测子进程的输出会整个消失**
+            // （`echo HELLO && dir C:\不存在`：退出码 1 收到了，但一个字都没打出来）。
+            // 而 CLI 的**全部意义**就是让输出落在真控制台上——`shutdown /h` 那类只讲给
+            // 控制台听的失败靠的就是它（L17/L29）。设上去这条诊断路径就废了。
+            CreateNoWindow = redirect,
         };
 
         if (OperatingSystem.IsWindows())
@@ -164,15 +176,21 @@ public static class Command
     // ---------------------------------------------------------------- App 到点时走的路
 
     /// <summary>
-    /// **macOS 上 App 到点时走的就是这一个方法**（2026-08-09 用户定，DECISIONS L26，
+    /// **两个平台 App 到点时走的都是这一个方法**（2026-08-09 统一，DECISIONS L26/L28，
     /// 规格见 DESIGN §9.3）：直接把命令跑起来，**起完就返回**，输出交给后台任务收进日志。
     ///
-    /// 为什么 macOS 不跟 Windows 一样去开一个控制台窗口：Windows 那套的**唯一理由**是
-    /// `shutdown /h` 会绕过管道、只把失败讲给控制台听（L17）。**macOS 上实测没有这回事**
-    /// ——`pmset -x`、`shutdown`、`open /nonexistent`、找不到的命令，失败信息全部老老实实
-    /// 走 stdout/stderr，管道都抓得到。既然抓得到，就没必要为了看一眼错误去套
-    /// `open → Terminal → 临时 .command → exec $SHELL -i` 那四层（用户 2026-08-09：
-    /// "这么一层套一层，其实我很不喜欢"）。
+    /// 中间存在过一版"Windows 另开一个控制台窗口跑 `itami commands --execute --yes`"，
+    /// 唯一理由是 `shutdown /h` 会绕过管道、只把失败讲给控制台听（L17）。**后来实测发现
+    /// 那个病的范围比想象中窄得多**：同样经 `cmd /c` 且两个流都重定向，`shutdown /?` 和
+    /// `shutdown /x` 的 4390 字节帮助文本照样被抓到，命令不存在（107B stderr）、路径不存在
+    /// （16B stderr）也都正常——**只有 `/h`「休眠未启用」这一条分支既不吐字节、退出码还是 0**。
+    /// 为一个罕见分支让每次到点都闪一个黑窗、还多养一条平台专有代码，不划算（L28）。
+    /// macOS 侧则从一开始就没有这个病（`pmset -x`、`open /nonexistent`、找不到的命令，
+    /// 失败信息全部老实走 stdout/stderr）。
+    ///
+    /// ⚠️ 代价（知情接受）：`shutdown /h` 那一类失败在日志里只会留下 `exited with 0`。
+    /// 诊断手段是**在真实终端里跑 `itami commands --execute`**——那里有真控制台，那句
+    /// "此系统上没有启用休眠"就出来了。README 里写了这条指引。
     ///
     /// ⚠️ **已知代价，用户知情接受**：走 Terminal 时 Apple 事件的授权记在 Terminal 头上
     /// （实测它已获 System Events 授权）；直接执行则记在 ItamiTimer 头上，而它**不在
@@ -242,43 +260,4 @@ public static class Command
         catch (Exception e) { Log.Error("executeCommand: failed to collect output", e); }
     }
 
-    /// <summary>
-    /// **Windows 上 App 到点时走的路**（2026-08-09，DECISIONS L19，规格见 DESIGN §9.3）：
-    /// 起一个**带控制台窗口**的 shell 去跑 `itami commands --execute --yes`，立刻返回。
-    ///
-    /// ⚠️ 起作用的是**"有一个真实控制台"**，不是"换了个解释器"——命令本身仍然由
-    /// <see cref="BuildShell"/> 里的 `cmd.exe /c` 解释，`rules.json` 里的条目语义一个字
-    /// 没变（L21）。绕这一圈只为让 `shutdown /h` 那类**只讲给控制台听**的失败信息能被
-    /// 人看见（L17）。**macOS 上没有这个病，所以那边不走这条路**（L26）。
-    ///
-    /// ⚠️ `-NoExit` 由这里给，**`itami` 自己永远不停顿**（L20）。
-    /// </summary>
-    public static bool LaunchInShell()
-    {
-        // 跟 ItamiTimer.exe 同目录。安装包必须把 CLI 一起打进去（L22）。
-        var exe = Path.Combine(AppContext.BaseDirectory, "itami.exe");
-
-        if (!File.Exists(exe))
-        {
-            Log.Warn($"executeCommand: cannot find the itami CLI next to the app ({exe}); nothing was run");
-            return false;
-        }
-
-        try
-        {
-            Log.Info("Alarm fired; launching a shell to run: itami commands --execute --yes");
-            Process.Start(new ProcessStartInfo("powershell.exe")
-            {
-                // `-NoExit` 让窗口留着；`&` 是 PowerShell 的调用运算符，路径带空格时必须有它。
-                Arguments = $"-NoExit -Command \"& '{exe}' commands --execute --yes\"",
-                UseShellExecute = true,   // true 才会真的开一个控制台窗口
-            });
-            return true;
-        }
-        catch (Exception e)
-        {
-            Log.Error("executeCommand: could not start the shell", e);
-            return false;
-        }
-    }
 }

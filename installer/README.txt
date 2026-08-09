@@ -47,20 +47,26 @@ isn't in the list — just prints the list and changes nothing. Only those exact
 forms do anything, so a typo can never run or rewrite something by accident.
 
 
-Why a window pops up when the alarm fires
------------------------------------------
+When a command seems to do nothing
+---------------------------------
 
-The alarm doesn't run your command directly. It opens a shell window, and that
-window runs "itami.exe commands --execute --yes" (--yes just means "don't wait
-for me to press y" — nobody is at the keyboard when an alarm goes off).
+The alarm runs your command and writes everything it can see — exit code,
+output, errors — to itami.log. No window opens.
 
-The window stays open on purpose. Some commands only report failure to a
-console: on a machine where hibernation is turned off, "shutdown /h" exits
-reporting success, prints nothing a program can capture, and simply does
-nothing at all. In a real window you just read the error.
+There is one class of failure it cannot see: a very few commands report failure
+only to a console. On a machine where hibernation is turned off, "shutdown /h"
+exits reporting success, prints nothing a program can capture, and simply does
+nothing at all. That is one branch of one command, not a general rule — unknown
+commands, bad paths and invalid flags all report normally.
 
-If the command shuts the machine down, the window goes with it. If it fails,
-the reason is still on screen when you get back.
+So if a command appears to have done nothing, and the log only says
+"exited with 0", run it yourself from a terminal:
+
+    .\itami.exe commands --execute
+
+There you have a real console, and the message that got swallowed shows up.
+(For that hibernate example it reads "hibernation has not been enabled" — the
+fix is to run "powercfg /h on" from an administrator terminal.)
 
 
 Where things live

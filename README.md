@@ -236,22 +236,26 @@ by construction — there is no "which one was I testing again?" to get wrong.
 
 ### What happens when the alarm fires
 
-Either way the app fires the command and **returns immediately** — it never waits, so a
-command that hangs can't stall the clock. The two platforms get there differently, and the
-reason is not symmetric.
+The app fires the command and **returns immediately** — it never waits, so a command that
+hangs can't stall the clock. **Both platforms do the same thing**: run it, write everything
+— exit code, stdout, stderr — to `itami.log`, and **never open a window**.
 
-**On Windows** the app opens a PowerShell window (`-NoExit`) and has *that* run
-`itami commands --execute --yes`. This exists for one reason: **some commands report failure
-only to a console.** `shutdown /h` on a machine without hibernation enabled exits with code
-0, writes nothing to stdout or stderr, and does nothing — the message ("hibernation has not
-been enabled") goes straight to the console, where a captured pipe can never see it. The
-window stays open so the reason is still there when you come back.
+**One class of failure it cannot see.** A very few commands report failure only to a
+console. `shutdown /h` on a machine without hibernation enabled exits with code 0, writes
+nothing to stdout or stderr, and does nothing at all — the message ("hibernation has not
+been enabled") bypasses the pipe entirely. This is one branch of one command, not a general
+rule: that same `shutdown`'s help text, its invalid-flag message, unknown commands and
+missing paths all report through the pipes just fine.
 
-**On macOS** the app just runs the command and writes everything — exit code, stdout,
-stderr — to `itami.log`. macOS has no equivalent of that console-only quirk: `pmset -x`,
-`shutdown`, `open /nonexistent` and unknown commands all report through stdout/stderr,
-where a pipe picks them up fine. So there's no window, and no chain of throwaway scripts
-to launch one.
+**So when a command appears to do nothing and the log only says `exited with 0`**, run it
+from a terminal:
+
+```bash
+itami commands --execute
+```
+
+There you have a real console, and the swallowed message shows up. That is why `itami`
+ships next to the app.
 
 One consequence worth knowing on macOS: most default entries drive System Events (restart,
 sleep, log out, shut down), which needs Automation permission — System Settings → Privacy &

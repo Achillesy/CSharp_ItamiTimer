@@ -52,13 +52,20 @@ DECISIONS.md 有没有这条；有，就先跟用户确认再动；没有，也�
 ✅ 都过了；**`shutdown /s /t 0` 的 `await` 行为和 winmm 截断顺序仍未验证**（前者不打算
 直接测——那条命令真的会关机）。逐条见 DESIGN §13.1 末尾那张表。
 
-**2.2.3 起 macOS 不再开窗口**（DESIGN §9.3、DECISIONS L26）：Windows 保持"起一个控制台
-窗口跑 `itami commands --execute --yes`"，**macOS 改成 App 直接 `sh -c` 跑、输出收进
-`itami.log`**——那套 `open → Terminal → 临时 .command` 的六层绕路，服务的是 Windows
-特有的毛病（`shutdown /h` 绕过管道只讲给控制台听），而 macOS 实测没有这回事。
-已实测：`LaunchDetached` 60~80ms 返回不阻塞、退出码 + stdout + stderr 都进了日志。
-⚠️ **已知代价**：Apple 事件授权从记在 Terminal 头上改成记在 ItamiTimer 头上，而它不在
-自动化列表里，所以 `osascript ... System Events` 那几条第一次会弹授权框。
+**2.2.4 起两个平台统一：都是 `Command.LaunchDetached` 直接跑命令、不开任何窗口、输出
+收进 `itami.log`**（DESIGN §9.3、DECISIONS L26/L29）。中途 Windows 单独走过"起一个控制台
+窗口跑 `itami commands --execute --yes`"（2.2.0~2.2.3），唯一理由是 `shutdown /h` 绕过
+管道只讲给控制台听（L17）；**后来把范围测清楚了**——同样重定向下 `shutdown /?`/`/x` 的
+4390 字节帮助文本照样抓得到，命令不存在、路径不存在也都有 stderr，**只有 `/h`「休眠未
+启用」这一条分支既不吐字节、退出码还是 0**。为一个罕见分支每次到点闪黑窗不划算。
+⚠️ **代价**：那类失败在日志里只剩 `exited with 0`，诊断手段是**终端里跑
+`itami commands --execute`**（有真控制台就看得见）。
+⚠️ **`BuildShell` 里 `CreateNoWindow = redirect`，两个值都是实测定的，别图省事改成常量**：
+App 那条路（重定向）不设它，Windows 会给子进程新建控制台窗口、黑窗回来；CLI 那条路
+（不重定向）设了它**子进程输出会整个消失**（实测退出码收得到、一个字都没有），
+而那正是唯一的诊断手段。
+⚠️ macOS 侧已知代价（L26）：Apple 事件授权记在 ItamiTimer 头上而它不在自动化列表里，
+所以 `osascript ... System Events` 那几条第一次会弹授权框。
 
 ⚠️ 2.0.8/2.0.9 重排了分钟序列（最终顺序：① 提示条到期收起 ② AW 查询+判定+三声通知
 ③ Alarms 清单 ④ 闹钟判断+执行命令/响铃；DESIGN §9.2、DECISIONS L13，推翻了 L9）：
