@@ -1102,7 +1102,7 @@ public partial class MainWindow : Window
     {
         try
         {
-            await new SettingsWindow(_settings).ShowDialog(this);
+            await new SettingsWindow(_settings, _rules).ShowDialog(this);
             // #2.6: activate the alarm when Execute is turned on
             if (_settings.CommandEnabled)
                 _alarm.Activate(DateTime.Now);

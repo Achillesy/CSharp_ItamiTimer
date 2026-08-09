@@ -1,6 +1,7 @@
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Markup.Xaml;
+using ItamiTimer.Core;
 
 namespace ItamiTimer.App;
 
@@ -21,6 +22,10 @@ namespace ItamiTimer.App;
 /// Selecting a sound plays it once immediately, **regardless of whether its toggle is
 /// on** -- picking a ringtone is about wanting to hear it, which is a separate matter from
 /// "will this actually ring later".
+///
+/// 卡片顺序（2026-08-09 用户指定）：Force Ticking、Focus complete、Break over、
+/// Idle Warning、Alarms、Command。**代码全部靠 <c>FindControl</c> 按名字取控件**，
+/// 所以顺序完全由 axaml 说了算，重排卡片不用动这里。
 /// </summary>
 public partial class SettingsWindow : Window
 {
@@ -29,7 +34,11 @@ public partial class SettingsWindow : Window
 
     public SettingsWindow() : this(new Settings()) { }
 
-    public SettingsWindow(Settings settings)
+    /// <param name="rules">
+    /// 启动时那份 rules.json，只用来给 Command 卡最底下那行预览兜底——
+    /// <see cref="Command.Preview"/> 会先重读文件，读不出来才用它（跟到点执行时一样）。
+    /// </param>
+    public SettingsWindow(Settings settings, GroupRules? rules = null)
     {
         _settings = settings;
         AvaloniaXamlLoader.Load(this);
@@ -58,15 +67,28 @@ public partial class SettingsWindow : Window
         {
             var toggle = this.FindControl<ToggleSwitch>("ExecuteOn")!;
             var combo = this.FindControl<ComboBox>("CommandSound")!;
+            var preview = this.FindControl<TextBlock>("CommandPreview")!;
             combo.ItemsSource = names;
             toggle.IsChecked = settings.CommandEnabled;
             combo.SelectedItem = settings.CommandSound;
             combo.IsEnabled = !settings.CommandEnabled; // Mutually exclusive: turning on Execute disables the sound picker
 
+            // 每次拨到 On 都重新问一遍，不是构造时算一次存着：`itami commands --select N`
+            // 可能在程序开着的时候改过 rules.json，而到点执行时读的正是那时候的文件。
+            void ShowPreview()
+            {
+                preview.IsVisible = settings.CommandEnabled;
+                if (!preview.IsVisible) return;
+                preview.Text = Command.Preview(rules)
+                    ?? $"(no executeCommand.{Command.OsKey} in rules.json)";
+            }
+            ShowPreview();
+
             toggle.IsCheckedChanged += (_, _) =>
             {
                 settings.CommandEnabled = toggle.IsChecked == true;
                 combo.IsEnabled = !settings.CommandEnabled;
+                ShowPreview();
                 Persist();
             };
             combo.SelectionChanged += (_, _) =>

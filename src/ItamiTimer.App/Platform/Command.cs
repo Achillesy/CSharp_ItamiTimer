@@ -85,37 +85,63 @@ public static class Command
     ///
     /// CLI 和 App 共用这一份，跟 <see cref="BuildShell"/> 同一个道理（L25）。
     /// </summary>
-    private static string? FirstCommand(GroupRules? rules)
+    private static string? FirstCommand(GroupRules? rules, bool log = true)
     {
         var key = OsKey;
 
         if (rules is null)
         {
-            Log.Warn("executeCommand: rules.json never loaded; nothing to run");
+            if (log) Log.Warn("executeCommand: rules.json never loaded; nothing to run");
             return null;
         }
 
         var list = rules.CommandsFor(key);
         if (list.Count == 0)
         {
-            Log.Warn($"executeCommand: no \"{key}\" entry in rules.json; nothing to run");
+            if (log) Log.Warn($"executeCommand: no \"{key}\" entry in rules.json; nothing to run");
             return null;
         }
 
         var cmd = list[0];
         if (string.IsNullOrWhiteSpace(cmd))
         {
-            Log.Warn($"executeCommand: entry #0 under \"{key}\" is empty; nothing to run");
+            if (log) Log.Warn($"executeCommand: entry #0 under \"{key}\" is empty; nothing to run");
             return null;
         }
 
         // **闹钟永远只跑 #0**（DECISIONS E9）：这是一份常用命令的收藏夹，想换哪条生效就把
         // 它挪到最前面——`itami commands --select N` 干的正是这件事。
-        if (list.Count > 1)
+        if (log && list.Count > 1)
             Log.Info($"executeCommand: {list.Count} entries under \"{key}\"; only #0 runs");
 
         return cmd;
     }
+
+    /// <summary>
+    /// 重读 rules.json，读不出来就退回启动时那份。<paramref name="log"/> 区分两个调用方：
+    /// 执行路径要留下痕迹，设置界面的预览不该往日志里灌噪音（开一次 Settings 灌一条）。
+    /// </summary>
+    private static GroupRules? Reload(GroupRules? fallback, bool log)
+    {
+        try { return GroupRules.Load(AppData.RulesPath()); }
+        catch (Exception e)
+        {
+            if (log)
+                Log.Error("executeCommand: could not re-read rules.json; falling back to the copy loaded at startup", e);
+            return fallback;
+        }
+    }
+
+    /// <summary>
+    /// 设置界面那行预览"到点会跑哪条"用的（DESIGN §8.8）。**跟 <see cref="LaunchDetached"/>
+    /// 走同一条取数路径**——重读 rules.json、同一个 <see cref="OsKey"/>、同一个 #0——只是
+    /// 不执行、不写日志。另写一份读法就又回到 §15.4 那个"两条读取路径"的老坑里去了。
+    ///
+    /// 返回 null = 到点什么都不会跑（没配、键不对、#0 是空串）。界面照实说这件事，
+    /// 因为原来它只在日志里，用户开着 Command 却什么都没发生时根本看不见。
+    /// </summary>
+    public static string? Preview(GroupRules? fallback)
+        => FirstCommand(Reload(fallback, log: false), log: false);
 
     // ---------------------------------------------------------------- 两边共用的 shell 构造
 
@@ -204,14 +230,7 @@ public static class Command
     /// </summary>
     public static void LaunchDetached(GroupRules? fallback)
     {
-        GroupRules? rules = null;
-        try { rules = GroupRules.Load(AppData.RulesPath()); }
-        catch (Exception e)
-        {
-            Log.Error("executeCommand: could not re-read rules.json; falling back to the copy loaded at startup", e);
-        }
-
-        var cmd = FirstCommand(rules ?? fallback);
+        var cmd = FirstCommand(Reload(fallback, log: true));
         if (cmd is null) return;   // 原因已经在 FirstCommand 里记过日志了
 
         try

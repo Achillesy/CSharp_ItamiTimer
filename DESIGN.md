@@ -641,8 +641,9 @@ buffer 的 7200 秒绘制区**不是内存考虑，是画图考虑**：钟面一
   （`Sound.Duration` 读文件头算，§10；三声通知同机制，2 遍）。仍是一次性——`MarkFired`
   在第一遍之前就跑完了，变长的只是这一次的响铃，不是 E5 的每日重复。
   Execute 开着时不响，命令只执行一次。
-- **Execute 开关**（Settings 卡 4）：开 → 到点执行 `rules.json` 的 `executeCommand`，
-  音色下拉变灰；关 → 到点响铃、可选音色。**二者互斥。**
+- **Execute 开关**（Settings **最后一张卡**，2026-08-09 从第 4 张挪到末尾，§10.1）：
+  开 → 到点执行 `rules.json` 的 `executeCommand`，音色下拉变灰、**卡片底部多一行显示
+  到点会跑的那条命令**（§10.1）；关 → 到点响铃、可选音色、预览行消失。**二者互斥。**
   Execute 每次启动强制复位为关（关机绝不跨会话）。
 - **到点那一刻重读 `rules.json`**（`Command.ExecuteFresh`，2026-08-08，DECISIONS L4）：
   用的不是启动时那份快照，所以 `itami commands` 换掉第一条之后，**正在运行的程序立刻
@@ -870,8 +871,30 @@ macOS 三级枚举 `*.aiff` 走 AudioToolbox。找不到、放不出一律安静
   帧数 ÷ 采样率，采样率是 80 位扩展浮点，手工拆）。两种格式的块**顺序不固定、按偶数补齐**，
   所以是遍历块不是读固定偏移——`C:\Windows\Media` 里真有 `LIST` 排在 `data` 前面的。
   只有闹钟连响用它排间隔；读不出来退回 3 秒，读错顶多节奏怪，绝不会把闹钟弄哑。
-- **Force Ticking**（Settings 卡 5）：开 → 主界面喇叭图标隐藏、滴答强制开；
-  但 Start 到休息结束期间一律静音。冲突时强制规则优先。
+- **Force Ticking**（Settings **第 1 张卡**，2026-08-09 从第 5 张挪到最前）：开 → 主界面
+  喇叭图标隐藏、滴答强制开；但 Start 到休息结束期间一律静音。冲突时强制规则优先。
+
+### 10.1 设置窗口的卡片顺序（2026-08-09，用户指定）
+
+自上而下：**Force Ticking → Focus complete → Break over → Idle Warning → Alarms →
+Command**。两头是用户点名的：滴答最常动、放开头；Command 是唯一会对机器动手的一条，
+放末尾。中间四张保持原有相对顺序。
+
+代码里**没有任何地方依赖这个顺序**——`SettingsWindow` 全靠 `FindControl` 按名字取控件，
+重排卡片只动 axaml。文档里凡是写"卡 N"的地方按上面这张顺序读。
+
+**Command 卡最底下多一行预览**（同日）：开关拨到 On 时，卡片底部显示到点真正会跑的那条
+命令（等宽字体、灰字、只读）；拨回 Off 就整行消失。没配好则显示
+`(no executeCommand.{os} in rules.json)`——这一句原来只在日志里，用户开着 Command 却什么
+都没发生时界面上一个字都没有。
+
+- 取数走 `Command.Preview(fallback)`，**跟到点执行是同一条路**（同一个 `Reload` 重读
+  rules.json、同一个 `OsKey`、同一个 `FirstCommand` 取 #0），只是不执行、不写日志。
+  另写一份读法就又是 §15.4 那个"两条读取路径"的坑。
+- **每次拨到 On 都重新问一遍**，不是打开窗口时算一次存着：`itami commands` 可能在程序
+  开着的时候改过文件，而到点读的正是那时候的文件。
+- 这不是给 E9 翻案：**只读、不可选**，换命令仍然只有重排 rules.json 一条路。也不违反
+  D6——D6 管的是**说明文字**，这行是**值**本身，而这个值多半是关机命令。
 
 ## 11. 设置与数据
 
@@ -1468,7 +1491,7 @@ macOS 没有零依赖的等价 API，退化成**静默拒绝**（单实例仍然
 | #1 音频重叠 | `Tick.cs` 加 `SND_NOSTOP`，通道占用则跳过本次滴答 |
 | #2 闹钟重构 | Settings 删 Alarm 开关改 Command 卡；黄针粒度 5→1 分钟 + 滚轮加速；`Restore` 不激活、新增 `Activate` |
 | #4 Settings 尺寸 | `Width` 460→380（等于主窗口） |
-| #5 Force Ticking | Settings 卡 5；Force on → 喇叭图标隐藏、滴答强制开；Start 到休息结束静音 |
+| #5 Force Ticking | Settings 卡 5（**当时**；2026-08-09 已挪到第 1 张，§10.1）；Force on → 喇叭图标隐藏、滴答强制开；Start 到休息结束静音 |
 | #6 删除退化路径 | 删 `AppMode` / `TomatoIcon` / `IconExport` / `PomodoroFallbackTests`；删 `Neutral` / `SelfApps` / `ignore` / `TodayTomatoes` / `Accumulate`；`Groups`→`Group`；多选→Radio 单选 |
 | #7 判定模型重写 | 新增 `JudgmentBuffer` + `Judgment`；引擎从 `Replay.Run` 切到 buffer；AW 查询改 4 分钟固定窗口；新增 `itami bench` |
 | #8 Shutdown→Command | 读 `rules.json` 的 `executeCommand.{os}`；Execute 与提示音互斥 |

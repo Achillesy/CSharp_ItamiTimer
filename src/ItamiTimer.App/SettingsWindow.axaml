@@ -31,11 +31,35 @@
       <Setter Property="FontWeight" Value="SemiBold"/>
       <Setter Property="VerticalAlignment" Value="Center"/>
     </Style>
+    <!-- 唯一一行"值",不是说明文字(D6 管的是后者)。等宽字体给的是一串命令的可读性;
+         Consolas 只有 Windows 有、Menlo 只有 macOS 有,写成回退链两边各命中一个,
+         都不在时落回 monospace(D5:不引字体资源、也不依赖某一边独有的字体) -->
+    <Style Selector="TextBlock.command">
+      <Setter Property="FontFamily" Value="Consolas,Menlo,monospace"/>
+      <Setter Property="FontSize" Value="12"/>
+      <Setter Property="Foreground" Value="#4A5560"/>
+      <Setter Property="TextWrapping" Value="Wrap"/>
+    </Style>
   </Window.Styles>
 
   <StackPanel Margin="22,18,22,20" Spacing="12">
 
     <TextBlock Text="Settings" FontSize="26" FontWeight="Bold" Margin="0,0,0,6"/>
+
+    <!-- 卡片顺序（2026-08-09 用户指定）：Force Ticking 打头、Command 收尾。
+         滴答是钟自己的事、最常动；Command 是唯一会对机器动手的一条，放最后，
+         它开着时下面那行预览也就落在整个窗口的最底部。 -->
+    <Border Classes="card">
+      <StackPanel Spacing="12">
+        <Grid ColumnDefinitions="*,Auto">
+          <TextBlock Classes="title" Text="Force Ticking"/>
+          <ToggleSwitch x:Name="ForceOn" Grid.Column="1" VerticalAlignment="Center"
+                        OnContent="On" OffContent="Off"/>
+        </Grid>
+        <Slider x:Name="TickVol" Minimum="0" Maximum="100" TickFrequency="10"
+                IsSnapToTickEnabled="True" HorizontalAlignment="Stretch"/>
+      </StackPanel>
+    </Border>
 
     <Border Classes="card">
       <StackPanel Spacing="12">
@@ -72,17 +96,6 @@
     <Border Classes="card">
       <StackPanel Spacing="12">
         <Grid ColumnDefinitions="*,Auto">
-          <TextBlock Classes="title" Text="Command"/>
-          <ToggleSwitch x:Name="ExecuteOn" Grid.Column="1" VerticalAlignment="Center"
-                        OnContent="On" OffContent="Off"/>
-        </Grid>
-        <ComboBox x:Name="CommandSound" HorizontalAlignment="Stretch" MaxDropDownHeight="320"/>
-      </StackPanel>
-    </Border>
-
-    <Border Classes="card">
-      <StackPanel Spacing="12">
-        <Grid ColumnDefinitions="*,Auto">
           <TextBlock Classes="title" Text="Alarms"/>
           <ToggleSwitch x:Name="AlarmsOn" Grid.Column="1" VerticalAlignment="Center"
                         OnContent="On" OffContent="Off"/>
@@ -94,12 +107,16 @@
     <Border Classes="card">
       <StackPanel Spacing="12">
         <Grid ColumnDefinitions="*,Auto">
-          <TextBlock Classes="title" Text="Force Ticking"/>
-          <ToggleSwitch x:Name="ForceOn" Grid.Column="1" VerticalAlignment="Center"
+          <TextBlock Classes="title" Text="Command"/>
+          <ToggleSwitch x:Name="ExecuteOn" Grid.Column="1" VerticalAlignment="Center"
                         OnContent="On" OffContent="Off"/>
         </Grid>
-        <Slider x:Name="TickVol" Minimum="0" Maximum="100" TickFrequency="10"
-                IsSnapToTickEnabled="True" HorizontalAlignment="Stretch"/>
+        <ComboBox x:Name="CommandSound" HorizontalAlignment="Stretch" MaxDropDownHeight="320"/>
+        <!-- 开关拨到 On 才出现：到点真正会跑的那一条（executeCommand.{os} 的 #0）。
+             只读、不可选——换命令仍然是重排 rules.json / `itami commands` 那个选择器
+             这一条路（E9 没被翻案）。它在这里是因为这条命令多半是关机：
+             按下去之前有权知道按的是什么。 -->
+        <TextBlock x:Name="CommandPreview" Classes="command" IsVisible="False"/>
       </StackPanel>
     </Border>
 
