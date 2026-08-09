@@ -30,9 +30,11 @@ try {
     dotnet publish src\ItamiTimer.App -c Release -r win-x64 --self-contained false -o $StageDir --nologo -v quiet
     if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed" }
 
-    # CLI 也要装（2026-08-09，DECISIONS L22）：闹钟到点时 App 起一个 shell 去跑
-    # `itami.exe commands --execute --yes`，那个文件必须真的在安装目录里。在这之前
-    # 这里只 publish 了 App，装机的机器上根本没有 itami.exe。
+    # CLI 也要装（2026-08-09，DECISIONS L22）。**2.2.4 之后理由换了一个，但结论没变**：
+    # App 到点时不再借道 CLI（两个平台都改成自己直接跑，L28/L29），所以少了它闹钟照样会响——
+    # 但 `itami commands` 是**选命令和试命令的唯一入口**，也是"命令看着没反应"时唯一能看到
+    # 真实报错的地方（`shutdown /h` 那一类只讲给真控制台听，README.txt 的诊断指引就指向它）。
+    # 装机的机器上没有它，用户就只能手改 rules.json、且没有任何试跑手段。
     # 发到**同一个 StageDir**：两边共用 ItamiTimer.Core.dll 等程序集（同一次 Release
     # 构建，内容一致），各自的 .deps.json / .runtimeconfig.json 按程序集名区分，不打架。
     Write-Host "==> publish itami CLI (same folder)"

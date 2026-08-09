@@ -1165,7 +1165,7 @@ Windows 侧已经实测过的两条，验证方法可以照抄：把 `settings.j
 | CLI 路（`redirect: false`）输出落在真控制台 | ✅ **程序化实测通过** | `itami commands --execute --yes --rules <临时文件>`：`STDOUT_MARKER_OK` 和 `ls` 的报错**都打在终端上**。L29 那半边（"CLI 绝不能设 `CreateNoWindow`"）在 macOS 上同样成立 |
 | `--execute` 非终端下拒绝执行 | ✅ **程序化实测通过** | 不带 `--yes` 时打印 `(not a terminal — pass --yes to run unattended)`，退出码 1，命令没跑 |
 | `Command.Preview` 跟执行同一条取数路径 | ✅ **程序化实测通过** | 预览文本与随后真正执行的命令逐字一致；`executeCommand.macos` 整个缺失时显示 `(no executeCommand.macos in rules.json)`；**预览没有往日志写任何一行**（`log: false` 生效） |
-| Settings 卡片顺序（2.3.0 重排） | ✅ **程序化实测通过** | 逻辑树取出的标题依次是 `Force Ticking > Focus complete > Break over > Idle Warning > Alarms > Command`，与 §8.8 的规格一致 |
+| Settings 卡片顺序（2.3.0 重排） | ✅ **程序化实测通过** | 逻辑树取出的标题依次是 `Force Ticking > Focus complete > Break over > Idle Warning > Alarms > Command`，与 §10.1 的规格一致 |
 | `CommandPreview` 控件解析 + 显隐 | ✅ **程序化实测通过** | `FindControl<TextBlock>("CommandPreview")` 取得到（名字打错就是开 Settings 时抛异常，**编译不报**）；`CommandEnabled` 关时 `IsVisible=False`、开时 `True` |
 | 到点真闹钟走完整条分钟序列 | ❌ **未验证** | 探针直接调 `LaunchDetached`，没有经过 `OnMinute` 第 ④ 步 |
 | 预览的观感（等宽字体回退、深色字号） | ❌ **未验证** | 没打开过真实窗口，`Consolas,Menlo,monospace` 在 macOS 上实际命中哪个没看过 |

@@ -133,7 +133,7 @@ public static class Command
     }
 
     /// <summary>
-    /// 设置界面那行预览"到点会跑哪条"用的（DESIGN §8.8）。**跟 <see cref="LaunchDetached"/>
+    /// 设置界面那行预览"到点会跑哪条"用的（DESIGN §10.1）。**跟 <see cref="LaunchDetached"/>
     /// 走同一条取数路径**——重读 rules.json、同一个 <see cref="OsKey"/>、同一个 #0——只是
     /// 不执行、不写日志。另写一份读法就又回到 §15.4 那个"两条读取路径"的老坑里去了。
     ///
