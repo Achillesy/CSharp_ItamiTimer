@@ -55,10 +55,11 @@ echo "==> publish (${RID}, framework-dependent)"
 dotnet publish src/ItamiTimer.App -c Release -r "$RID" --self-contained false \
     -o "$STAGE/publish" --nologo -v quiet
 
-# CLI 也要装（2026-08-09，DECISIONS L22）：闹钟到点时 App 用 `open -a Terminal` 起一个
-# 窗口去跑 `itami commands --execute --yes`，那个文件必须真的在 .app 里。在这之前这里
-# 只 publish 了 App，装机的机器上根本没有 itami，日志里只会留一句 "cannot find the
-# itami CLI"、命令一条都不跑。
+# CLI 也要装（2026-08-09，DECISIONS L22）。**2.2.4 之后理由换了一个，但结论没变**：
+# App 到点时不再借道 CLI（两个平台都改成自己直接跑，L28），所以少了它闹钟照样会响——
+# 但 `itami commands` 是**选命令和试命令的唯一入口**，也是"命令看着没反应"时唯一能看到
+# 真实报错的地方（README 的诊断指引就指向它）。装机的机器上没有它，用户就只能手改
+# rules.json、且没有任何试跑手段。
 # 发到**同一个 publish 目录**：两边共用 ItamiTimer.Core.dll 等程序集（同一次 Release
 # 构建，内容一致），各自的 .deps.json / .runtimeconfig.json 按程序集名区分，不打架。
 echo "==> publish itami CLI (same folder)"
@@ -202,23 +203,24 @@ isn't in the list -- just prints the list and changes nothing. Only those exact
 forms do anything, so a typo can never run or rewrite something by accident.
 
 
-Why a Terminal window opens when the alarm fires
-------------------------------------------------
+What happens when the alarm fires
+---------------------------------
 
-The alarm doesn't run your command directly. It opens a Terminal window, and
-that window runs "itami commands --execute --yes" (--yes just means "don't wait
-for me to press y" -- nobody is at the keyboard when an alarm goes off).
-
-The window stays open on purpose. Some commands only report failure to a
-console, where no program can capture it. In a real window you just read it.
-If the command shuts the machine down, the window goes with it; if it fails,
-the reason is still on screen when you get back.
+The alarm runs your command and returns immediately -- it never waits, so a
+command that hangs can't stall the clock. No window opens. Everything the
+command reports -- exit code, output, errors -- goes to itami.log.
 
 Most of the default macOS commands drive System Events (restart, sleep, log
 out, shut down). The first time one runs, macOS asks whether to allow it --
 System Settings > Privacy & Security > Automation. Until it is allowed, those
-commands fail with "Not authorized to send Apple events (-1743)", and the
-Terminal window is where you will see that.
+commands fail with "Not authorized to send Apple events (-1743)", and itami.log
+is where you will see that.
+
+Note that the request comes from ItamiTimer itself, which is not in the
+Automation list until it asks for the first time. If an alarm fires while you
+are away from the keyboard, the permission dialog may simply be sitting there
+unanswered -- running "\$ITAMI commands --execute" once from Terminal gets it
+asked and answered while you are actually there.
 
 
 Where things live

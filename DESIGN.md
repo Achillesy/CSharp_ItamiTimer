@@ -687,7 +687,8 @@ buffer 的 7200 秒绘制区**不是内存考虑，是画图考虑**：钟面一
 
 ⚠️ **知情接受的代价**：`shutdown /h` 那一类失败在 App 日志里只剩 `exited with 0`。
 **诊断手段是在真实终端里跑 `itami commands --execute`**——那里有真控制台，那句话就出来
-了。三份 README 都写了这条指引。
+了。**四份 README 都写了这条指引**（`README.md` / `README_ZH.md` / `installer/README.txt`
+/ `pack-macos.sh` 里那段进 .dmg 的 heredoc——第四份漏过一次，见 DECISIONS L30）。
 
 **几条不能动的实现细节**：
 
@@ -1147,6 +1148,28 @@ csproj 的 `AssemblyName=ItamiTimer`。macOS 上 AW 报的 `data.app` 就是前�
 Windows 侧已经实测过的两条，验证方法可以照抄：把 `settings.json` 的 `windowX`/`windowY`
 手改成 `99999,99999` 再启动，程序应该把它拉回屏幕内（Windows 上实测 `99999,99999` →
 `2093,620`）；再启动一次，位置应该原样保持、不漂移。
+
+**2.2.4 / 2.3.0 的 macOS 验证进度**（2026-08-09）：这两版是在 Windows 上写的、Windows 上
+测的（`CreateNoWindow` 那两个值全部来自 Windows 实测，§9.3），macOS 侧当天补了一轮。
+
+⚠️ **测法要说清楚：走的是一个临时探针程序**（引用 `ItamiTimer.App`，用假 `HOME` 把
+`AppData.Dir` 指到临时目录，因此**一个字节都没碰用户真实的 rules.json**），
+调的是 App 自己那份 `Command.LaunchDetached` / `Command.Preview` / `SettingsWindow`。
+**不是"打开 GUI、拨一个真闹钟、等它到点"**——分钟序列第 ④ 步怎么调用它，这一轮没覆盖。
+
+| 要验证的 | 状态 | 依据 |
+|---|---|---|
+| 编译 + 单元测试 | ✅ **程序化实测通过** | macOS 上 `dotnet build` 0 警告 0 错误；134 个测试全过（Core 98 + App 36） |
+| `LaunchDetached` 不阻塞 | ✅ **程序化实测通过** | 加了 `CreateNoWindow` 之后仍是 **37ms 返回**，落在原先记录的 60~80ms 同一量级 |
+| App 路（`redirect: true`）输出收集 | ✅ **程序化实测通过** | `echo … && ls /不存在` → 日志里三样齐全：`exited with 1`、`stdout: STDOUT_MARKER_OK`、`stderr: ls: … No such file or directory`。**`CreateNoWindow = true` 没有吃掉 macOS 的重定向输出** |
+| CLI 路（`redirect: false`）输出落在真控制台 | ✅ **程序化实测通过** | `itami commands --execute --yes --rules <临时文件>`：`STDOUT_MARKER_OK` 和 `ls` 的报错**都打在终端上**。L29 那半边（"CLI 绝不能设 `CreateNoWindow`"）在 macOS 上同样成立 |
+| `--execute` 非终端下拒绝执行 | ✅ **程序化实测通过** | 不带 `--yes` 时打印 `(not a terminal — pass --yes to run unattended)`，退出码 1，命令没跑 |
+| `Command.Preview` 跟执行同一条取数路径 | ✅ **程序化实测通过** | 预览文本与随后真正执行的命令逐字一致；`executeCommand.macos` 整个缺失时显示 `(no executeCommand.macos in rules.json)`；**预览没有往日志写任何一行**（`log: false` 生效） |
+| Settings 卡片顺序（2.3.0 重排） | ✅ **程序化实测通过** | 逻辑树取出的标题依次是 `Force Ticking > Focus complete > Break over > Idle Warning > Alarms > Command`，与 §8.8 的规格一致 |
+| `CommandPreview` 控件解析 + 显隐 | ✅ **程序化实测通过** | `FindControl<TextBlock>("CommandPreview")` 取得到（名字打错就是开 Settings 时抛异常，**编译不报**）；`CommandEnabled` 关时 `IsVisible=False`、开时 `True` |
+| 到点真闹钟走完整条分钟序列 | ❌ **未验证** | 探针直接调 `LaunchDetached`，没有经过 `OnMinute` 第 ④ 步 |
+| 预览的观感（等宽字体回退、深色字号） | ❌ **未验证** | 没打开过真实窗口，`Consolas,Menlo,monospace` 在 macOS 上实际命中哪个没看过 |
+| System Events 授权框（L26 的已知代价） | ❌ **未验证** | 探针跑的是 `echo`/`ls`，没碰 `osascript`，那个授权框一次都没触发过 |
 
 ## 14. 构建与发布
 
