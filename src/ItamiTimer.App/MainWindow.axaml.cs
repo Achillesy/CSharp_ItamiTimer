@@ -447,17 +447,26 @@ public partial class MainWindow : Window
 
             // ---- 4) 闹钟：判断 + 执行/响铃**在同一处**，且是整分钟的最后一件事。
             //         Execute 和响铃互斥（DECISIONS E8/E9），所以这里是二选一。
-            //         "重读 rules.json"这件事仍然成立，只是**不再由 App 做**：跑起来的
-            //         `itami commands --execute` 在它自己的进程里现读一次，所以用户刚用
-            //         `itami commands --select` 换过的第一条立刻生效，不用重启（L19）。
+            //
+            //         ⚠️ **两个平台走不同的路，理由不对称**（DESIGN §9.3）：
+            //         Windows 起一个带控制台窗口的 shell 去跑 `itami commands --execute
+            //         --yes`——因为 `shutdown /h` 会绕过管道、只把失败讲给控制台听（L17），
+            //         不给它一个真控制台就永远看不见那句话。
+            //         macOS **实测没有这个病**（失败信息老实走 stdout/stderr，管道全抓得到），
+            //         所以直接跑、把输出收进日志，不再套 open → Terminal → 临时脚本那几层
+            //         （用户 2026-08-09，L26）。
+            //
+            //         两条路都**起完就返回，绝不 await**：命令挂死也卡不到分钟循环。
+            //         "重读 rules.json"两条路都成立——Windows 由 itami 在它自己进程里现读，
+            //         macOS 由 LaunchDetached 现读，所以刚 `--select` 换过的 #0 立刻生效。
             if (now >= _alarmQuietUntil && _alarm.ShouldFire(now))
             {
                 _alarm.MarkFired();   // 一次性：响过即撤，不是每日重复（DECISIONS E5）
-                // App 自己不执行命令，只起一个带控制台窗口的 shell 去跑
-                // `itami commands --execute --yes`，起完立刻返回（DECISIONS L19，
-                // 规格见 DESIGN §9.3）。不重定向、不 await、不看退出码——那三样在
-                // `shutdown /h` 这类"只把失败讲给控制台听"的命令上本来就是骗人的。
-                if (_settings.CommandEnabled) Command.LaunchInShell();
+                if (_settings.CommandEnabled)
+                {
+                    if (OperatingSystem.IsWindows()) Command.LaunchInShell();
+                    else Command.LaunchDetached(_rules);
+                }
                 else Sound.Repeat(_settings.CommandSound, AlarmRings);
             }
         }

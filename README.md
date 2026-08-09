@@ -236,25 +236,30 @@ by construction — there is no "which one was I testing again?" to get wrong.
 
 ### What happens when the alarm fires
 
-The app does **not** run your command itself. It opens a shell window and has *that* run
-`itami commands --execute --yes`, then gets out of the way — no output capture, no exit
-code, no waiting.
+Either way the app fires the command and **returns immediately** — it never waits, so a
+command that hangs can't stall the clock. The two platforms get there differently, and the
+reason is not symmetric.
 
-That indirection exists for one reason: **some commands report failure only to a console.**
-`shutdown /h` on a machine without hibernation enabled exits with code 0, writes nothing to
-stdout or stderr, and does nothing — the message ("hibernation has not been enabled") goes
-straight to the console, where a captured pipe can never see it. Run it in a real window
-and you simply read what went wrong.
+**On Windows** the app opens a PowerShell window (`-NoExit`) and has *that* run
+`itami commands --execute --yes`. This exists for one reason: **some commands report failure
+only to a console.** `shutdown /h` on a machine without hibernation enabled exits with code
+0, writes nothing to stdout or stderr, and does nothing — the message ("hibernation has not
+been enabled") goes straight to the console, where a captured pipe can never see it. The
+window stays open so the reason is still there when you come back.
 
-The window is left open on purpose. If your command shuts the machine down, that hardly
-matters; if it fails, the reason is still on screen when you come back. On Windows that
-window is PowerShell (`-NoExit`); on macOS it's Terminal, opened with `open -a Terminal`
-on a small throwaway script that ends in `exec $SHELL -i`.
+**On macOS** the app just runs the command and writes everything — exit code, stdout,
+stderr — to `itami.log`. macOS has no equivalent of that console-only quirk: `pmset -x`,
+`shutdown`, `open /nonexistent` and unknown commands all report through stdout/stderr,
+where a pipe picks them up fine. So there's no window, and no chain of throwaway scripts
+to launch one.
 
-On macOS most of the default entries drive System Events (restart, sleep, log out, shut
-down), which needs Automation permission — System Settings → Privacy & Security →
-Automation. Until it's granted they fail with `Not authorized to send Apple events`, and
-that Terminal window is exactly where you'll see it.
+One consequence worth knowing on macOS: most default entries drive System Events (restart,
+sleep, log out, shut down), which needs Automation permission — System Settings → Privacy &
+Security → Automation. That permission is granted **per app**, and ItamiTimer starts out
+without it, so the first time one of those entries runs you'll get a permission prompt. If
+nobody is at the keyboard the command simply waits on it; after 60 seconds the log says
+`still running`. Click Allow once and it's fine. Entries that don't touch System Events
+(`pmset`, `open`) are unaffected.
 
 Your commands are still interpreted by `cmd.exe /c` (Windows) or `sh -c` (macOS) exactly as
 before — nothing in `rules.json` changes meaning. What changed is only *where* they run.

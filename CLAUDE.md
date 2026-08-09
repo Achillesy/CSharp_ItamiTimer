@@ -52,10 +52,13 @@ DECISIONS.md 有没有这条；有，就先跟用户确认再动；没有，也�
 ✅ 都过了；**`shutdown /s /t 0` 的 `await` 行为和 winmm 截断顺序仍未验证**（前者不打算
 直接测——那条命令真的会关机）。逐条见 DESIGN §13.1 末尾那张表。
 
-**2.2.0 的"App 只起窗口"（DESIGN §9.3）macOS 侧已落地并实测**：`open -a Terminal` +
-临时 `.command` 脚本这条路验证过——命令真的跑了、Terminal 窗口留在屏幕上没自动消失
-（DECISIONS L24）；`pack-macos.sh` 也已经把 `itami` 打进 `.app`（L25）。
-**没验证的是"App 到点自动触发"这一环**（要在界面里武装闹钟，只能手测）。
+**2.2.3 起 macOS 不再开窗口**（DESIGN §9.3、DECISIONS L26）：Windows 保持"起一个控制台
+窗口跑 `itami commands --execute --yes`"，**macOS 改成 App 直接 `sh -c` 跑、输出收进
+`itami.log`**——那套 `open → Terminal → 临时 .command` 的六层绕路，服务的是 Windows
+特有的毛病（`shutdown /h` 绕过管道只讲给控制台听），而 macOS 实测没有这回事。
+已实测：`LaunchDetached` 60~80ms 返回不阻塞、退出码 + stdout + stderr 都进了日志。
+⚠️ **已知代价**：Apple 事件授权从记在 Terminal 头上改成记在 ItamiTimer 头上，而它不在
+自动化列表里，所以 `osascript ... System Events` 那几条第一次会弹授权框。
 
 ⚠️ 2.0.8/2.0.9 重排了分钟序列（最终顺序：① 提示条到期收起 ② AW 查询+判定+三声通知
 ③ Alarms 清单 ④ 闹钟判断+执行命令/响铃；DESIGN §9.2、DECISIONS L13，推翻了 L9）：

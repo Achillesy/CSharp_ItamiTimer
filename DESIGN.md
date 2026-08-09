@@ -653,24 +653,40 @@ buffer 的 7200 秒绘制区**不是内存考虑，是画图考虑**：钟面一
   文件、`--execute [--yes]` 只跑 #0 且**不带下标**（想试别的先 `--select` 成 #0）。这样
   "试的那条"和"闹钟真会跑的那条"在设计上就是同一条。执行细节见 §9.3。
 
-### 9.3 命令怎么被执行：App 只负责开一个窗口（2.2.0，DECISIONS L19~L22）
+### 9.3 命令怎么被执行：两个平台两条路（2.2.3，DECISIONS L19~L22 / L25~L27）
 
-**App 自己不再执行任何命令。** 到点且 Execute 开着时，它只做一件事——起一个**带控制台
-窗口**的 shell，让那个窗口去跑 `itami commands --execute --yes`，然后立刻返回。
-**不重定向、不 await、不看退出码。**
+到点且 Execute 开着时，**两个平台都是"起完就返回、绝不 await"**，但走的路不同——
+**理由不对称，不是随手分的**：
 
-两个平台起窗口的方式不同，**要的效果是同一个：一个人眼看得见、且不会自己消失的窗口**。
+| | 怎么执行 | 输出去哪 | 为什么 |
+|---|---|---|---|
+| Windows | 起一个**带控制台窗口**的 shell 跑 `itami commands --execute --yes`（`powershell.exe -NoExit -Command "& '<装到哪>\itami.exe' …"`，`UseShellExecute = true`） | 那个窗口 | `shutdown /h` 会**绕过管道**、只把失败讲给控制台听（L17），不给它真控制台就永远看不见 |
+| macOS | **直接 `sh -c` 跑**（`Command.LaunchDetached`），后台任务并发收两个流 | `itami.log` | **实测 macOS 没有那个病**：失败信息老实走 stdout/stderr，管道全抓得到（见下） |
 
-| | 怎么起 | 窗口靠什么留住 |
-|---|---|---|
-| Windows | `powershell.exe -NoExit -Command "& '<装到哪>\itami.exe' commands --execute --yes"`，`UseShellExecute = true`（true 才会真开一个控制台窗口） | `-NoExit` |
-| macOS | 往临时目录写一个 `.command` 脚本，再 `open -a Terminal <脚本>` | 脚本末尾 `exec "$SHELL" -i` |
+**macOS 为什么在 2.2.3 砍掉了窗口**（用户 2026-08-09："这么一层套一层，其实我很不喜欢"）。
+原来是 `open → Terminal → 临时 .command → exec $SHELL -i → itami → sh -c → 命令` 六层，
+而它们全部服务于一个 **Windows 特有**的理由。实测四条会失败的命令：
+
+| 命令 | 失败信息去了哪 |
+|---|---|
+| `pmset -x` | stdout ✅ |
+| `shutdown`（非 root） | stderr ✅ |
+| `open /nonexistent` | stderr ✅ |
+| 不存在的命令 | stderr ✅ |
+
+**没有一条是"两个流都空"的**，所以捕获进日志就够了，跟这个项目"界面全程沉默、日志是
+唯一能事后查的地方"（§8.1a）也更一致。
+
+⚠️ **已知代价，用户知情接受（L26）**：走 Terminal 时 Apple 事件授权记在 **Terminal**
+头上（实测它已获 System Events 授权）；直接执行则记在 **ItamiTimer** 头上，而它**不在
+系统设置的自动化列表里**，且 `pack-macos.sh` 是 ad-hoc 签名、每次重装身份都变。所以
+`osascript ... System Events` 那几条**第一次会弹授权框**，到点时多半没人在键盘前——
+表现是命令卡着不动，60 秒后日志出现 `still running`。点一次"允许"即可。
+`pmset`、`open` 这类不碰 System Events 的命令不受影响。
 
 ⚠️ **macOS 上不要用 `osascript -e 'tell application "Terminal" to do script ...'`**
-（2026-08-09，DECISIONS L24）：那条路要「自动化」权限，本机实测拿到的是
-`-1743 Not authorized to send Apple events`——**API 不报错、窗口不出现**，正是这个项目
-最怕的那种安静失效，而且用户不点那个授权框就永远修不好。`open` 走 LaunchServices，
-不需要任何授权。
+（L24，虽然这条路现在已经不走了，结论仍然成立）：那要「自动化」权限，本机实测拿到的是
+`-1743 Not authorized to send Apple events`——**API 不报错、窗口不出现**。
 
 **为什么要这么绕一圈**，起因是一个真实的坑（2026-08-08 用户实测）：`shutdown /h` 在
 休眠被禁用的机器上**退出码 0、stdout 空、stderr 空，机器纹丝不动**——它把
@@ -683,8 +699,11 @@ buffer 的 7200 秒绘制区**不是内存考虑，是画图考虑**：钟面一
 - **命令本身仍然由 `cmd.exe /c`（Windows）/ `sh -c`（Unix）解释，一个字没改**。
   `rules.json` 里所有既有条目语义不变（`start notepad` 照旧是 cmd 的内建 `start`），
   L1/L2 那两条引号护栏继续有效，`CommandQuotingTests` 不用重写。
-- **`itami` 内部不再重定向 stdout/stderr**，子进程直接继承控制台。没有管道，
-  **L15 那个"串行读 + 写满缓冲 = 死锁"的死角随之消失**——不是修好了，是不成立了。
+- **`itami` 内部不再重定向 stdout/stderr**，子进程直接继承控制台。
+  ⚠️ 但"死锁不成立了"这句话**只对 `itami` 这条路成立**：macOS 的 `LaunchDetached`
+  为了把输出收进日志**必须重定向**，管道又回来了。那边靠 `Task.WhenAll` **并发**读两个
+  流来避开——2026-08-09 实测确认：串行读（先读完 stdout 再读 stderr）在 300KB stderr 下
+  **必死锁**，并发读全部拿到（L27）。**别再把 L15 当成"已经不存在的问题"。**
 - **App 不再 await 命令**，所以 L14 为了防止分钟循环被卡死而加的取消机制整个删掉；
   `_minuteBusy` 保留，但它现在守的只剩 AW 查询（本来就有 10 秒超时）。
 
@@ -692,7 +711,8 @@ buffer 的 7200 秒绘制区**不是内存考虑，是画图考虑**：钟面一
 
 | 谁 | 负责什么 | 不负责什么 |
 |---|---|---|
-| App | 起一个 shell 窗口；`Process.Start` 抛异常时记 Error（连 shell 都没起来是我们**唯一**还能真判断的失败） | 命令跑没跑成 |
+| App（Windows） | 起一个 shell 窗口；`Process.Start` 抛异常时记 Error（连 shell 都没起来是我们**唯一**还能真判断的失败） | 命令跑没跑成 |
+| App（macOS） | 直接跑命令并**立刻返回**；后台任务收输出、等退出、写日志（退出码 + stdout + stderr）。卡住时 60 秒记一行 `still running`，**不杀进程**——命令合法地跑很久跟卡在授权框上从外面分辨不了，杀错了比等着糟 | 阻塞分钟序列（结构上就不 await） |
 | shell 窗口 | 活着、显示输出。留住窗口的那一下（Windows 的 `-NoExit` / macOS 的 `exec $SHELL -i`）由**启动方**给，**`itami` 自己永远不停顿**——否则你在自己终端里手动跑也要被迫按一次键 | 解释命令 |
 | `itami commands --execute` | 读 rules.json、跑 #0、把输出留在控制台上 | 窗口活多久 |
 

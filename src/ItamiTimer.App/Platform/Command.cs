@@ -34,118 +34,21 @@ public static class Command
     public static string OsKey => OperatingSystem.IsWindows() ? "windows" : "macos";
 
     /// <summary>
-    /// 闹钟到点走的就是这条：**每次都重新读一遍 rules.json**，而不是用启动时的快照
-    /// （用户 2026-08-08：「闹钟到的时候应该重新读入，因为用户可能改过」）。
-    /// `itami --list` 把某条挪到第一位之后，正在运行的程序立刻就跟着变，不用重启。
+    /// 跑 <c>executeCommand.{os}</c> 的 **#0**（`itami commands --execute` 用这条）。
+    /// 命令表来自已经解析好的 <see cref="GroupRules"/>，**这里从不自己读文件**。
     ///
-    /// ⚠️ 这**不是** §15.4 警告的"第二条读取路径"：那条护栏说的是"一个类型模型、一个
-    /// 解析器"，当年的事故是两处各自用不同的 JSON 设置（一边不跳注释、一边区分大小写），
-    /// 导致文件一半好用一半安静失效。这里读的仍然是 <see cref="GroupRules.Load"/>，
-    /// 同一个解析器、同一套设置，只是读的时机从"启动一次"变成"每次到点"。
-    ///
-    /// 读失败（用户把文件改坏了）时**退回启动时的快照**并大声记日志：到点什么都不做
-    /// 对一个可能是关机的命令来说更糟，而"为什么用的是旧的"必须能在日志里查到（§8.1a）。
+    /// 没有下标参数：闹钟永远只跑 #0，想跑别的先 `--select`（DECISIONS L14）。
     /// </summary>
-    public static Task ExecuteFreshAsync(GroupRules? fallback, CancellationToken ct = default)
+    public static async Task ExecuteAsync(GroupRules? rules, CancellationToken ct = default)
     {
-        GroupRules? rules = null;
-        try
-        {
-            rules = GroupRules.Load(AppData.RulesPath());
-        }
-        catch (Exception e)
-        {
-            Log.Error("executeCommand: could not re-read rules.json; falling back to the copy loaded at startup", e);
-        }
-        return ExecuteAsync(rules ?? fallback, ct: ct);
-    }
+        var cmd = FirstCommand(rules);
+        if (cmd is null) return;   // 原因已经在 FirstCommand 里记过日志了
 
-    /// <summary>
-    /// Runs one entry of <c>executeCommand.{os}</c> -- the **first** one unless
-    /// <paramref name="index"/> says otherwise (`itami --test` / `--execute N` pick a
-    /// specific one). The command table comes from an already-parsed
-    /// <see cref="GroupRules"/> -- this **never reads the file itself**.
-    /// </summary>
-    public static async Task ExecuteAsync(GroupRules? rules, int index = 0, CancellationToken ct = default)
-    {
-        var key = OsKey;
-
-        if (rules is null)
-        {
-            Log.Warn("executeCommand: rules.json never loaded; nothing to run");
-            return;
-        }
-
-        var list = rules.CommandsFor(key);
-        if (list.Count == 0)
-        {
-            Log.Warn($"executeCommand: no \"{key}\" entry in rules.json; nothing to run");
-            return;
-        }
-
-        // **闹钟永远只跑第一条**（DECISIONS E9）。这是一份常用命令的收藏夹：想换哪条生效，
-        // 就把它挪到最前面——`itami --list` 干的正是这件事。界面上不给选择器，能猜的就让人猜（D6）。
-        // index 不为 0 只出现在 CLI 的 `--test` / `--execute N`，那是"试一下这条什么效果"，
-        // 跟闹钟该跑哪条是两回事。
-        if (index < 0 || index >= list.Count)
-        {
-            Log.Warn($"executeCommand: no entry #{index} under \"{key}\" ({list.Count} available); nothing to run");
-            return;
-        }
-
-        var cmd = list[index];
-        if (string.IsNullOrWhiteSpace(cmd))
-        {
-            Log.Warn($"executeCommand: entry #{index} under \"{key}\" is empty; nothing to run");
-            return;
-        }
-        if (index == 0 && list.Count > 1)
-            Log.Info($"executeCommand: {list.Count} entries under \"{key}\"; only the first one runs");
-
-        var shell = OperatingSystem.IsWindows() ? "cmd.exe" : "/bin/sh";
-
-        // ⚠️ **不重定向 stdout/stderr**（2026-08-09 改，DECISIONS L19/L21）：子进程直接继承
-        // 本进程的控制台，输出就落在用户眼前那个窗口里。
-        //
-        // 为什么这很重要，而不是"少写两行"：`shutdown /h` 在休眠被禁用的机器上**退出码 0、
-        // stdout 空、stderr 空、机器纹丝不动**——它把"此系统上没有启用休眠 (126)"这句话
-        // **直接写给控制台**，绕开了管道。重定向的那一版因此完全看不见失败（L17）。
-        //
-        // 附带好处：没有管道就没有 L15 那个"串行读 + 缓冲写满 = 死锁"的死角，也就不再需要
-        // L14 那套分钟边界取消——那两条护栏都随之作废。
-        //
-        // `CreateNoWindow` 也不设了：这个方法现在只由 `itami`（控制台程序）调用，它本来就
-        // 有窗口；App 那边不再走这里，改成起一个 shell 去跑 `itami commands --execute --yes`。
-        var psi = new ProcessStartInfo(shell) { UseShellExecute = false };
-
-        if (OperatingSystem.IsWindows())
-        {
-            // `cmd.exe /c` 有它自己一套引号规则，跟 ArgumentList 用的 C 运行库转义规则
-            // **对不上**，别顺手把这条也改成 ArgumentList——Windows 这条路真机验证过。
-            psi.Arguments = $"/c {cmd}";
-        }
-        else
-        {
-            // ⚠️ 脚本必须作为**单独一个 argv 元素**交给 `sh -c`，绝不能拼成
-            // `-c "{cmd}"` 那样一整条 Arguments 字符串（2026-08-08 修，DECISIONS L1）。
-            // 拼字符串时 .NET 还要按 C 运行库规则把它切回 argv，而 rules.json 里的命令
-            // 自己就带双引号（`osascript -e 'tell application "System Events" to ...'`），
-            // 内层的 " 会把外层引号提前闭合，切出来是这样：
-            //   argv = [ "-c",
-            //            "osascript -e 'tell application System",  ← 脚本被截断
-            //            "Events to restart'" ]                    ← 剩下的成了 $0
-            // 结果 sh 报 `unexpected EOF while looking for matching '`、退出码 2，
-            // 而**闹钟那边一切正常**（触发了、也调用了），只有命令自己安静地失败——
-            // 正是这个项目栽过好几次的那一类（H12/K21）。
-            // 不带引号的命令（`open /System/.../Finder.app`）恰好不受影响，所以这条
-            // 在只测过那种命令时看着是好的。
-            psi.ArgumentList.Add("-c");
-            psi.ArgumentList.Add(cmd);
-        }
+        var psi = BuildShell(cmd, redirect: false);
 
         // Log "about to run" before actually running it: the command is quite possibly a
         // shutdown, and there may be no chance to log anything afterward.
-        Log.Info($"Alarm fired; running executeCommand: {cmd}");
+        Log.Info($"Running executeCommand: {cmd}");
 
         try
         {
@@ -172,42 +75,204 @@ public static class Command
         }
     }
 
+    // ---------------------------------------------------------------- 两边共用的挑选与校验
+
     /// <summary>
-    /// **App 到点时走的就是这一个方法**（2026-08-09，DECISIONS L19，规格见 DESIGN §9.3）：
-    /// 起一个**带控制台窗口**的 shell，让它去跑 `itami commands --execute --yes`，然后
-    /// 立刻返回。不重定向、不 await、不看退出码。
+    /// 挑出 <c>executeCommand.{os}</c> 的 **#0**，顺带把"为什么没得跑"记进日志。
+    /// 拿不到就返回 null——**每一条 null 路径都必须先说清楚原因**（§8.1a）：2026-08-02
+    /// 之前这里有三个**静默** return，用户开着 Execute、时间到了、什么都没发生，日志里
+    /// 一个字都没有，根本没法查。
+    ///
+    /// CLI 和 App 共用这一份，跟 <see cref="BuildShell"/> 同一个道理（L25）。
+    /// </summary>
+    private static string? FirstCommand(GroupRules? rules)
+    {
+        var key = OsKey;
+
+        if (rules is null)
+        {
+            Log.Warn("executeCommand: rules.json never loaded; nothing to run");
+            return null;
+        }
+
+        var list = rules.CommandsFor(key);
+        if (list.Count == 0)
+        {
+            Log.Warn($"executeCommand: no \"{key}\" entry in rules.json; nothing to run");
+            return null;
+        }
+
+        var cmd = list[0];
+        if (string.IsNullOrWhiteSpace(cmd))
+        {
+            Log.Warn($"executeCommand: entry #0 under \"{key}\" is empty; nothing to run");
+            return null;
+        }
+
+        // **闹钟永远只跑 #0**（DECISIONS E9）：这是一份常用命令的收藏夹，想换哪条生效就把
+        // 它挪到最前面——`itami commands --select N` 干的正是这件事。
+        if (list.Count > 1)
+            Log.Info($"executeCommand: {list.Count} entries under \"{key}\"; only #0 runs");
+
+        return cmd;
+    }
+
+    // ---------------------------------------------------------------- 两边共用的 shell 构造
+
+    /// <summary>
+    /// **CLI 和 App 用的是同一个 psi 构造**（2026-08-09，DECISIONS L25）。抽出来只为一件事：
+    /// 让"命令行里测得通、到了界面跑不动"在结构上不可能发生——shell 是哪个、参数怎么递、
+    /// 命令串长什么样，两条路只有这一处定义。别为了图省事在任何调用方另写一遍。
+    ///
+    /// 唯一允许不同的是 <paramref name="redirect"/>：CLI 有真控制台，让子进程直接继承
+    /// （Windows 的 `shutdown /h` 只把失败讲给控制台听，重定向就看不见了，L17）；
+    /// App 没有控制台，必须重定向才能把输出捞进日志。
+    /// </summary>
+    private static ProcessStartInfo BuildShell(string cmd, bool redirect)
+    {
+        var psi = new ProcessStartInfo(OperatingSystem.IsWindows() ? "cmd.exe" : "/bin/sh")
+        {
+            UseShellExecute = false,
+            RedirectStandardOutput = redirect,
+            RedirectStandardError = redirect,
+        };
+
+        if (OperatingSystem.IsWindows())
+        {
+            // `cmd.exe /c` 有它自己一套引号规则，跟 ArgumentList 用的 C 运行库转义规则
+            // **对不上**，别顺手把这条也改成 ArgumentList——Windows 这条路真机验证过。
+            psi.Arguments = $"/c {cmd}";
+        }
+        else
+        {
+            // ⚠️ 脚本必须作为**单独一个 argv 元素**交给 `sh -c`，绝不能拼成
+            // `-c "{cmd}"` 那样一整条 Arguments 字符串（2026-08-08 修，DECISIONS L1）。
+            // 拼字符串时 .NET 还要按 C 运行库规则把它切回 argv，而 rules.json 里的命令
+            // 自己就带双引号（`osascript -e 'tell application "System Events" to ...'`），
+            // 内层的 " 会把外层引号提前闭合，切出来是这样：
+            //   argv = [ "-c",
+            //            "osascript -e 'tell application System",  ← 脚本被截断
+            //            "Events to restart'" ]                    ← 剩下的成了 $0
+            // 结果 sh 报 `unexpected EOF while looking for matching '`、退出码 2，
+            // 而**闹钟那边一切正常**（触发了、也调用了），只有命令自己安静地失败。
+            psi.ArgumentList.Add("-c");
+            psi.ArgumentList.Add(cmd);
+        }
+        return psi;
+    }
+
+    // ---------------------------------------------------------------- App 到点时走的路
+
+    /// <summary>
+    /// **macOS 上 App 到点时走的就是这一个方法**（2026-08-09 用户定，DECISIONS L26，
+    /// 规格见 DESIGN §9.3）：直接把命令跑起来，**起完就返回**，输出交给后台任务收进日志。
+    ///
+    /// 为什么 macOS 不跟 Windows 一样去开一个控制台窗口：Windows 那套的**唯一理由**是
+    /// `shutdown /h` 会绕过管道、只把失败讲给控制台听（L17）。**macOS 上实测没有这回事**
+    /// ——`pmset -x`、`shutdown`、`open /nonexistent`、找不到的命令，失败信息全部老老实实
+    /// 走 stdout/stderr，管道都抓得到。既然抓得到，就没必要为了看一眼错误去套
+    /// `open → Terminal → 临时 .command → exec $SHELL -i` 那四层（用户 2026-08-09：
+    /// "这么一层套一层，其实我很不喜欢"）。
+    ///
+    /// ⚠️ **已知代价，用户知情接受**：走 Terminal 时 Apple 事件的授权记在 Terminal 头上
+    /// （实测它已获 System Events 授权）；直接执行则记在 ItamiTimer 头上，而它**不在
+    /// 授权列表里**、且 ad-hoc 签名每次重装身份都变。所以 `osascript ... System Events`
+    /// 那几条**第一次会弹授权框**，而到点时多半没人在键盘前——表现是命令卡着不动，
+    /// 60 秒后日志里出现 "still running"。点一次"允许"就好了。
+    /// 不碰 System Events 的命令（`pmset`、`open`）不受影响。
+    ///
+    /// ⚠️ **绝不 await**：分钟序列调完这里必须立刻往下走。命令挂死（比如就卡在那个授权框上）
+    /// 也伤不到任何东西——等待和读流全在后台任务里，那边卡住只是线程池里停着一个任务。
+    /// </summary>
+    public static void LaunchDetached(GroupRules? fallback)
+    {
+        GroupRules? rules = null;
+        try { rules = GroupRules.Load(AppData.RulesPath()); }
+        catch (Exception e)
+        {
+            Log.Error("executeCommand: could not re-read rules.json; falling back to the copy loaded at startup", e);
+        }
+
+        var cmd = FirstCommand(rules ?? fallback);
+        if (cmd is null) return;   // 原因已经在 FirstCommand 里记过日志了
+
+        try
+        {
+            var p = Process.Start(BuildShell(cmd, redirect: true));
+            if (p is null) { Log.Warn("executeCommand: the shell process did not start"); return; }
+
+            Log.Info($"Alarm fired; running executeCommand: {cmd}");
+            _ = Task.Run(() => CollectAsync(p, cmd));   // 起完就走，绝不等
+        }
+        catch (Exception e)
+        {
+            Log.Error($"Failed to run executeCommand ({cmd})", e);
+        }
+    }
+
+    /// <summary>
+    /// 后台收尾：读输出、等退出、写日志。**这里卡多久都不影响主程序**——调用方早就返回了。
+    ///
+    /// ⚠️ 两个流必须 <c>Task.WhenAll</c> **并发**读，不能先读完 stdout 再读 stderr
+    /// （2026-08-09 实测，DECISIONS L27）：串行读时子进程往另一根管子写满 64KB 缓冲区就
+    /// 阻塞在写上，我们阻塞在读上，双方互等——实测 300KB 的 stderr 必死锁。
+    /// </summary>
+    private static async Task CollectAsync(Process p, string cmd)
+    {
+        try
+        {
+            var so = p.StandardOutput.ReadToEndAsync();
+            var se = p.StandardError.ReadToEndAsync();
+
+            // 软看门狗：只记一行，**不杀进程**。命令合法地跑很久（关机流程）跟卡在授权框上
+            // 从外面分辨不了，杀错了比等着糟。这行日志是那种"卡住了"唯一的线索。
+            var done = Task.WhenAll(so, se);
+            if (await Task.WhenAny(done, Task.Delay(TimeSpan.FromSeconds(60))) != done)
+                Log.Warn($"executeCommand: still running after 60s (a permission prompt may be waiting): {cmd}");
+
+            await done;
+            await p.WaitForExitAsync();
+
+            // 退出码记一笔，但**别当成"命令成功了"的证据**：`shutdown /h` 在休眠被禁用时
+            // 就是退出码 0（L17）。真正的失败信息在下面两行输出里。
+            Log.Info($"executeCommand exited with {p.ExitCode}");
+            if (!string.IsNullOrWhiteSpace(so.Result)) Log.Info($"  stdout: {so.Result.Trim()}");
+            if (!string.IsNullOrWhiteSpace(se.Result)) Log.Warn($"  stderr: {se.Result.Trim()}");
+        }
+        catch (Exception e) { Log.Error("executeCommand: failed to collect output", e); }
+    }
+
+    /// <summary>
+    /// **Windows 上 App 到点时走的路**（2026-08-09，DECISIONS L19，规格见 DESIGN §9.3）：
+    /// 起一个**带控制台窗口**的 shell 去跑 `itami commands --execute --yes`，立刻返回。
     ///
     /// ⚠️ 起作用的是**"有一个真实控制台"**，不是"换了个解释器"——命令本身仍然由
-    /// <see cref="ExecuteAsync"/> 里的 `cmd.exe /c` / `sh -c` 解释，`rules.json` 里的条目
-    /// 语义一个字没变（L21）。绕这一圈只为让 `shutdown /h` 那类**只讲给控制台听**的
-    /// 失败信息能被人看见（L17）。
+    /// <see cref="BuildShell"/> 里的 `cmd.exe /c` 解释，`rules.json` 里的条目语义一个字
+    /// 没变（L21）。绕这一圈只为让 `shutdown /h` 那类**只讲给控制台听**的失败信息能被
+    /// 人看见（L17）。**macOS 上没有这个病，所以那边不走这条路**（L26）。
     ///
-    /// ⚠️ `-NoExit` 由这里给，**`itami` 自己永远不停顿**（L20）：窗口活多久是启动方的事。
-    /// `--yes` 只表示"不用等人按 y"，不表示"跑完就关窗"。
-    ///
-    /// 返回 false = 连 shell 都没起来（多半是找不到 `itami.exe`）。**这是新架构下我们
-    /// 唯一还能真正判断的失败**，跟"命令跑得对不对"是两回事，所以它值得单独记一条 Error。
+    /// ⚠️ `-NoExit` 由这里给，**`itami` 自己永远不停顿**（L20）。
     /// </summary>
     public static bool LaunchInShell()
     {
-        // 跟 ItamiTimer.exe 同目录。安装包必须把 CLI 一起打进去（L22）——在 2.2.0 之前
-        // 打包脚本只 publish 了 App，装机的机器上根本没有这个文件。
-        var exe = Path.Combine(AppContext.BaseDirectory,
-            OperatingSystem.IsWindows() ? "itami.exe" : "itami");
+        // 跟 ItamiTimer.exe 同目录。安装包必须把 CLI 一起打进去（L22）。
+        var exe = Path.Combine(AppContext.BaseDirectory, "itami.exe");
 
         if (!File.Exists(exe))
         {
-            // `Log.Error` 要一个异常，这条路上没有——但级别本来也该是 Warn：文件不在
-            // 是个可以看懂的状况（多半是从项目目录直接跑 App、CLI 没编），不是崩溃。
             Log.Warn($"executeCommand: cannot find the itami CLI next to the app ({exe}); nothing was run");
             return false;
         }
 
         try
         {
-            var psi = OperatingSystem.IsWindows() ? WindowsShell(exe) : MacTerminal(exe);
-            Log.Info($"Alarm fired; launching a shell to run: itami commands --execute --yes");
-            Process.Start(psi);
+            Log.Info("Alarm fired; launching a shell to run: itami commands --execute --yes");
+            Process.Start(new ProcessStartInfo("powershell.exe")
+            {
+                // `-NoExit` 让窗口留着；`&` 是 PowerShell 的调用运算符，路径带空格时必须有它。
+                Arguments = $"-NoExit -Command \"& '{exe}' commands --execute --yes\"",
+                UseShellExecute = true,   // true 才会真的开一个控制台窗口
+            });
             return true;
         }
         catch (Exception e)
@@ -216,48 +281,4 @@ public static class Command
             return false;
         }
     }
-
-    private static ProcessStartInfo WindowsShell(string exe) => new("powershell.exe")
-    {
-        // `-NoExit` 让窗口留着；`&` 是 PowerShell 的调用运算符，路径带空格时必须有它。
-        Arguments = $"-NoExit -Command \"& '{exe}' commands --execute --yes\"",
-        UseShellExecute = true,   // true 才会真的开一个控制台窗口
-    };
-
-    /// <summary>
-    /// macOS 侧的"开一个看得见的窗口"（2026-08-09，DECISIONS L24）：写一个临时
-    /// <c>.command</c> 脚本，再用 <c>open -a Terminal</c> 让 Terminal.app 去跑它。
-    ///
-    /// ⚠️ **不用 `osascript -e 'tell application "Terminal" to do script ...'`**——那条路
-    /// 要「自动化」权限（隐私与安全性 → 自动化），本机实测拿到的是
-    /// <c>-1743 Not authorized to send Apple events</c>：**API 不报错、窗口不出现**，
-    /// 正好是这个项目最怕的那种安静失效，而且用户不点那个授权框就永远修不好。
-    /// <c>open</c> 走的是 LaunchServices，不需要任何授权。
-    ///
-    /// 脚本末尾的 <c>exec $SHELL -i</c> 是 Windows 那边 <c>-NoExit</c> 的对应物：命令跑完
-    /// 之后留一个交互 shell，窗口不会自己消失，那句只讲给控制台听的错误信息才留得住
-    /// （L17/L20）。**停顿由启动方给，`itami` 自己仍然永不停顿**（L20）——手动在自己的
-    /// 终端里跑 `itami commands --execute` 时不会被迫按键。
-    /// </summary>
-    private static ProcessStartInfo MacTerminal(string exe)
-    {
-        // 固定文件名而不是每次一个新的：这是启动器的一次性跳板，不是用户数据，
-        // 攒一堆临时文件没有意义。
-        var script = Path.Combine(Path.GetTempPath(), "itami-execute.command");
-        File.WriteAllText(script,
-            "#!/bin/sh\n"
-            + $"{SingleQuote(exe)} commands --execute --yes\n"
-            + "exec \"${SHELL:-/bin/sh}\" -i\n");
-        if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(script,
-            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-
-        return new ProcessStartInfo("open")
-        {
-            ArgumentList = { "-a", "Terminal", script },
-            UseShellExecute = false,
-        };
-    }
-
-    /// <summary>套一层单引号交给 sh，路径里真有单引号时按 <c>'\''</c> 的老办法拆开。</summary>
-    private static string SingleQuote(string s) => "'" + s.Replace("'", "'\\''") + "'";
 }
