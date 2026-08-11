@@ -1,5 +1,4 @@
 using Avalonia;
-using Avalonia.Controls;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 
@@ -8,9 +7,11 @@ namespace ItamiTimer.App;
 /// <summary>
 /// Tomato -- the app icon.
 ///
-/// A pomodoro timer using a tomato as its icon is fitting. **While a task is running**,
-/// the taskbar icon switches to <see cref="RingIcon"/>'s progress ring (§8.3.2); **while
-/// idle**, it's this tomato.
+/// A pomodoro timer using a tomato as its icon is fitting. **This is the only icon there
+/// is**: it goes into the exe's resources (csproj `ApplicationIcon`) and the .app's .icns,
+/// both by way of <see cref="IconExport"/>. There used to be a `RingIcon` that swapped in a
+/// live progress ring while a task ran; it was deleted on 2026-08-10 because nothing
+/// displayed it any more (DECISIONS D11).
 ///
 /// Pure vector, like the dial and the dominoes: a handful of polygons and Beziers, no
 /// bitmap asset, crisp at any size.
@@ -35,8 +36,6 @@ public static class TomatoIcon
     private static readonly Color GreenDark = Color.FromRgb(0x1A, 0x66, 0x2C);
     private static readonly Color Green = Color.FromRgb(0x2C, 0x8B, 0x3C);
     private static readonly Color GreenLit = Color.FromRgb(0x4F, 0xAD, 0x5C);
-
-    public static WindowIcon Make(int size = 128) => RingIcon.ToIcon(Render(size));
 
     public static RenderTargetBitmap Render(int size = 128)
     {

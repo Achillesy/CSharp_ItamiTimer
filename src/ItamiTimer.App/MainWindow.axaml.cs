@@ -120,8 +120,11 @@ public partial class MainWindow : Window
 
         InitializeComponent();
         ApplyTheme();
-        Icon = RingIcon.Make(0, 0);   // Grey ring when idle; swapped for the progress ring while a task is running
 
+        // 这里原来给 Window.Icon 赋一张实时重绘的进度环（RingIcon）。2026-08-10 整块删掉：
+        // 它能显示的地方一个不剩了——任务栏从来就没认过它（Avalonia 只发小尺寸 HICON，
+        // D10），标题栏在 2.0.1 改成无边框时消失（659f06a）。不设 Window.Icon，两个平台
+        // 都退回可执行文件/.app 自带的静态番茄图标，正是 D10 定下的那个状态（DECISIONS D11）。
         ApplySliderRange();
         LoadRules();
         RefreshStartButton();
@@ -776,9 +779,6 @@ public partial class MainWindow : Window
         // un-pins now, it no longer minimizes (see the watchdog in OnFrame).
     }
 
-    /// <summary>Whole minute the taskbar icon was last redrawn for — see the throttle in <see cref="OnSessionUpdated"/>.</summary>
-    private DateTimeOffset? _lastIconMinute;
-
     private void OnSessionUpdated()
     {
         if (_session is not { } s) return;
@@ -790,21 +790,11 @@ public partial class MainWindow : Window
         dial.RestMinutes = s.Task.RestMinutes;
         dial.InvalidateVisual();
 
-        // §8.3.2: the taskbar icon is an **aggregate projection** — angle = completion
-        // ratio, colour = overall purity. Only worth redrawing once a whole minute has
-        // passed: during rest this method is called once a second, but the projection
-        // barely moves tick to tick, so repainting that often was pure churn (user,
-        // 2026-08-04) — same cadence as the dial's own per-minute judgment tick.
-        var minute = TimeGrid.FloorToMinute(DateTimeOffset.Now);
-        if (minute != _lastIconMinute)
-        {
-            _lastIconMinute = minute;
-            var focused = s.FocusedSeconds();
-            var progress = Math.Clamp(focused / (s.Task.FocusMinutes * 60.0), 0, 1);
-            var elapsed = Math.Max(1, (DateTimeOffset.Now - s.Task.StartedAt).TotalSeconds);
-            Icon = RingIcon.Make(progress, Math.Clamp(1 - focused / elapsed, 0, 1));
-        }
-
+        // 这里原来还有一段按整分钟节流的任务栏图标重绘（`_lastIconMinute` + `RingIcon.Make`），
+        // 2026-08-10 随图标本身一起删了（DECISIONS D11）。那个节流当初是为了修原生位图泄漏
+        // 加的（1.0.3，a471f3c）——泄漏的源头 `RenderTargetBitmap` 现在整条路都没了，
+        // 所以节流也没有存在的理由，不是"顺手删了个优化"。
+        //
         // The goal list's running total follows the same tick — no timer of its own, because
         // the number it shows only ever changes on the whole-minute tick anyway (during rest
         // this fires once a second, but nothing behind it moves, so it's a no-op repaint).
@@ -945,8 +935,6 @@ public partial class MainWindow : Window
         dial.RestFrom = null;
         dial.InvalidateVisual();
 
-        Icon = RingIcon.Make(0, 0);
-        _lastIconMinute = null;
         RefreshGoalItems();
         RefreshStartButton();
     }
