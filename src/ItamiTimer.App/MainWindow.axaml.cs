@@ -365,12 +365,23 @@ public partial class MainWindow : Window
         if (sec == _tickedSecond) return;
         _tickedSecond = sec;
         // #5 reversed (2026-08-13, user): Force on now means unconditional -- it overrides
-        // everything, including focus/rest, which is the whole point of "force". The mute-
-        // during-focus rule moves to the *non-forced* branch instead, alongside the manual
-        // switch it was always meant to sit next to.
-        var ticking = _settings.ForceTicking
-            ? true
-            : _settings.TickEnabled && _session is not { Finished: false };   // No task, or the task has ended -> tick
+        // everything, including focus/rest, which is the whole point of "force".
+        //
+        // Not forced: **quiet is earned, not the default** (2026-08-13, DECISIONS C7). The
+        // tick is a reminder, not a punishment -- it's just what a clock does -- and the one
+        // thing that buys silence is the previous whole minute having been genuinely judged
+        // as focus. Everything else (idle, resting, a task just started with no judgment
+        // yet, or the last minute coming back off-task/away) ticks like an ordinary clock.
+        // This deliberately does **not** carve out an exception for stepping away (AFK):
+        // unlike the dial's colouring (DECISIONS D3, "not your fault, not counted"), which
+        // is about *scoring*, this is a content-free nudge that the clock is still running --
+        // drifting off unconsciously is exactly the case a reminder is for, whether that's a
+        // tab switch or getting up. `TickEnabled` still has final say: turning the switch off
+        // is a conscious choice, and no reminder overrides it.
+        var duringFocus = _session is { Finished: false, InRest: false };
+        var lastMinuteFocused = duringFocus && _session!.LastCompletedMinute is { } m
+            && m.Tier is CellTier.FocusFull or CellTier.FocusMid or CellTier.FocusLow;
+        var ticking = _settings.ForceTicking || (_settings.TickEnabled && !lastMinuteFocused);
         if (ticking) Tick.Play(sec, _settings.TickVolume);
 
         // 整分钟：所有"以分为单位"的功能都在 OnMinute 里按固定顺序走一遍。

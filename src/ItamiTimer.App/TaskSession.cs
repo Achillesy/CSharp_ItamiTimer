@@ -63,6 +63,20 @@ public sealed class TaskSession : IDisposable
     public bool Finished { get; private set; }
 
     /// <summary>
+    /// The most recently **completed** minute's judgment, for the tick's "quiet is earned"
+    /// rule (MainWindow.OnFrame, 2026-08-13). <c>null</c> until the first real tick lands.
+    ///
+    /// ⚠️ **Deliberately not <c>Cells[^1]</c>.** <see cref="Cells"/> is real minutes **plus**
+    /// the commitment arc's grey projection tacked on the end (<c>JudgmentBuffer.ToMinuteCells</c>),
+    /// and the projection is not empty until the deficit hits zero — so for almost this
+    /// entire round, <c>Cells[^1]</c> is a cell that hasn't happened yet, not the one that
+    /// just did. This field is set from the correct index (the last real minute, before the
+    /// grey tail starts) right when it's computed, so callers never have to know the
+    /// distinction exists.
+    /// </summary>
+    public MinuteCell? LastCompletedMinute { get; private set; }
+
+    /// <summary>
     /// 本轮到目前为止的专注秒数 = 归档已结算的 + 还在 buffer 里的。
     ///
     /// **整数** —— 数的是 buffer 里的格子数，不是 AW 事件的 `duration`，所以永远没有小数
@@ -229,6 +243,13 @@ public sealed class TaskSession : IDisposable
 
             var cells = _buffer.ToMinuteCells();
             Cells = cells; // #11: doesn't disappear once focus completes, the arc stays underneath the rest wedge
+
+            // The real (already-ticked) minutes come first in `cells`, the commitment arc's
+            // grey projection is tacked on after them (see LastCompletedMinute's doc) -- so
+            // the minute that just completed is at index ElapsedSeconds/60 - 1, never `[^1]`.
+            var realMinutes = _buffer.ElapsedSeconds / 60;
+            if (realMinutes > 0) LastCompletedMinute = cells[realMinutes - 1];
+
             Updated?.Invoke();
 
             Log.Info($"{FocusedSeconds() / 60.0,5:F1}/{Task.FocusMinutes} min  " +
