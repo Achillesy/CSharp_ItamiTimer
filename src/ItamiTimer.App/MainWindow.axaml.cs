@@ -378,9 +378,21 @@ public partial class MainWindow : Window
         // drifting off unconsciously is exactly the case a reminder is for, whether that's a
         // tab switch or getting up. `TickEnabled` still has final say: turning the switch off
         // is a conscious choice, and no reminder overrides it.
+        //
+        // ⚠️ **FocusLow doesn't count** (2026-08-13, DECISIONS C8). The minute that's just
+        // completed is read the instant it lands, which is exactly when JudgmentBuffer.Cover
+        // is most likely to still be showing fail-open AwOffline seconds for the tail of it
+        // -- ActivityWatch's own window bucket hasn't necessarily flushed the last few
+        // seconds' events yet, so those seconds default to AwOffline, which counts as focus
+        // (§3.1's knowing fail-open). That stray handful of seconds almost never clears 20,
+        // so it lands in FocusLow and nowhere higher -- excluding FocusLow filters out
+        // exactly this artifact without adding any lag (the next tick's repaint would fix it
+        // anyway, one minute later, but there's no reason to wait for that here). Genuine
+        // focus that's merely brief (a quick real glance at the goal) gets the same
+        // treatment as no focus at all -- an acceptable trade against false silence.
         var duringFocus = _session is { Finished: false, InRest: false };
         var lastMinuteFocused = duringFocus && _session!.LastCompletedMinute is { } m
-            && m.Tier is CellTier.FocusFull or CellTier.FocusMid or CellTier.FocusLow;
+            && m.Tier is CellTier.FocusFull or CellTier.FocusMid;
         var ticking = _settings.ForceTicking || (_settings.TickEnabled && !lastMinuteFocused);
         if (ticking) Tick.Play(sec, _settings.TickVolume);
 
