@@ -364,10 +364,13 @@ public partial class MainWindow : Window
         var sec = DateTime.Now.Second;
         if (sec == _tickedSecond) return;
         _tickedSecond = sec;
-        // #5: Force on -> force ticking, but mute during focus + rest
+        // #5 reversed (2026-08-13, user): Force on now means unconditional -- it overrides
+        // everything, including focus/rest, which is the whole point of "force". The mute-
+        // during-focus rule moves to the *non-forced* branch instead, alongside the manual
+        // switch it was always meant to sit next to.
         var ticking = _settings.ForceTicking
-            ? _session is not { Finished: false }   // No task, or the task has ended -> tick
-            : _settings.TickEnabled;
+            ? true
+            : _settings.TickEnabled && _session is not { Finished: false };   // No task, or the task has ended -> tick
         if (ticking) Tick.Play(sec, _settings.TickVolume);
 
         // 整分钟：所有"以分为单位"的功能都在 OnMinute 里按固定顺序走一遍。
