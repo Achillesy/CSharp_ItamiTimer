@@ -5,6 +5,7 @@
         Width="380"
         SizeToContent="Height"
         CanResize="False"
+        CanMinimize="False"
         ShowInTaskbar="False"
         WindowStartupLocation="CenterOwner"
         Topmost="True"
@@ -13,6 +14,13 @@
        modal window would sink entirely beneath it — nothing shows up on screen, and
        clicking the gear looks like it did nothing. A modal window should sit above
        everything else to begin with, so it's pinned outright. Hit in practice on 2026-07-28. -->
+  <!-- CanMinimize="False" (2026-08-13, user-reported bug): this window is shown via
+       ShowDialog, so minimizing it doesn't just hide it — the owner (MainWindow) stays
+       disabled the whole time a modal is open, and this window is also ShowInTaskbar="False",
+       so once minimized there's no taskbar entry to click to bring it back either. Net
+       effect: every button on the main window goes dead with no visible cause. CanResize
+       already being False doesn't imply this — Avalonia defaults CanMinimize to True on
+       its own, independent of resizability. -->
 
   <Window.Styles>
     <!-- One card = one setting. Laid out after the Windows Clock app's settings page.

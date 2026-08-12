@@ -398,8 +398,10 @@ public partial class MainWindow : Window
     ///
     /// ⚠️ **顺序是有讲究的，别随手调**（2026-08-08 定稿，DECISIONS L13）：
     /// ① 提示条到期收起 ② AW 查询+判定+三声通知 ③ Alarms 清单 ④ 闹钟（判断+执行/响铃）
+    /// ⑤ 骨牌核对星期（2026-08-13 用户补充，见 DECISIONS D12，取代 D7 的"只在启动/Start 时查"）
     ///
-    /// 三条理由，每条都对应一个真踩过或差点踩到的坑：
+    /// 三条理由，每条都对应一个真踩过或差点踩到的坑（都是针对①~④；⑤ 是后来单独加的，
+    /// 见它自己那行注释）：
     ///
     /// 1. **闹钟整体排最后**，判断和动作不再分开。命令多半是关机/重启，让它成为这一分钟
     ///    的最后一件事，前面该做的都已经做完。原来的写法是"第 ① 步判断并执行命令"，
@@ -470,6 +472,14 @@ public partial class MainWindow : Window
                 if (_settings.CommandEnabled) Command.LaunchDetached(_rules);
                 else Sound.Repeat(_settings.CommandSound, AlarmRings);
             }
+
+            // ---- 5) 骨牌：每分钟核对一次星期，取代 D7 原来"只在启动和点 Start 时查"
+            //         的做法（2026-08-13 用户要求，DECISIONS D12）。**排在闹钟之后但没有
+            //         破坏"闹钟最后一件事"这个前提**：这一步只读 `now` 写一个 UI 属性，
+            //         不碰网络、不 await，跟闹钟真正忌讳的"关机时还在敲 aw-server"不是
+            //         同一类风险——就算上一步刚起了关机命令，这一句也能在进程被杀掉之前
+            //         同步跑完。
+            F<DominoRow>("Dominoes").Fallen = DominoRow.FallenForToday(now);
         }
         catch (Exception e)
         {
