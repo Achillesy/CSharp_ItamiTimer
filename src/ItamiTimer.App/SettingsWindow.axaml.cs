@@ -121,6 +121,10 @@ public partial class SettingsWindow : Window
             Persist();
         };
 
+        // No settings.json state to load or save here -- see AppData.OpenInFileManager's
+        // doc comment for why this button exists.
+        this.FindControl<Button>("OpenConfigFolder")!.Click += (_, _) => AppData.OpenInFileManager();
+
         _loading = false;
     }
 

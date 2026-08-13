@@ -926,6 +926,14 @@ Command**。两头是用户点名的：滴答最常动、放开头；Command 是
 | `alarms.md` | **用户/外部脚本写，程序只读**（1.2.0，§9.1）| Alarms 清单：`- [ ] 时间 文字` 一行一条，程序从不回写、不清理 |
 | `itami.log` | 程序 | 1MB 滚动。界面全程沉默，日志是唯一能事后查的地方 |
 
+**Settings 最底下的 `Open Config Folder` 按钮**（2026-08-13，DECISIONS C9）：点了就在
+Explorer/Finder 里打开这个目录——`rules.json`、`during.json` 的清零/找回历史都要靠手改
+这个目录下的文件（§8.1、DECISIONS I7），一个按钮比记住 `%LOCALAPPDATA%\ItamiTimer` 这串
+路径更可靠。不放进任何卡片，因为它没有开关状态，是一次性动作。实现是
+`AppData.OpenInFileManager()`，Windows 走 `explorer.exe`、macOS 走 `open`，用
+`ProcessStartInfo.ArgumentList` 传路径而不是手拼 `Arguments` 字符串，绕开路径带空格时的
+Windows argv 转义问题（§15.4 那类坑）。
+
 **任务状态不落盘**：没有 current-task.json，退出即放弃。设置和日志删掉不改变行为。
 
 ### 11.1 ✅ 关于「把 settings.json 和 rules.json 合并」（2026-08-02 定稿：不合并，不改名）

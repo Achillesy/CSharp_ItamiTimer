@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 
@@ -6,15 +7,17 @@ namespace ItamiTimer.App;
 /// <summary>
 /// Where the program's own stuff lives.
 ///
-/// Pulled out on its own because <see cref="Log"/> is a complete no-op in Release (user,
-/// 2026-07-28), while <see cref="Settings"/> still needs to write settings.json to the
-/// same directory -- making config depend on a logging class that's already inert is a
-/// trap waiting to be stepped on later.
+/// Pulled out on its own so <see cref="Settings"/> (which needs to write settings.json)
+/// doesn't have to depend on <see cref="Log"/> for the directory, or vice versa -- neither
+/// class should have to know the other exists just to agree on a path. ⚠️ The original
+/// reason written here was "Log is a no-op in Release", which **stopped being true the
+/// same day it was written** (see <see cref="Log"/>'s own doc comment: both configurations
+/// write, reversed later on 2026-07-28) -- this class just never got the memo.
 /// </summary>
 public static class AppData
 {
     /// <summary>
-    /// Where settings.json and the (Debug-only) log live.
+    /// Where settings.json and the log live.
     ///
     /// <code>
     /// Windows   %LOCALAPPDATA%\ItamiTimer
@@ -88,4 +91,38 @@ public static class AppData
         WriteIndented = true,
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
     };
+
+    /// <summary>
+    /// Opens <see cref="Dir"/> in the OS's file manager -- Settings' "Open Config Folder"
+    /// button (2026-08-13). Same motivation as <see cref="Dir"/> deliberately not being
+    /// hidden on macOS: this config is meant to be hand-edited (rules.json, and now
+    /// during.json's reset-by-deleting-the-entry trick too), so getting to it should be one
+    /// click, not "go find %LOCALAPPDATA% yourself".
+    ///
+    /// Windows opens straight through `explorer.exe`, macOS through `open` -- neither needs
+    /// `UseShellExecute` or output capture, unlike <see cref="Command.LaunchDetached"/>:
+    /// that one runs whatever line the user wrote in rules.json, this one always launches
+    /// the same fixed, trusted executable against <see cref="Dir"/>. `ArgumentList` (not a
+    /// hand-built `Arguments` string) sidesteps the Windows argv/CRT quoting question
+    /// entirely -- the same class of bug <see cref="Command"/>'s comments call out by name,
+    /// not worth re-earning here over one path that might contain spaces.
+    ///
+    /// Creates the directory first in case it somehow doesn't exist yet (a fresh install
+    /// that hasn't saved anything) -- opening a missing folder just fails silently on both
+    /// platforms, and an empty folder is a better answer than nothing visibly happening.
+    /// </summary>
+    public static void OpenInFileManager()
+    {
+        try
+        {
+            Directory.CreateDirectory(Dir);
+            var psi = new ProcessStartInfo(OperatingSystem.IsMacOS() ? "open" : "explorer.exe");
+            psi.ArgumentList.Add(Dir);
+            Process.Start(psi);
+        }
+        catch (Exception e)
+        {
+            Log.Error("Failed to open the config folder", e);
+        }
+    }
 }

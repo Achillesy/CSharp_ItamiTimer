@@ -128,5 +128,10 @@
       </StackPanel>
     </Border>
 
+    <!-- Not a card: this isn't a setting (no on/off state), it's a one-shot action.
+         See AppData.OpenInFileManager's doc comment for why it exists. -->
+    <Button x:Name="OpenConfigFolder" Content="Open Config Folder" HorizontalAlignment="Stretch"
+            HorizontalContentAlignment="Center"/>
+
   </StackPanel>
 </Window>
