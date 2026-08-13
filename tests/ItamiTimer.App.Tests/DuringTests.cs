@@ -115,4 +115,66 @@ public class DuringTests
         Assert.Equal(0, d["Economics"]);
         Assert.Equal(Now, d.RecordedThrough("Economics"));
     }
+
+    // ---------------------------------------------------------------- 补种（DECISIONS I7）
+
+    /// <summary>
+    /// 一个 rules.json 里全新出现的目标，补种成 <c>(0, now)</c>——不是 I3 那个 <c>null</c>
+    /// 哨兵。新目标不该背上"从 AW 全部历史里回填"这个包袱。
+    /// </summary>
+    [Fact]
+    public void ANewlyDiscoveredGoalIsSeededWithNowNotNull()
+    {
+        var d = new During();
+        var changed = d.ApplySeed(["Programming"], Now);
+
+        Assert.True(changed);
+        Assert.Equal(0, d["Programming"]);
+        Assert.Equal(Now, d.RecordedThrough("Programming"));
+    }
+
+    /// <summary>
+    /// 已经有真实累计值的目标不会被补种碰到——只补缺失的，不覆盖已有的。
+    /// </summary>
+    [Fact]
+    public void ApplySeedNeverOverwritesAnExistingGoal()
+    {
+        var d = new During();
+        d.Goals["Economics"] = new GoalTime { Seconds = 12345, RecordedThrough = Now };
+
+        var changed = d.ApplySeed(["Economics"], Now.AddDays(1));
+
+        Assert.False(changed);
+        Assert.Equal(12345, d["Economics"]);
+        Assert.Equal(Now, d.RecordedThrough("Economics"));
+    }
+
+    /// <summary>
+    /// 删掉一个目标的整条记录、再让它出现在传入的 goal 列表里，等价于"清零"——重新补种成
+    /// <c>(0, now)</c>，不会继承被删掉之前的任何东西（DECISIONS I7 的清零就是这个机制）。
+    /// </summary>
+    [Fact]
+    public void DeletingAGoalThenReseedingResetsItCleanly()
+    {
+        var d = new During();
+        d.Goals["Economics"] = new GoalTime { Seconds = 12345, RecordedThrough = Now };
+        d.Goals.Remove("Economics");
+
+        var changed = d.ApplySeed(["Economics"], Now.AddDays(1));
+
+        Assert.True(changed);
+        Assert.Equal(0, d["Economics"]);
+        Assert.Equal(Now.AddDays(1), d.RecordedThrough("Economics"));
+    }
+
+    /// <summary>没有新目标时不该报告"变了"——调用方靠这个决定要不要写盘。</summary>
+    [Fact]
+    public void ApplySeedReportsNoChangeWhenNothingIsMissing()
+    {
+        var d = new During();
+        d.Goals["Economics"] = new GoalTime { Seconds = 1, RecordedThrough = Now };
+
+        Assert.False(d.ApplySeed(["Economics"], Now));
+        Assert.False(d.ApplySeed([], Now));
+    }
 }

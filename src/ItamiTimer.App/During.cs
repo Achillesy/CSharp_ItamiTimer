@@ -59,10 +59,10 @@ public sealed class GoalTime
     /// <summary>
     /// <see cref="Seconds"/> 已经算到了哪一刻——下一次回填的左端。
     ///
-    /// <b><c>null</c> = 从没被统计过</b>，首次启动时会从 AW 历史的开头一路数过来
-    /// （DECISIONS I3）。这个哨兵值是有意留成 null 而不是在播种时填一个具体日期的：
-    /// 播种发生在程序启动路径上，那一刻 AW 可能连不上，「已播种但起点未知」这个状态
-    /// 无论如何都省不掉。一个状态能表达的事，不用两个。
+    /// <b><c>null</c> = 让下次回填去 AW 全部历史里数一遍</b>（DECISIONS I3 的机制）。
+    /// ⚠️ **`During.EnsureSeeded` 2026-08-13 起不再自动播出这个值**（DECISIONS I7）：
+    /// 自动补种一律填挂钟时间，`null` 变成了纯手动的选项——想让某个目标找回历史，去
+    /// during.json 里把这一条手动改成 `null` 再点 Start。
     /// </summary>
     [JsonPropertyName("recordedThrough")]
     public DateTimeOffset? RecordedThrough { get; set; }
@@ -192,23 +192,53 @@ public sealed class During
     }
 
     /// <summary>
-    /// 文件还不存在时，按当前的小目标名播一份全 0 的（用户 2026-08-02）。
+    /// 每次启动都跑一遍：rules.json 里有、`Goals` 里还没有的目标名，各补种一条
+    /// <c>(0, 补种这一刻)</c>。**这是这个文件除 <see cref="Advance"/> 之外唯一的写入点**。
     ///
-    /// 界面上那个数字没有单位、不解释（D6），用户只能去数据目录里翻。翻到 <c>{}</c>
-    /// 什么也学不到，翻到 <c>{ "Economics": { "seconds": 0, "recordedThrough": null } }</c>
-    /// 一眼就明白这表是什么——跟 rules.json「给例子不给注释」同一条思路，而且顺带把
-    /// <c>recordedThrough: null</c> 这个哨兵摆在明面上。
+    /// <b>2026-08-13 用户推翻 I3（DECISIONS I7）：种子不再是 <c>null</c>，是 <c>DateTimeOffset.Now</c>。</b>
+    /// 旧版只在文件从没存在过的那一次播种，且故意留 <c>null</c>——那意味着这个目标第一次
+    /// 点 Start 时会去 AW 全部历史里回填，新目标不丢掉之前已经做过的部分。用户现在要的是
+    /// 反过来：**新目标默认不背历史包袱，只从被发现这一刻算起**——`"编程"` 这种后来才加进
+    /// rules.json 的目标，不该因为之前用 Claude Code / VS Code 干过别的事，一点 Start
+    /// 就平白多出几十小时。
     ///
-    /// <b>只在创建那一次播种，之后绝不再同步。</b>状态文件不该去镜像配置文件：后来改了
-    /// 目标名，这儿留一条对不上的零就留着。反正没播种过的名字走
-    /// <see cref="this[string]"/> / <see cref="RecordedThrough"/> 得到的也是同一对
-    /// <c>(0, null)</c>，行为完全一致。
+    /// <c>null</c> 这个哨兵**没有被删掉，只是不再是自动路径**：<see cref="MainWindow"/> 的
+    /// `BackfillAsync` 见到 `null` 仍然会走全历史回填（DECISIONS I3 的机制原样保留）。想让
+    /// 某个目标找回历史，手动把 during.json 里那一条的 `recordedThrough` 改成 `null`（或者
+    /// 改成任意更早的日期）再点 Start 就行——跟 rules.json 一样，这个文件也是可以手改的，
+    /// 不需要专门的界面。**同一套逻辑也是清零的办法**：把某个目标的整条记录从 during.json
+    /// 里删掉，重启程序，它会被当成"没见过的目标"重新补种成 <c>(0, 重启这一刻)</c>——不需要
+    /// 另写一个"重置"功能。
+    ///
+    /// 不查 AW 的 bucket 创建时间（`created`）来定种子——那是 I3 权衡过、专门否掉的路：
+    /// ① 是派生值，会随 AW 重装 / 迁移漂移；② 播种发生在程序启动路径上，那一刻 AW 可能
+    /// 还没连上，查询会失败或者拖慢启动。直接用挂钟时间 `Now` 完全不需要问 AW，这两条顾虑
+    /// 天然不存在。
+    ///
+    /// **只补种缺失的，不覆盖已有的**——已经有真实累计值的目标不会被这里碰到；已经改过名字
+    /// 的旧条目也不会被这里清理，状态文件依然不镜像配置文件，只是"发现新目标"这一动作从
+    /// "仅一次"变成了"每次启动都查一遍差集"。
     /// </summary>
     public void EnsureSeeded(IReadOnlyList<string> goals)
     {
-        if (File.Exists(Path_)) return;
-        foreach (var g in goals) Goals[g] = new GoalTime();
-        Save();
+        if (ApplySeed(goals, DateTimeOffset.Now)) Save();
+    }
+
+    /// <summary>
+    /// <see cref="EnsureSeeded"/> 的纯内存部分——不落盘（同 <see cref="Apply"/> /
+    /// <see cref="FromLegacy"/> 那条拆分规矩，DECISIONS I5）。返回是否真的新种了点什么，
+    /// 让调用方决定要不要写盘。
+    /// </summary>
+    public bool ApplySeed(IReadOnlyList<string> goals, DateTimeOffset now)
+    {
+        var added = false;
+        foreach (var g in goals)
+        {
+            if (Goals.ContainsKey(g)) continue;
+            Goals[g] = new GoalTime { RecordedThrough = now };
+            added = true;
+        }
+        return added;
     }
 
     public void Save()
