@@ -10,8 +10,6 @@
 ![ItamiTimer 主界面](screenshots/ItamiTimer.png)
 ![ItamiTimer 设置窗口](screenshots/Settings.png)
 
-> ⚠️ 主界面截图停在 2.0.0 之前，还是带边框的老样子——现在长什么样见[窗口](#窗口)。
-
 **所有的痛感都在表盘上**
 ```
 痛みを感じろ，

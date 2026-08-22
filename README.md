@@ -11,9 +11,6 @@ count: the grey deadline arc on the clock face slides further away, and you watc
 ![ItamiTimer main window](screenshots/ItamiTimer.png)
 ![ItamiTimer settings window](screenshots/Settings.png)
 
-> ⚠️ The main-window screenshot predates 2.0.0 and still shows the old framed window —
-> see [Window](#window) for what it looks like now.
-
 **All the pain comes from the dial**
 ```
 痛みを感じろ，
