@@ -268,9 +268,22 @@ public sealed class TaskSession : IDisposable
             else if (cells.Count > 0 && cells.Count != _lastCellCount)
             {
                 _lastCellCount = cells.Count;
-                var last = cells[^1];
-                if (last.OffTaskSeconds >= NudgeFloorSeconds)
-                    Log.Info($"The minute just past had {last.OffTaskSeconds}s off-task");
+
+                // 2026-08-27 修复：这里原来写的是 `cells[^1]`，跟上面那条注释字面矛盾
+                // （"the minute that just completed is at index ElapsedSeconds/60 - 1,
+                // never `[^1]`"）——`[^1]` 绝大多数时候是承诺弧那截灰色投影，`OffTaskSeconds`
+                // 恒为 0，导致这条日志**在生产环境里一次都没触发过**（翻遍现有 itami.log
+                // 零命中，含 2026-08-23 那段实打实跑偏 13 分钟的记录）。改用上面已经算对的
+                // `LastCompletedMinute`，同一个值，不重新算一遍索引。
+                if (LastCompletedMinute is { OffTaskSeconds: >= NudgeFloorSeconds } cell)
+                {
+                    // 归因只用于诊断，绝不反哺判定（§8.1a 同一条原则，跟 AwStaleSeconds
+                    // 那两条警告一样）：算的是"大概率是谁"，不是又一次判定。
+                    var culprit = OffTaskAttribution.Attribute(win, cell.Start, _rules, Task.Group);
+                    Log.Info(culprit is null
+                        ? $"The minute just past had {cell.OffTaskSeconds}s off-task"
+                        : $"The minute just past had {cell.OffTaskSeconds}s off-task: {culprit}");
+                }
             }
         }
         catch (Exception ex)
