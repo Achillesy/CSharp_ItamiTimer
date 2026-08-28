@@ -42,6 +42,13 @@ public class DialControl : Control
     private const double RAlarmsDotRadius = 0.05;
     private const double RAlarmsDotStroke = 0.022;
 
+    /// <summary>
+    /// 点击命中红圈的额外容差，**固定像素，不跟着 <c>rFace</c> 缩放**（2026-08-27，
+    /// DESIGN §17.1）：红圈本身在这块表盘常见尺寸下画出来大约只有 7px 半径，纯几何
+    /// 精确点太挑手感。这圈容差是隐形的——不改画出来的样子，只放宽"算不算点中"。
+    /// </summary>
+    private const double AlarmsDotHitPaddingPx = 6.0;
+
     /// <summary>Outer edge of the rest wedge. Sits inside the tick ring so it doesn't cover the numerals (§8.4.4).</summary>
     private const double RestWedgeOuter = 0.70;
 
@@ -132,15 +139,54 @@ public class DialControl : Control
     private static Color A(Color c, byte alpha) => Color.FromArgb(alpha, c.R, c.G, c.B);
     private static readonly Color Shadow = Color.FromArgb(0xFF, 0, 0, 0);
 
-    public override void Render(DrawingContext ctx)
+    /// <summary>
+    /// 表盘圆心 + 缩放系数，从 <see cref="Bounds"/> 推导——<see cref="Render"/> 画一切
+    /// 东西用的就是这两个数。2026-08-27 单独抽出来，是因为 <see cref="HitTestAlarmsDot"/>
+    /// 要在 <c>Render</c> 之外（一次指针按下事件里）用**完全同一套公式**重新算一遍红圈
+    /// 圆心，抽成一个方法而不是抄一份，保证"画在哪"和"能点哪"不可能各算各的、慢慢漂移。
+    /// <c>box &lt;= 0</c>（控件还没量出尺寸）时返回 null。
+    /// </summary>
+    private (Point Center, double RFace)? FaceGeometry()
     {
-        var p = Palette;
         var box = Math.Min(Bounds.Width, Bounds.Height);
-        if (box <= 0) return;
+        if (box <= 0) return null;
 
         // Leave headroom for the drop shadow, otherwise it gets clipped by the control's bounds
         var rFace = box / 2 / (RBezelOut + 0.10);
-        var c = new Point(Bounds.Width / 2, Bounds.Height / 2 - rFace * 0.03);
+        return (new Point(Bounds.Width / 2, Bounds.Height / 2 - rFace * 0.03), rFace);
+    }
+
+    /// <summary>
+    /// 这一下按下（<paramref name="point"/> 是 <c>e.GetPosition(dial)</c> 那个坐标系）
+    /// 有没有落在 Alarms 清单的小红圈上。<see cref="AlarmsDotMinutes"/> 为 null（没画
+    /// 红圈）时恒为 false——没画出来的东西不该点得中，跟拖窗口那套"没画的地方拖不动"
+    /// 是同一条 Avalonia 命中测试语义（DECISIONS K10），这里只是手动复刻同一个直觉。
+    ///
+    /// **不是 Button**：DECISIONS E4 记过一次教训——Button 内部把 PointerPressed 标
+    /// Handled，挂在钟面上的普通 `+=` 订阅会收不到。这里换成纯几何判断，判断本身跟
+    /// <see cref="MainWindow"/> 现有的那个 PointerPressed 处理器共用同一次按下事件，
+    /// 不新开一层控件。
+    /// </summary>
+    public bool HitTestAlarmsDot(Point point)
+    {
+        if (AlarmsDotMinutes is not { } minutes) return false;
+        if (FaceGeometry() is not { } geometry) return false;
+        var (c, rFace) = geometry;
+
+        var deg = (minutes % AlarmClock.FaceMinutes) / 2.0;   // 跟 DrawAlarmsDot 同一个换算
+        var at = At(c, rFace * RAlarmsDot, deg);
+        var hitRadius = rFace * RAlarmsDotRadius + AlarmsDotHitPaddingPx;
+
+        var dx = point.X - at.X;
+        var dy = point.Y - at.Y;
+        return dx * dx + dy * dy <= hitRadius * hitRadius;
+    }
+
+    public override void Render(DrawingContext ctx)
+    {
+        var p = Palette;
+        if (FaceGeometry() is not { } geometry) return;
+        var (c, rFace) = geometry;
         double R(double n) => n * rFace;
 
         DrawDropShadow(ctx, c, R, rFace);

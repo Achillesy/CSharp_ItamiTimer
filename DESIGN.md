@@ -1578,6 +1578,44 @@ The minute just past had 55s off-task: chrome.exe "YouTube - some title"
 共存的响铃顺序，均按预期工作；Windows 上 `powershell.exe` 调 WinRT 弹出的 toast
 子进程稳定退出码 0。
 
+### 17.1 ✅ 点小红圈瞄一眼下一条（2.9.0，2026-08-27）
+
+红圈本来只是个纯装饰的角度指示——画出"下一条 Alarms 什么时候到"，但点不动。这次
+给它加了唯一一种交互：**精确点在红圈上，弹一次提示条**，看到的正是红圈本身代表
+的那一条（`AlarmsList.Next`）。
+
+- **命中测试，不是 Button**：`DialControl` 是纯手绘控件（跟表盘上其它一切一样），
+  红圈没有对应的子控件。新增 [`DialControl.HitTestAlarmsDot`](src/ItamiTimer.App/Drawing/DialControl.cs)
+  做几何判断——圆心和半径复用**跟 `DrawAlarmsDot` 完全同一套公式**（新抽出的
+  `FaceGeometry()`），画在哪就能点哪，两处不可能各算各的、慢慢漂移。
+  ⚠️ **特意不用 Button**：DECISIONS E4 记过一次教训——Button 内部把
+  `PointerPressed` 标 Handled，钟面上其它靠 `+=` 订阅的手势会收不到。命中判断挂在
+  `MainWindow` 现有的那个 `dial.PointerPressed` 里，跟拖窗口共用同一次按下事件。
+- **命中区比画出来的圆稍大一圈**（固定 6px，不跟着表盘缩放）：红圈在常见尺寸下
+  半径只有 7px 左右，纯几何精确点太挑手感。这圈容差是隐形的，不改视觉。
+- **按下即分岔，不是"松开才算"**：跟喇叭/图钉/齿轮那几个真正的 `Button`（`Click`
+  在松开时触发）不是同一套手势——拖窗口本来就必须在**按下**那一刻调用
+  `BeginMoveDrag` 才能把控制权交给操作系统（等到松开已经错过时机），所以红圈这个
+  新分支也只能挂在按下上：精确点中红圈的那一下，从按下瞬间起就已经是"瞄一眼"，
+  不会再退化成拖拽，哪怕按住不放再移动鼠标。
+- **纯读，绝不碰到点触发那条路**：`OnAlarmsDotClicked` 不出声、不弹系统通知、
+  **不推进 `_alarmsProcessedThrough` 水位线**——跟 `CheckAlarmsList`（§9.1）完全
+  隔离。这是唯一不能妥协的一条：点这一下绝不能让后面真正到点的那次提醒被冲掉、
+  被提前消费，或者被算作"已经处理过"。
+- **停留 3 秒，不是到点那次的 1 分钟**：`ShowAlarmBanner` 加了个 `visibleFor` 参数，
+  到点真触发传 1 分钟（挂在整分钟节拍上，行为不变），瞄一眼传 3 秒——只是扫一眼，
+  没必要占那么久。两条路复用同一块显示区域和同一套双层文字画法（DECISIONS J11）。
+- **没有下一条闹钟时，什么都不会发生**：`AlarmsDotMinutes` 为 null（没画红圈）
+  时 `HitTestAlarmsDot` 恒为 false，那一下按下照旧走拖窗口——没有专门写"如果没有
+  闹钟"的分支，是几何判断的自然结果。
+
+⚠️ **验证缺口，如实记录**：`ItamiTimer.App.Tests` 项目明确"Avalonia 从不初始化"
+（见其 csproj 注释），而 `HitTestAlarmsDot` 依赖 `Bounds`（由 Avalonia 布局系统
+赋值），没法在现有测试边界内写自动化单元测试——为这一个方法单独引入 headless
+Avalonia 测试基础设施，相对这个小功能的体量不划算。**这次改动只过了编译和现有
+全部测试（未受影响），命中区大小、按下即分岔的手感、提示条内容对不对，都需要
+在真实窗口上点一下才能确认。**
+
 ---
 
 # 附录 · 2026-07-31 那一轮的实施记录（存档）

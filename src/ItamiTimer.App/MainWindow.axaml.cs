@@ -175,8 +175,22 @@ public partial class MainWindow : Window
         // 改成方的。
         dial.PointerPressed += (_, e) =>
         {
-            if (e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
-                BeginMoveDrag(e);
+            if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed) return;
+
+            // 先问红圈（2026-08-27，DESIGN §17.1）：这一下精确落在 Alarms 清单的小红圈
+            // 上就当"瞄一眼下一条"处理，不再往下走拖窗口。跟拖拽共用同一次按下事件，
+            // 非此即彼，不是叠加手势——精确点中红圈时窗口不会跟着这次按下走，松手前
+            // 移动鼠标也不会拖动（跟旁边几个 Button 的"松开才算"不是一回事，这里在
+            // 按下那一刻就已经分岔）。`OnAlarmsDotClicked` 返回 false（没有下一条可看，
+            // 理论上不该发生，见其注释）时照旧退回拖窗口，行为不多不少跟没这个功能时
+            // 完全一样。
+            if (dial.HitTestAlarmsDot(e.GetPosition(dial)) && OnAlarmsDotClicked())
+            {
+                e.Handled = true;
+                return;
+            }
+
+            BeginMoveDrag(e);
         };
 
         // 表盘右键菜单（用户 2026-08-08）：无边框之后没有标题栏、没有系统菜单，任务栏
@@ -528,7 +542,7 @@ public partial class MainWindow : Window
             // 跟闹钟的 Command.Execute 同一个理由记一笔：提示条只显示一分钟，这行日志是
             // 之后唯一还能查到"当时到底响过什么"的地方。
             foreach (var entry in due) Log.Info($"Alarms 清单到点: {entry.Text}");
-            ShowAlarmBanner(due, now);   // 无条件：屏幕上一定看得见
+            ShowAlarmBanner(due, now, TimeSpan.FromMinutes(1));   // 无条件：屏幕上一定看得见
             foreach (var entry in due) Notify.Show(entry.Text);   // 无条件：系统通知，多一份关掉程序也能翻看的记录（DECISIONS J13）
             if (_settings.AlarmsListEnabled) Sound.Repeat(_settings.AlarmsListSound, AlarmsListRings);
         }
@@ -539,10 +553,15 @@ public partial class MainWindow : Window
     /// <summary>
     /// 叠在骨牌上的提示条（2026-08-06，见 <see cref="_alarmBannerHideAt"/> 的注释）：
     /// 程序自己画，保证屏幕上一定看得见，跟 <see cref="Notify"/> 的系统通知并存。
-    /// **显示刚好一分钟**——到点那一刻起、到下一分钟整点为止，在 <see cref="OnFrame"/>
-    /// 里跟秒针共用的心跳一起收起，不需要用户手动点掉。
+    /// 显示 <paramref name="visibleFor"/> 那么久，到点在 <see cref="OnFrame"/> 里跟秒针
+    /// 共用的心跳一起收起，不需要用户手动点掉。
+    ///
+    /// **到点真触发**（<see cref="CheckAlarmsList"/>）传 1 分钟——挂在整分钟节拍上，
+    /// 下一分钟整点收起最自然。**点红圈手动瞄一眼**（<see cref="OnAlarmsDotClicked"/>）
+    /// 传几秒——那只是扫一眼"下一条是什么"，没必要占那么久。两条路复用同一块显示
+    /// 区域和同一套双层文字画法（DECISIONS J11），只是停留时长不同。
     /// </summary>
-    private void ShowAlarmBanner(IReadOnlyList<AlarmEntry> due, DateTime now)
+    private void ShowAlarmBanner(IReadOnlyList<AlarmEntry> due, DateTime now, TimeSpan visibleFor)
     {
         var time = due[0].At.ToString("HH:mm");
         var text = string.Join(" / ", due.Select(e => e.Text));
@@ -554,7 +573,28 @@ public partial class MainWindow : Window
         F<TextBlock>("AlarmBannerTextBlue").Text = text;
 
         F<Grid>("AlarmBanner").IsVisible = true;
-        _alarmBannerHideAt = now.AddMinutes(1);
+        _alarmBannerHideAt = now.Add(visibleFor);
+    }
+
+    /// <summary>
+    /// 点表盘上 Alarms 清单的小红圈（2026-08-27，DESIGN §17.1）：瞄一眼"下一条是什么"，
+    /// 跟红圈本来就代表的那一条是同一条数据（<see cref="AlarmsList.Next"/>）。
+    ///
+    /// **纯读，不触发任何真实效果**——不出声、不弹系统通知、**不推进
+    /// <see cref="_alarmsProcessedThrough"/> 水位线**。跟 <see cref="CheckAlarmsList"/>
+    /// 那条到点真正触发的路径完全隔离，点这一下绝不会让后面真正到点时的提醒被冲掉或
+    /// 提前消费——这是这个功能唯一不能妥协的一条。
+    ///
+    /// 没有下一条（<c>alarms.md</c> 是空的，或者压根没红圈可点）就什么都不做，
+    /// 静默返回；红圈都没画出来时 <see cref="DialControl.HitTestAlarmsDot"/> 已经先
+    /// 挡掉了这一条分支，这里理论上不会走到，多一层判断只是防御性的。
+    /// </summary>
+    private bool OnAlarmsDotClicked()
+    {
+        var next = AlarmsList.Next(ReadAlarmsList(), DateTime.Now);
+        if (next is not { } entry) return false;
+        ShowAlarmBanner([entry], DateTime.Now, TimeSpan.FromSeconds(3));
+        return true;
     }
 
     /// <summary>
