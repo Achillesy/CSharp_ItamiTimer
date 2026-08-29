@@ -85,6 +85,21 @@ public sealed class Settings
     [JsonPropertyName("pinned")] public bool Pinned { get; set; }
 
     /// <summary>
+    /// 主题（v3.0.0）：`false` = 日面，`true` = 夜面。右上角 2×2 的第四个图标一点就换，
+    /// 跟 <see cref="Pinned"/>、<see cref="TickEnabled"/> 同一类的普通持久化开关。
+    ///
+    /// **两态，没有"跟随系统"这一档**（DESIGN §8.8）：在这之前 App.axaml 写的是
+    /// `RequestedThemeVariant="Default"`（跟随系统），而读它的 `ApplyTheme()` 只在构造
+    /// 函数里跑过一次——启动后系统主题再变也不会跟着变，所以并不存在一个真在运作的
+    /// "跟随系统"功能可丢；反倒是那个半吊子状态会把界面撕成两半（表盘已是夜面、卡片
+    /// 和提示条还是浅色）。v3.0.0 起变体由这个字段显式钉死，系统主题不再有发言权。
+    ///
+    /// 存成 bool 而不是 "light"/"dark" 字符串：只有两态，没有第三种取值需要表达，
+    /// 字符串反而多出一堆"拼错了怎么办"的分支。
+    /// </summary>
+    [JsonPropertyName("darkTheme")] public bool DarkTheme { get; set; }
+
+    /// <summary>
     /// 主窗口上次的位置（物理像素，屏幕坐标）。两个都是 null = 还没被拖动过，启动时
     /// 走 axaml 里的 <c>WindowStartupLocation="CenterScreen"</c> 居中显示。
     ///

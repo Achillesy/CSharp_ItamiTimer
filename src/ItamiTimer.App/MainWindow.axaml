@@ -48,9 +48,10 @@
       <Setter Property="Background" Value="#3BBA7D"/>
       <Setter Property="Foreground" Value="#FFFFFF"/>
     </Style>
+    <!-- 禁用态是中性色，跟着主题走（v3.0.0，DESIGN §8.8）；绿和红是语义色，不跟。 -->
     <Style Selector="Button.start:disabled /template/ ContentPresenter">
-      <Setter Property="Background" Value="#AEB6BF"/>
-      <Setter Property="Foreground" Value="#E4E8EC"/>
+      <Setter Property="Background" Value="{DynamicResource ItamiStartDisabledBackground}"/>
+      <Setter Property="Foreground" Value="{DynamicResource ItamiStartDisabledForeground}"/>
     </Style>
 
     <!-- "Give up" is a dangerous action, coloured red on its own (requested by the user on the evening of 2026-07-28).
@@ -161,8 +162,8 @@
             IsVisible="False">
         <StackPanel Spacing="2">
           <TextBlock x:Name="AlarmBannerTime" FontSize="18" FontWeight="Bold"
-                     Foreground="#1B222A" HorizontalAlignment="Center"/>
-          <TextBlock x:Name="AlarmBannerText" FontSize="16" Foreground="#1B222A"
+                     Foreground="{DynamicResource ItamiBannerInk}" HorizontalAlignment="Center"/>
+          <TextBlock x:Name="AlarmBannerText" FontSize="16" Foreground="{DynamicResource ItamiBannerInk}"
                      HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap"
                      MaxWidth="280"/>
         </StackPanel>
@@ -177,18 +178,30 @@
         </StackPanel>
       </Grid>
 
-      <!-- A right margin of 26 (DIP) lands the gear directly below the **speaker**, and
-           also directly above the fallen dominoes — so it looks like the gear is what
-           knocked them down (user, evening of 2026-07-28). The number was measured, not
-           computed: screen scaling separates DIPs from physical pixels, so it was tuned by
-           eye until it lined up. -->
-      <!-- There used to be an AlarmBtn here (removed 2026-07-30, see the note outside this
+      <!-- 右上角凑成 2×2（v3.0.0）：上排喇叭 + 图钉（在表盘那个 Grid 里），下排齿轮 +
+           主题。**这一排的两个按钮跟上排用完全相同的结构**——同一个 Horizontal
+           StackPanel、同样的 Spacing="2"、同样的右边距 -4——所以两列天然对齐，不用再
+           凑数字。
+
+           ⚠️ 齿轮原来是单独一个按钮、右边距写死 30，那个 30 是**用眼睛量出来的**
+           （"落在喇叭正下方"，用户 2026-07-28；屏幕缩放让 DIP 和物理像素不是一回事，
+           算不出来只能试）。现在这一排有两个按钮了，照抄上排的结构反而是**几何上精确**
+           的对齐，30 那个经验值随之作废，别再照它去调。齿轮"看起来像是它把骨牌推倒的"
+           这个观感来自它压在骨牌上方这个位置，不来自那 4px，改完仍然成立。
+           左右顺序：齿轮在左、主题在右——主题落在图钉正下方，齿轮落在喇叭正下方。
+
+           There used to be an AlarmBtn here (removed 2026-07-30, see the note outside this
            XAML): the alarm's press interaction moved directly onto the clock face itself
-           (DialControl), no longer occupying its own icon. -->
-      <!-- No ToolTip.Tip here, unlike the other two chrome buttons — the modal it opens
-           leaves the tooltip stuck on screen (DECISIONS E10). Don't add one back. -->
-      <Button x:Name="SettingsBtn" Classes="chrome"
-              HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-6,30,0"/>
+           (DialControl), no longer occupying its own icon.
+
+           ⚠️ 齿轮上没有 ToolTip.Tip，跟另外两个 chrome 按钮不一样——它打开的模态框会把
+           tooltip 留在屏幕上（DECISIONS E10），别给它加回来。**主题按钮同理不加**：
+           它虽然不开模态框，但一点就重画整扇窗口，tooltip 挂在旧的一版上，同一类麻烦。 -->
+      <StackPanel Orientation="Horizontal" Spacing="2"
+                  HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-6,-4,0">
+        <Button x:Name="SettingsBtn" Classes="chrome"/>
+        <Button x:Name="ThemeBtn" Classes="chrome"/>
+      </StackPanel>
     </Grid>
 
     <!-- 半透明背景卡片（用户 2026-08-08 三次定稿：90% 不透明度，从骨牌最下边开始，
@@ -200,7 +213,7 @@
          的 `Spacing`（控件之间）取同一个值，卡片边框到控件的距离 = 控件与控件之间的
          距离，整张卡片一套节奏。中间试过 12/12（用户："内边界显大"）和 8/12（边距
          和控件间距不一致），定稿是两边都取 8。 -->
-    <Border Grid.Row="2" Background="#E6D7DBE0" CornerRadius="10" Padding="8">
+    <Border Grid.Row="2" Background="{DynamicResource ItamiCardBackground}" CornerRadius="10" Padding="8">
       <StackPanel x:Name="Controls" Spacing="8">
 
         <Button x:Name="StartBtn" Classes="start" Click="OnStart" Content="Start"/>

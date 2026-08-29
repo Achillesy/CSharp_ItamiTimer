@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using Avalonia.Controls;
 using Avalonia.Layout;
+using Avalonia.Markup.Xaml.MarkupExtensions;
 using Avalonia.Media;
 
 namespace ItamiTimer.App;
@@ -42,7 +43,6 @@ public static class Confirm
             // sink beneath it, showing up as "I clicked X and nothing happened". A modal
             // should always sit above everything else.
             Topmost = true,
-            Background = new SolidColorBrush(Color.FromRgb(0xD7, 0xDB, 0xE0)),
             Content = new StackPanel
             {
                 Margin = new Avalonia.Thickness(20, 18, 20, 16),
@@ -60,6 +60,14 @@ public static class Confirm
                 },
             },
         };
+
+        // 窗口底色跟 Settings 窗口共用同一个键，按主题两套（v3.0.0，DESIGN §8.8）。
+        // 这里原来是写死的 `#D7DBE0`，跟 SettingsWindow.axaml 里那个值**各写各的**；
+        // 现在两处引同一个键，改一个地方两扇窗口一起动。
+        // 用 DynamicResource 而不是当场 TryFindResource 取一次值：这扇框是模态的、
+        // 活不过一次问答，理论上等不到主题切换——但绑定这条路不需要谁记得"切主题时
+        // 也去刷一下确认框"，少一个将来会忘的前提。
+        dlg[!Window.BackgroundProperty] = new DynamicResourceExtension("ItamiWindowBackground");
 
         yes.Click += (_, _) => { result = true; dlg.Close(); };
         no.Click += (_, _) => { result = false; dlg.Close(); };

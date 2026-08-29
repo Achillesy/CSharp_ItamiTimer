@@ -19,7 +19,63 @@
              x:Class="ItamiTimer.App.App"
              Name="ItamiTimer"
              RequestedThemeVariant="Default">
+  <!-- RequestedThemeVariant 在这里保持 Default 只是个占位：**真正的值由代码在启动时
+       按 settings.json 的 darkTheme 钉死**（MainWindow.ApplyTheme，DESIGN §8.8），
+       写在 XAML 里的这一档从窗口构造出来的那一刻起就已经被覆盖。
+       ⚠️ 别把它改成 Light 或 Dark——那不会成为默认值，只会让"XAML 写的是一回事、
+       实际生效的是另一回事"这句话更难看懂。 -->
   <Application.Styles>
     <FluentTheme />
   </Application.Styles>
+
+  <!-- 程序自己那几处写死的中性色，收口到这里，按主题两套（v3.0.0，DESIGN §8.8）。
+
+       **为什么是资源字典而不是切换时挨个控件赋色**：ThemeDictionaries 里的键跟着
+       变体走，XAML 那头用 {DynamicResource} 引一次就行，切主题时 Avalonia 自己把所有
+       引用重新解析一遍——挨个赋色那条路是"能编译、能跑、然后安静漏掉几处"的典型，
+       而这个项目正是在这类错上栽过（CLAUDE.md 开头那段）。
+
+       ⚠️ **语义色不在这里**：Start 的绿 `#2FA36B`、Give Up 的红 `#D6453F` 两个模式
+       都不变——它们跟表盘"绿=专注、红=偷懒"是同一套语义（DESIGN §8.2.3），夜面下
+       翻掉反而把这套语义拆了。这里只收**中性色**：底、卡片、描边、禁用态、提示条
+       底层那一份墨。
+
+       浅色一列全是 v2.9.0 的原值，一个像素都没改——夜面才是这次新加的。 -->
+  <Application.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.ThemeDictionaries>
+
+        <ResourceDictionary x:Key="Light">
+          <!-- Start 按钮以下那张半透明卡片（DECISIONS K16）：90% 不透明度 + 浅灰 -->
+          <SolidColorBrush x:Key="ItamiCardBackground">#E6D7DBE0</SolidColorBrush>
+          <SolidColorBrush x:Key="ItamiStartDisabledBackground">#AEB6BF</SolidColorBrush>
+          <SolidColorBrush x:Key="ItamiStartDisabledForeground">#E4E8EC</SolidColorBrush>
+          <!-- Alarms 提示条的**底层**那份文字（DECISIONS J12 的双层错位）。蓝色那层
+               是固定的 #63A6E0，不进这张表：它两个模式下都一样。 -->
+          <SolidColorBrush x:Key="ItamiBannerInk">#1B222A</SolidColorBrush>
+          <!-- Settings 窗口和 Give Up 确认框共用的窗口底色 -->
+          <SolidColorBrush x:Key="ItamiWindowBackground">#D7DBE0</SolidColorBrush>
+          <SolidColorBrush x:Key="ItamiSettingsCardBackground">#E8EBEE</SolidColorBrush>
+          <SolidColorBrush x:Key="ItamiSettingsCardBorder">#C7CDD4</SolidColorBrush>
+          <SolidColorBrush x:Key="ItamiCommandForeground">#4A5560</SolidColorBrush>
+        </ResourceDictionary>
+
+        <ResourceDictionary x:Key="Dark">
+          <!-- 比夜面盘面 #20272F 亮一档：卡片得读成"盖在上面的一层"，不是背景本身 -->
+          <SolidColorBrush x:Key="ItamiCardBackground">#E6222A33</SolidColorBrush>
+          <SolidColorBrush x:Key="ItamiStartDisabledBackground">#3A434E</SolidColorBrush>
+          <SolidColorBrush x:Key="ItamiStartDisabledForeground">#8A94A0</SolidColorBrush>
+          <!-- 提示条底层继续压深（用户 2026-08-29 在两版之间选的 A）：保持"深底 +
+               亮蓝"这个原有关系。翻成浅色的那版（B）试过——浅色那层在深背景上太抢，
+               把蓝字顶掉，双层错位的立体感糊成一团。 -->
+          <SolidColorBrush x:Key="ItamiBannerInk">#12171C</SolidColorBrush>
+          <SolidColorBrush x:Key="ItamiWindowBackground">#1A2027</SolidColorBrush>
+          <SolidColorBrush x:Key="ItamiSettingsCardBackground">#252D36</SolidColorBrush>
+          <SolidColorBrush x:Key="ItamiSettingsCardBorder">#39424D</SolidColorBrush>
+          <SolidColorBrush x:Key="ItamiCommandForeground">#9AA6B2</SolidColorBrush>
+        </ResourceDictionary>
+
+      </ResourceDictionary.ThemeDictionaries>
+    </ResourceDictionary>
+  </Application.Resources>
 </Application>

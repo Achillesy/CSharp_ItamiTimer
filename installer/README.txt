@@ -73,7 +73,7 @@ Where things live
 -----------------
 
   %LOCALAPPDATA%\ItamiTimer\rules.json      your goals and executeCommand list
-  %LOCALAPPDATA%\ItamiTimer\settings.json   sounds, switches, window position
+  %LOCALAPPDATA%\ItamiTimer\settings.json   sounds, switches, theme, window position
   %LOCALAPPDATA%\ItamiTimer\itami.log       what happened, and why
 
 The window itself never explains anything and never shows a report — that is

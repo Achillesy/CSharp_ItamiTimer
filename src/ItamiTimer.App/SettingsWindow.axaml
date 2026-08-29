@@ -9,7 +9,7 @@
         ShowInTaskbar="False"
         WindowStartupLocation="CenterOwner"
         Topmost="True"
-        Background="#D7DBE0">
+        Background="{DynamicResource ItamiWindowBackground}">
   <!-- Topmost: the main window might be pinned by the user (§8.3.7), and an ordinary
        modal window would sink entirely beneath it — nothing shows up on screen, and
        clicking the gear looks like it did nothing. A modal window should sit above
@@ -28,10 +28,10 @@
          controls, the rest is left to guess — the same approach as nothing below the
          main window's divider explaining itself or showing numbers. -->
     <Style Selector="Border.card">
-      <Setter Property="Background" Value="#E8EBEE"/>
+      <Setter Property="Background" Value="{DynamicResource ItamiSettingsCardBackground}"/>
       <Setter Property="CornerRadius" Value="8"/>
       <Setter Property="Padding" Value="16,14"/>
-      <Setter Property="BorderBrush" Value="#C7CDD4"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource ItamiSettingsCardBorder}"/>
       <Setter Property="BorderThickness" Value="1"/>
     </Style>
     <Style Selector="TextBlock.title">
@@ -45,7 +45,7 @@
     <Style Selector="TextBlock.command">
       <Setter Property="FontFamily" Value="Consolas,Menlo,monospace"/>
       <Setter Property="FontSize" Value="12"/>
-      <Setter Property="Foreground" Value="#4A5560"/>
+      <Setter Property="Foreground" Value="{DynamicResource ItamiCommandForeground}"/>
       <Setter Property="TextWrapping" Value="Wrap"/>
     </Style>
   </Window.Styles>

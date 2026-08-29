@@ -135,9 +135,16 @@ public partial class MainWindow : Window
         var version = Assembly.GetExecutingAssembly().GetName().Version;
         F<TextBlock>("VersionLabel").Text = version is null ? "" : $"v{version.ToString(3)}";
 
-        var gear = F<Button>("SettingsBtn");
-        gear.Content = ChromeIcons.Gear();
-        gear.Click += OnSettings;
+        // 齿轮和主题两个图标的 Content 由 ApplyChrome 统一画（跟喇叭、图钉一样跟着
+        // 调色板走），这里只挂事件。
+        F<Button>("SettingsBtn").Click += OnSettings;
+        F<Button>("ThemeBtn").Click += (_, _) =>
+        {
+            _settings.DarkTheme = !_settings.DarkTheme;
+            ApplyTheme();
+            ApplyChrome();
+            _settings.Save();
+        };
         var dial = F<DialControl>("Dial");
         dial.PointerWheelChanged += OnAlarmWheel;
         _alarm.Restore(_settings.AlarmFireAt, DateTime.Now);
@@ -204,7 +211,11 @@ public partial class MainWindow : Window
         // 提过"要根据系统文字，如果不行，就统一为英文"，跟系统语言走需要引入一整套
         // 本地化资源机制（目前一行都没有），为一个菜单项不划算，按用户给的退路走英文。
         // 图标同样是矢量画的（ChromeIcons.Close），仓库不放位图（DECISIONS D5）。
-        var closeItem = new MenuItem { Header = "Close window", Icon = ChromeIcons.Close() };
+        // 图标的墨色跟着主题走（v3.0.0）：右键菜单自己的背景是 Fluent 给的，变体一翻
+        // 它也跟着翻，写死的深墨在暗色菜单上就看不见了。菜单只构造一次，所以把这一项
+        // 记下来，换主题时由 ApplyChrome 重画它的图标。
+        _closeItem = new MenuItem { Header = "Close window", Icon = ChromeIcons.Close(_palette) };
+        var closeItem = _closeItem;
         // 走 Close() 而不是直接退进程：任务没结束时照样会弹"要放弃吗"的确认
         // （OnClosing，§9），跟点标题栏 ×、Alt+F4 完全同一条路径。
         closeItem.Click += (_, _) => Close();
@@ -344,13 +355,46 @@ public partial class MainWindow : Window
 
     private T F<T>(string name) where T : Control => this.FindControl<T>(name)!;
 
-    /// <summary>§8.2.7: the dial follows the theme — plain white by day, deep grey by night; it's the day and night face of the same thing.</summary>
+    /// <summary>
+    /// 当前主题的调色板。**唯一真相源是 <see cref="Settings.DarkTheme"/>**，这个字段
+    /// 只是 <see cref="ApplyTheme"/> 每次算完存下来给自绘那几处用的副本。
+    /// </summary>
+    private DialPalette _palette = DialPalette.Light;
+
+    /// <summary>表盘右键菜单里唯一那一项。留着引用只为换主题时重画它的图标（见 <see cref="ApplyChrome"/>）。</summary>
+    private MenuItem? _closeItem;
+
+    /// <summary>
+    /// 把主题铺开：日面素白、夜面深灰，同一块表的两副面孔（DESIGN §8.8）。
+    ///
+    /// **可以反复调用**（v3.0.0 起）——原来它只在构造函数里跑过一次、读的还是
+    /// `ActualThemeVariant`（也就是系统主题），启动之后再没人碰过它。现在它由用户设置
+    /// 驱动，点一下按钮就重跑一遍。
+    ///
+    /// 三件事，缺一不可：
+    /// ① `Application.RequestedThemeVariant` —— Fluent 自带控件（单选、滑块、下拉、
+    ///    开关、默认文字前景）**全靠这一句**跟着翻，Settings 窗口和 Give Up 确认框
+    ///    一起白拿；App.axaml 里那两张 ThemeDictionaries 也是按这个变体选的，
+    ///    `{DynamicResource}` 引到的中性色随之整批重刷。
+    /// ② 自绘的表盘和骨牌 —— 它们不吃样式，只认 `Palette` 这个 StyledProperty
+    ///    （`AffectsRender`，赋值即重绘）。
+    /// ③ 右上角那四个图标 —— 它们的墨色和光晕现在也从调色板里取（ChromeIcons），
+    ///    而图标是**构造出来塞进 Content 的对象**，不重建就不会变，所以必须
+    ///    <see cref="ApplyChrome"/> 再跑一遍。
+    ///
+    /// ⚠️ 顺手刷 `row.Fallen` 是原来就有的，留着：反复调用它是幂等的（同一天算出来
+    /// 同一个数），跟分钟节拍第 ⑤ 步每分钟核对一次（DECISIONS D12）不冲突。
+    /// </summary>
     private void ApplyTheme()
     {
-        var palette = ActualThemeVariant == ThemeVariant.Dark ? DialPalette.Dark : DialPalette.Light;
-        F<DialControl>("Dial").Palette = palette;
+        _palette = _settings.DarkTheme ? DialPalette.Dark : DialPalette.Light;
+
+        if (Application.Current is { } app)
+            app.RequestedThemeVariant = _settings.DarkTheme ? ThemeVariant.Dark : ThemeVariant.Light;
+
+        F<DialControl>("Dial").Palette = _palette;
         var row = F<DominoRow>("Dominoes");
-        row.Palette = palette;
+        row.Palette = _palette;
         row.Fallen = DominoRow.FallenForToday(DateTime.Now);
     }
 
@@ -650,10 +694,21 @@ public partial class MainWindow : Window
 
         // #5: Force on -> hide the ticking icon, the user can't manually turn it off
         mute.IsVisible = !_settings.ForceTicking;
-        mute.Content = ChromeIcons.Speaker(_settings.TickEnabled);
+        mute.Content = ChromeIcons.Speaker(_settings.TickEnabled, _palette);
         mute.Classes.Set("on", _settings.TickEnabled);
-        pin.Content = ChromeIcons.Pin(_settings.Pinned);
+        pin.Content = ChromeIcons.Pin(_settings.Pinned, _palette);
         pin.Classes.Set("on", _settings.Pinned);
+
+        // 齿轮和主题图标也在这儿重建（v3.0.0）：四个图标的墨色/光晕都跟着调色板走，
+        // 换主题时必须整排重新画一遍。齿轮没有开关态，主题图标**画的是当前状态**
+        // （夜间显示月亮），所以它也不挂 `on` 这个 class——那一档是给"开/关"用的，
+        // 这里两个态一样重要，用 Opacity 分主次会读成"主题被关掉了"。
+        F<Button>("SettingsBtn").Content = ChromeIcons.Gear(_palette);
+        F<Button>("ThemeBtn").Content = ChromeIcons.Theme(_settings.DarkTheme, _palette);
+
+        // 右键菜单里那个关闭图标。构造函数里 ApplyChrome 先跑、菜单后建，那一趟这里
+        // 还是 null（图标在建的时候就已经用当前调色板画好了），只有换主题那趟需要它。
+        if (_closeItem is not null) _closeItem.Icon = ChromeIcons.Close(_palette);
 
         // ⚠️ Cutting off the tick that's already playing does **not** belong here (moved out
         // 2026-08-03, DECISIONS E13). ApplyChrome runs on four paths — construction, the

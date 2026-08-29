@@ -227,7 +227,7 @@ Where things live
 -----------------
 
   ~/Library/Application Support/ItamiTimer/rules.json      goals + executeCommand
-  ~/Library/Application Support/ItamiTimer/settings.json   sounds, switches, position
+  ~/Library/Application Support/ItamiTimer/settings.json   sounds, switches, theme, position
   ~/Library/Application Support/ItamiTimer/itami.log       what happened, and why
 
 The window itself never explains anything and never shows a report -- that is

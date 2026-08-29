@@ -65,15 +65,28 @@ public sealed record DialPalette(
         // 也不共用同一个 token——以后想单独调其中一个都不会牵动另一个。
         AlarmsDot: Color.FromRgb(0xD6, 0x45, 0x3F));
 
-    /// <summary>Night face: a deep grey face plus a dark metal bezel.</summary>
+    /// <summary>
+    /// Night face: a deep grey face, **the same wooden bezel**.
+    ///
+    /// ⚠️ 边框原来是"深色金属"（`#6E7A88` / `#444E5A` / `#1E242B` 三档灰）。3.0.0 改成
+    /// 跟日面**一模一样的木色**（用户 2026-08-29：钟的木制边框不要变）——理由跟骨牌
+    /// 维持木色是同一条（DECISIONS M5/M10）：换主题换的是**表盘的照明**，不是把这只钟
+    /// 换成另一只钟。木头白天晚上都是木头；边框跟着变成金属，读起来就成了两件不同的
+    /// 物件，而这个项目从一开始就在照着一张真实木壳挂钟的照片调"材质和光"（见本文件
+    /// 顶部那段）。
+    ///
+    /// 三档灰的值没有留在注释里做备份：真要回去 `git log` 里就有，留着反而像个还能选
+    /// 的选项。
+    /// </summary>
     public static readonly DialPalette Dark = new(
         Face: Color.FromRgb(0x20, 0x27, 0x2F),
         FaceRim: Color.FromRgb(0x14, 0x19, 0x1F),
         Ink: Color.FromRgb(0xE4, 0xE9, 0xEF),
         Tick: Color.FromRgb(0x8A, 0x97, 0xA4),
-        BezelLit: Color.FromRgb(0x6E, 0x7A, 0x88),
-        BezelMid: Color.FromRgb(0x44, 0x4E, 0x5A),
-        BezelDark: Color.FromRgb(0x1E, 0x24, 0x2B),
+        // 跟 Light 逐字相同，别"顺手"调暗一档：那正是这条决策要挡住的事
+        BezelLit: Color.FromRgb(0xB5, 0x7C, 0x4C),
+        BezelMid: Color.FromRgb(0x8C, 0x58, 0x30),
+        BezelDark: Color.FromRgb(0x5A, 0x35, 0x1C),
         Focus: Color.FromRgb(0x46, 0xBE, 0x84),
         Amber: Color.FromRgb(0xED, 0xB2, 0x55),
         Slack: Color.FromRgb(0xE9, 0x63, 0x5C),

@@ -61,6 +61,12 @@ Losing the title bar changes two everyday things:
 - **Close it from the clock face's right-click menu** (or the taskbar / Dock as before).
   Closing mid-focus still asks first — quitting abandons the round, as it always has.
 
+Four icons sit in the window's top-right corner, in a 2x2: ticking, always-on-top, settings,
+and — since 3.0.0 — **light / dark theme**. The theme icon shows where you are rather than
+where a click would take you: a sun by day, a bitten cookie of a moon by night. One click
+repaints everything at once, the dial and dominoes included, and the choice is remembered.
+There is no "follow the system" option; the two states are the whole set.
+
 The window remembers where you left it. If a position ends up off-screen — you dragged it
 past an edge, or the monitor it was on is gone — it returns to the visible area on its own
 once you let go. Dragging *between* monitors is unaffected: it settles onto whichever
