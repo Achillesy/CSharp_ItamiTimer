@@ -392,23 +392,10 @@ public partial class MainWindow : Window
         if (Application.Current is { } app)
             app.RequestedThemeVariant = _settings.DarkTheme ? ThemeVariant.Dark : ThemeVariant.Light;
 
-        ApplyDialPalette();
+        F<DialControl>("Dial").Palette = _palette;
         var row = F<DominoRow>("Dominoes");
         row.Palette = _palette;
         row.Fallen = DominoRow.FallenForToday(DateTime.Now);
-    }
-
-    /// <summary>
-    /// 表盘用哪一套色：底色，跑偏时把**钟面、刻度、指针**换成另一档（DESIGN §8.9）。
-    ///
-    /// ⚠️ **反色只作用于这一处**。骨牌、卡片、右上角四个图标、Settings 窗口、确认框
-    /// 全部认用户设定的底色，`Application.RequestedThemeVariant` 也不跟着动——那是主题，
-    /// 这是提示，两件事。
-    /// </summary>
-    private void ApplyDialPalette()
-    {
-        var other = _settings.DarkTheme ? DialPalette.Light : DialPalette.Dark;
-        F<DialControl>("Dial").Palette = _inverted ? _palette.WithFaceFrom(other) : _palette;
     }
 
     private int _tickedSecond = -1;
@@ -441,82 +428,44 @@ public partial class MainWindow : Window
         // Not forced: **quiet is earned, not the default** (2026-08-13, DECISIONS C7). The
         // tick is a reminder, not a punishment -- it's just what a clock does -- and the one
         // thing that buys silence is the previous whole minute having been genuinely judged
-        // as focus. Everything else (idle, resting, a task just started with no judgment
-        // yet, or the last minute coming back off-task/away) ticks like an ordinary clock.
-        // This deliberately does **not** carve out an exception for stepping away (AFK):
-        // unlike the dial's colouring (DECISIONS D3, "not your fault, not counted"), which
-        // is about *scoring*, this is a content-free nudge that the clock is still running --
-        // drifting off unconsciously is exactly the case a reminder is for, whether that's a
-        // tab switch or getting up. `TickEnabled` still has final say: turning the switch off
-        // is a conscious choice, and no reminder overrides it.
-        //
-        // ⚠️ **FocusLow doesn't count** (2026-08-13, DECISIONS C8). The minute that's just
-        // completed is read the instant it lands, which is exactly when JudgmentBuffer.Cover
-        // is most likely to still be showing fail-open AwOffline seconds for the tail of it
-        // -- ActivityWatch's own window bucket hasn't necessarily flushed the last few
-        // seconds' events yet, so those seconds default to AwOffline, which counts as focus
-        // (§3.1's knowing fail-open). That stray handful of seconds almost never clears 20,
-        // so it lands in FocusLow and nowhere higher -- excluding FocusLow filters out
-        // exactly this artifact without adding any lag (the next tick's repaint would fix it
-        // anyway, one minute later, but there's no reason to wait for that here). Genuine
-        // focus that's merely brief (a quick real glance at the goal) gets the same
-        // treatment as no focus at all -- an acceptable trade against false silence.
+        // as focus.
         var duringFocus = _session is { Finished: false, InRest: false };
         var lastMinuteFocused = duringFocus && _session!.LastCompletedMinute is { } m
             && m.Tier is CellTier.FocusFull or CellTier.FocusMid;
         var ticking = _settings.ForceTicking || (_settings.TickEnabled && !lastMinuteFocused);
         if (ticking) Tick.Play(sec, _settings.TickVolume);
 
-        // 每 5 秒：跑偏反色的采样（DESIGN §8.9）。挂在同一个 `_frame` 上，**不新开定时器**
-        // ——DECISIONS L8 定过，这个程序里只有一个钟。跟下面的 OnMinute 各走各的，
-        // 互不等待、互不影响。
-        if (sec % Inversion.SampleSeconds == 0) SampleInversion(DateTime.Now);
+        // 每一秒：把 AW 内存镜像推到此刻（DESIGN §7.5）。**这是常驻期唯一还在碰 AW
+        // 的地方**——判定、诊断、以后的反色全部从镜像读。挂在同一个 `_frame` 上，
+        // **不新开定时器**（DECISIONS L8：这个程序里只有一个钟）；跟下面的 OnMinute
+        // 各走各的，互不等待。
+        RefreshMirror(DateTime.Now);
 
         // 整分钟：所有"以分为单位"的功能都在 OnMinute 里按固定顺序走一遍。
         if (sec == 0) OnMinute(DateTime.Now);
     }
 
-    /// <summary>
-    /// 钟面此刻是不是反着的（DESIGN §8.9）。**推导值，绝不落盘**：用户按钮定的是底色
-    /// （<see cref="Settings.DarkTheme"/>），这个只在它上面把钟面那几个色号换一下。
-    /// </summary>
-    private bool _inverted;
-
-    /// <summary>上一次采样还没回来的闸门。AW 卡住时（默认超时 10 秒）5 秒一次会摞起来。</summary>
-    private bool _inversionBusy;
+    /// <summary>上一次镜像刷新还没回来的闸门。AW 卡住时（默认超时 10 秒）每秒一次会摞起来。</summary>
+    private bool _mirrorBusy;
 
     /// <summary>
-    /// 5 秒一次的跑偏采样（DESIGN §8.9）。
+    /// 每秒一次的镜像刷新（DESIGN §7.5）。
     ///
     /// `async void`：跟 <see cref="OnMinute"/> 同一个理由——它是事件处理器的延长线，没有谁
     /// 能 await 它。里面不抛异常：AW 那一路的失败在
-    /// <see cref="TaskSession.SampleInversionAsync"/> 里已经收敛成"不反色"。
+    /// <see cref="TaskSession.RefreshMirrorAsync"/> 里已经收敛成"那些秒记为无记录"。
     ///
-    /// **专注阶段之外一律回到底色**：休息时跑偏没有意义（那是挣来的），空闲时更没有对象。
-    /// 任务结束/放弃也走这一条，不留一块反着的钟面在那儿。
+    /// 没有任务在跑就什么都不做——镜像跟任务同生共死（DECISIONS O2），**空闲时一次 AW
+    /// 查询都没有**。
     /// </summary>
-    private async void SampleInversion(DateTime now)
+    private async void RefreshMirror(DateTime now)
     {
-        var wanted = false;
-        if (_session is { Finished: false, InRest: false } session)
-        {
-            if (_inversionBusy) return;
-            _inversionBusy = true;
-            try { wanted = await session.SampleInversionAsync(new DateTimeOffset(now)); }
-            finally { _inversionBusy = false; }
-        }
+        if (_session is not { Finished: false } session) return;
+        if (_mirrorBusy) return;
 
-        if (wanted == _inverted) return;
-        _inverted = wanted;
-
-        // **日志记一行**：界面全程沉默，事后能查的只有日志（§8.1a），而"钟面自己反了"
-        // 这件事必须能对得上时间点。只在**变化**那一下记，不是每次采样都记。
-        var (from, to) = Inversion.WindowFor(new DateTimeOffset(now));
-        Log.Info(_inverted
-            ? $"Off-task seconds in [{from:HH:mm:ss}, {to:HH:mm:ss}); dial face inverted"
-            : "No off-task seconds in the sampled window; dial face restored");
-
-        ApplyDialPalette();
+        _mirrorBusy = true;
+        try { await session.RefreshMirrorAsync(now); }
+        finally { _mirrorBusy = false; }
     }
 
     /// <summary>上一分钟的处理还没跑完的闸门（见 <see cref="OnMinute"/>）。</summary>
@@ -1121,12 +1070,7 @@ public partial class MainWindow : Window
         if (saved is not null) saved.IsChecked = true;
         else if (_goalRadios.Count > 0) _goalRadios[0].IsChecked = true;
 
-        // 钟面立刻回到底色（DESIGN §8.9）。5 秒后那次采样本来也会把它收回去，但"任务结束了
-        // 钟面还反着五秒"没有道理——结束这一刻就该干净。
-        _inverted = false;
-
         var dial = F<DialControl>("Dial");
-        ApplyDialPalette();
         dial.Cells = [];
         dial.StartedAt = null;
         dial.RestFrom = null;

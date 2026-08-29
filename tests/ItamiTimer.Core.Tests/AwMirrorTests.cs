@@ -242,4 +242,58 @@ public class AwMirrorTests
 
         Assert.Equal(JudgmentCode.OffTask, Code(m, -3));
     }
+
+    // ---------------------------------------------------------------- 还原成事件
+
+    [Fact]
+    public void 还原出来的事件喂回Paint能得到一模一样的每秒判定()
+    {
+        // 这是账本切到镜像的全部依据：round-trip 必须逐秒相等
+        var m = New();
+        m.Apply([Win(-60, 20, "Reader.exe"), Win(-30, 25, "Chat.exe")], [Afk(-15, 5)], At(0));
+
+        var (win, afk) = m.EventsIn(At(-60), At(1));
+
+        var span = new JudgmentCode[61];
+        Array.Fill(span, JudgmentCode.AwOffline);
+        Judgment.Paint(span, At(-60), win, afk, Rules, Reading);
+
+        for (var i = 0; i < span.Length; i++)
+            Assert.Equal(Code(m, -60 + i), span[i]);
+    }
+
+    [Fact]
+    public void 相邻相同的秒合并成一条事件()
+    {
+        var m = New();
+        m.Apply([Win(-10, 10, "Reader.exe")], [], At(0));
+
+        var (win, _) = m.EventsIn(At(-10), At(0));
+        Assert.Single(win);
+        Assert.Equal(At(-10), win[0].Start);
+        Assert.Equal(10, win[0].DurationSeconds);
+    }
+
+    [Fact]
+    public void AwOffline的秒什么都不吐()
+    {
+        var m = New();
+        m.MarkUnavailable(At(0));
+
+        var (win, afk) = m.EventsIn(At(-10), At(1));
+        Assert.Empty(win);
+        Assert.Empty(afk);
+    }
+
+    [Fact]
+    public void afk的秒只吐afk事件不吐窗口事件()
+    {
+        var m = New();
+        m.Apply([Win(-20, 20, "Chat.exe")], [Afk(-10, 10)], At(0));
+
+        var (win, afk) = m.EventsIn(At(-10), At(0));
+        Assert.Empty(win);
+        Assert.Single(afk);
+        Assert.Equal("afk", afk[0].Status);
+    }
 }

@@ -142,8 +142,51 @@ public sealed class AwClient : IDisposable
         var widened = since.AddHours(-6);
         var q = $"?start={Uri.EscapeDataString(widened.UtcDateTime.ToString("o"))}" +
                 $"&end={Uri.EscapeDataString(until.UtcDateTime.ToString("o"))}";
-        var arr = await GetAsync($"/api/0/buckets/{Uri.EscapeDataString(bucketId)}/events{q}");
+        return Parse(await GetAsync($"/api/0/buckets/{Uri.EscapeDataString(bucketId)}/events{q}"));
+    }
 
+    /// <summary>
+    /// 每个 bucket 的 <c>last_updated</c>（<see cref="AwMirror"/> 每秒的探针，DESIGN §7.5）。
+    ///
+    /// **一次请求 739 字节**（实测）同时给出两个 watcher 的新鲜度，它既是"在线探测"，
+    /// 也是"要不要去拉事件"的游标——`last_updated` 没动就说明这个桶什么都没变。
+    ///
+    /// ⚠️ **两个桶的节奏差很远**（实测）：window 每 ~10 秒前进一次，afk 卡住 38 秒还在涨
+    /// （它只在状态变化或自己的慢心跳时才写）。**别拿同一个阈值判"死没死"**，afk 会被
+    /// 误判，而误判的后果是 afk 覆盖失效 → 离开被算成跑偏 → 冤枉人（DECISIONS O9）。
+    /// </summary>
+    public async Task<Dictionary<string, DateTimeOffset>> FetchLastUpdatedAsync()
+    {
+        var buckets = await GetAsync("/api/0/buckets/");
+        var map = new Dictionary<string, DateTimeOffset>();
+        foreach (var b in buckets.EnumerateObject())
+        {
+            if (b.Value.TryGetProperty("last_updated", out var lu) && lu.GetString() is { } str)
+                map[b.Name] = DateTimeOffset.Parse(str).ToLocalTime();
+        }
+        return map;
+    }
+
+    /// <summary>
+    /// 最近 <paramref name="limit"/> 条事件（最新的在前），**不带时间区间**。
+    ///
+    /// 这是绕开 T1 的另一条路，而且比放宽 6 小时又便宜又更对：**最新那条正是正在进行中的
+    /// 那条**（实测：start 在 23 分钟前、duration 一直长到此刻），所以"停在同一个窗口很久"
+    /// 这种情况天然覆盖，不需要猜要放宽多少。实测 `limit=20` 是 4.7 KB，而放宽 6 小时的
+    /// 范围查询是 65.7 KB。
+    ///
+    /// <paramref name="before"/> 给了的话就是"<b>早于</b>这个时刻的最近 N 条"——初始化镜像
+    /// 时用它拿"覆盖镜像起点的那条事件"（实测有效，DESIGN §7.5）。
+    /// </summary>
+    public async Task<List<AwEvent>> FetchLatestAsync(string bucketId, int limit, DateTimeOffset? before = null)
+    {
+        var q = $"?limit={limit}";
+        if (before is { } b) q += $"&end={Uri.EscapeDataString(b.UtcDateTime.ToString("o"))}";
+        return Parse(await GetAsync($"/api/0/buckets/{Uri.EscapeDataString(bucketId)}/events{q}"));
+    }
+
+    private static List<AwEvent> Parse(JsonElement arr)
+    {
         var events = new List<AwEvent>();
         foreach (var e in arr.EnumerateArray())
         {
@@ -172,6 +215,10 @@ public sealed class AwClient : IDisposable
         events.Sort((x, y) => x.Start.CompareTo(y.Start));
         return events;
     }
+
+    /// <summary>窗口/afk 两个 bucket 的 id，一次问齐（<see cref="AwMirror"/> 那条路每秒都要用）。</summary>
+    public async Task<(string Window, string Afk)> FindWatcherBucketsAsync()
+        => (await FindBucketIdAsync(WindowBucketType), await FindBucketIdAsync(AfkBucketType));
 
     public void Dispose() => _http.Dispose();
 }

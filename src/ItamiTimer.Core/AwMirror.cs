@@ -153,6 +153,57 @@ public sealed class AwMirror
         Predict();
     }
 
+    /// <summary>
+    /// 把镜像的 <c>[from, to)</c> 这一段**还原成事件**，喂给现有的
+    /// <see cref="Judgment.Paint"/> / <see cref="JudgmentBuffer.Cover"/>。
+    ///
+    /// **账本因此一个字都不用改**：它拿到的仍然是"窗口事件 + afk 事件"两个列表，
+    /// 只是数据源从"再查一次 AW"换成了"从镜像里读"。相邻相同的秒合并成一条事件，
+    /// 时长正好是那一段的秒数——`Paint` 的覆盖口径是 <c>floor(start) … ceil(end)-1</c>，
+    /// 整秒进整秒出，round-trip 不会差一秒。
+    ///
+    /// <see cref="JudgmentCode.Afk"/> 的秒**只吐 afk 事件、不吐窗口事件**：`Paint` 里
+    /// afk 画在最后覆盖一切，这样还原出来的结果跟镜像里存的完全一致。
+    /// <see cref="JudgmentCode.AwOffline"/> 的秒什么都不吐——"没有记录"本来就是用
+    /// "没有事件"表达的（§4.3 第 (1) 步）。
+    /// </summary>
+    public (List<AwEvent> Window, List<AwEvent> Afk) EventsIn(DateTimeOffset from, DateTimeOffset to)
+    {
+        var win = new List<AwEvent>();
+        var afk = new List<AwEvent>();
+
+        var a = Floor(from);
+        var end = Floor(to);
+
+        var runStart = a;
+        MirrorSecond? run = null;
+
+        void Flush(DateTimeOffset stop)
+        {
+            if (run is not { } r) return;
+            var seconds = (stop - runStart).TotalSeconds;
+            if (seconds <= 0) return;
+
+            if (r.Code == JudgmentCode.Afk)
+                afk.Add(new AwEvent(runStart, seconds, null, null, "afk"));
+            else if (r.Code is JudgmentCode.Focused or JudgmentCode.OffTask)
+                win.Add(new AwEvent(runStart, seconds, r.App, r.Title, null));
+        }
+
+        for (var s = a; s < end; s = s.AddSeconds(1))
+        {
+            var cur = At(s);
+            if (run is { } r && r.Code == cur.Code && r.App == cur.App && r.Title == cur.Title) continue;
+
+            Flush(s);
+            run = cur;
+            runStart = s;
+        }
+        Flush(end);
+
+        return (win, afk);
+    }
+
     // ── 内部 ────────────────────────────────────────────────────────────────
 
     /// <summary>整秒归一。所有的下标都从这里出发，绝不掺亚秒零头（跟 §4.2 / DECISIONS H9 同一条纪律）。</summary>
