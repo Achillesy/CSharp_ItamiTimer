@@ -101,6 +101,46 @@ public class AwMirrorTests
     }
 
     [Fact]
+    public void 预测过的秒会被后到的真实事件整段改回来()
+    {
+        // 用户 2026-08-29 举的例子（时刻换算成相对偏移）：
+        //   01:09 起一直在目标窗口里；01:10:00 切走了，但 AW 还没吐出新事件。
+        //   01:10:03 这一刻刷新 → 镜像只能预测：00/01/02/03 沿用上一个事件，判 Focused。
+        //   随后 AW 提交了 start=01:10:00 的新事件 → 那四秒**必须被改回 OffTask**。
+        var m = New();
+
+        // ① 01:06:00~01:10:00 一直在 Reader.exe 里
+        m.Apply([Win(-240, 240, "Reader.exe")], [], At(3));
+
+        Assert.Equal(JudgmentCode.Focused, Code(m, -1));   // 有真实事件的秒
+        Assert.Equal(JudgmentCode.Focused, Code(m, 0));    // ↓ 这四秒是**预测**出来的
+        Assert.Equal(JudgmentCode.Focused, Code(m, 1));
+        Assert.Equal(JudgmentCode.Focused, Code(m, 2));
+        Assert.Equal(JudgmentCode.Focused, Code(m, 3));
+
+        // ② AW 终于吐出那条 start=01:10:00 的事件（心跳提交粒度 ~10 秒，所以晚了几秒）
+        m.Apply([Win(0, 8, "Chat.exe")], [], At(8));
+
+        Assert.Equal(JudgmentCode.OffTask, Code(m, 0));    // 预测被真值整段改回来
+        Assert.Equal(JudgmentCode.OffTask, Code(m, 1));
+        Assert.Equal(JudgmentCode.OffTask, Code(m, 2));
+        Assert.Equal(JudgmentCode.OffTask, Code(m, 3));
+        Assert.Equal(JudgmentCode.Focused, Code(m, -1));   // 切走之前的那一秒不受影响
+    }
+
+    [Fact]
+    public void 改正的范围由事件自己的start决定不受四分钟窗口以外的影响()
+    {
+        // 三分半之前的那一秒照样改得动——只要还在环里
+        var m = New();
+        m.Apply([Win(-240, 240, "Reader.exe")], [], At(0));
+        Assert.Equal(JudgmentCode.Focused, Code(m, -210));
+
+        m.Apply([Win(-215, 20, "Chat.exe")], [], At(0));
+        Assert.Equal(JudgmentCode.OffTask, Code(m, -210));
+    }
+
+    [Fact]
     public void 预测最多延续一个环的长度不会画出几小时()
     {
         // watcher 死掉：再也没有新事件。预测只往后传，跨不过环的起点

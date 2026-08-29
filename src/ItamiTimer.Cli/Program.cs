@@ -62,8 +62,6 @@ async Task<int> StartAsync()
         throw new ArgumentException($"No enabled goal \"{group}\" in rules.json. Available: {string.Join(", ", rules.SelectableGroups)}");
 
     using var aw = new AwClient();
-    var winId = await aw.FindBucketIdAsync(AwClient.WindowBucketType);
-    var afkId = await aw.FindBucketIdAsync(AwClient.AfkBucketType);
 
     // §14.1: truncated to the current whole minute
     var task = new TaskRecord
@@ -77,7 +75,7 @@ async Task<int> StartAsync()
     Console.WriteLine($"Focus {minutes} min, then a {task.RestMinutes} min break");
     Console.WriteLine($"Started at {Renderer.Clock(task.StartedAt)} (floored to the minute)\n");
     Console.WriteLine(Renderer.Legend());
-    Console.WriteLine($"Tick every {TickSeconds}s");
+    Console.WriteLine($"Judgment ticks every {TickSeconds}s; the mirror refreshes every second (ActivityWatch polled every {MirrorFeed.PollSeconds}s)");
     Console.WriteLine("Ctrl+C = abandon the task\n");
 
     var buf = new JudgmentBuffer(task.StartedAt, minutes);
@@ -93,15 +91,34 @@ async Task<int> StartAsync()
         Environment.Exit(130);
     };
 
-    // ---- The single loop from §8.3.5. The tick is anchored to a whole minute (§4.2), not to the moment it started.
+    // ---- 镜像：跟界面**同一份驱动**（Core 的 MirrorFeed）。§15.7 要的"验证工具和被验证
+    // 对象是同一个引擎、同一个节拍"，从这一版起连"怎么取数"都统一了——干跑不再自己
+    // 查 AW，而是跟 App 一样每秒喂镜像、每分钟从镜像读。
+    var feed = new MirrorFeed(aw, task.StartedAt, rules, group)
+    {
+        OnInitialized = (w, a) => Console.WriteLine($"Mirror initialized: {AwMirror.Capacity}s, {w} window / {a} afk events"),
+        OnUnavailable = why => Console.WriteLine($"       ⚠ ActivityWatch unreachable (fail-open, counts as focus): {why}"),
+        OnRestored = () => Console.WriteLine("       ✓ ActivityWatch is back"),
+    };
+
+    // ---- The single loop from §8.3.5. **秒节拍**：镜像每秒推进（预测靠它），
+    // 而真正的判定仍然锚在整分钟上（§4.2 / DECISIONS H9）。
+    var lastMinute = DateTimeOffset.MinValue;
     while (true)
     {
+        await feed.RefreshAsync(DateTimeOffset.Now);
+
         var minute = TimeGrid.FloorToMinute(DateTimeOffset.Now);
+        if (minute == lastMinute)
+        {
+            await Task.Delay(1000);
+            continue;
+        }
+        lastMinute = minute;
 
         // Both ends of the query interval are whole minutes, so the write offset is always an integer (DECISIONS H9)
         var queryStart = minute.AddSeconds(-JudgmentBuffer.QueryWindowSeconds);
-        var win = await aw.FetchEventsAsync(winId, queryStart, minute);
-        var afk = await aw.FetchEventsAsync(afkId, queryStart, minute);
+        var (win, afk) = feed.Mirror.EventsIn(queryStart, minute);
 
         var outcome = buf.Tick(minute, win, afk, rules, group);
         settled += outcome.SettledSeconds;
@@ -131,7 +148,7 @@ async Task<int> StartAsync()
         // exactly how §15.1 happened).
         if (outcome.Completed) return Rest(task, buf, settled, minute);
 
-        await Task.Delay(TickSeconds * 1000);
+        await Task.Delay(1000);
     }
 }
 
@@ -263,10 +280,12 @@ async Task<int> BackfillAsync()
 }
 
 /// <summary>
-/// `executeCommand` 收藏夹的三个模式（用户 2026-08-08）。默认操作的是**程序真正在用的
-/// 那一份 rules.json**（<see cref="AppData.RulesPath"/> 的三级查找链），不是当前目录下的
-/// ——其它子命令沿用旧的 `./rules.json` 默认值，这里刻意不同：改命令的人要改的必然是
-/// 生效的那一份。
+/// `executeCommand` 收藏夹的三个模式（用户 2026-08-08）。操作的是**程序真正在用的
+/// 那一份 rules.json**（<see cref="AppData.RulesPath"/> 的三级查找链）——改命令的人
+/// 要改的必然是生效的那一份。
+///
+/// （这里原来是**唯一**这么做的子命令，其余的默认读 `./rules.json`；2026-08-29 起
+/// <see cref="LoadRules"/> 也改成同一条查找链了，全部子命令就此一致。）
 /// </summary>
 async Task<int> CommandsAsync()
 {
@@ -334,7 +353,7 @@ int Help()
 
         A task lives only in this process and is never written to disk: quitting itami
         abandons the current task.
-        The rules file defaults to ./rules.json; override it with --rules <path>.
+        The rules file defaults to the one the app actually uses; override it with --rules <path>.
 
         """);
     return 0;
@@ -446,9 +465,23 @@ static (List<AwEvent> Win, List<AwEvent> Afk) SyntheticEvents(
 
 // ---------------------------------------------------------------- Misc
 
+/// <summary>
+/// 默认读**程序真正在用的那一份 rules.json**（<see cref="AppData.RulesPath"/> 的三级
+/// 查找链），`--rules` 仍然可以指向任意文件。
+///
+/// ⚠️ **2026-08-29 改的，原来默认是当前目录下的 `./rules.json`**。改的理由是这个工具
+/// 存在的意义：`itami start` 是"界面到底会怎么判"的干跑，`backfill` 算的是界面要写进
+/// during.json 的同一个数——**判的规则跟界面不是同一份，这两件事就都不成立**
+/// （§15.7：验证工具和被验证对象必须是同一个）。
+///
+/// 现场就是这么撞见的：界面里有"学习经济学"和"编程"两个目标，而 `itami start --group
+/// 学习经济学` 直接报"没有这个目标，可用的只有 ItamiTimer"——它读的是仓库里那份默认
+/// 规则。`itami commands` 早就用 <see cref="AppData.RulesPath"/> 了，只是其余子命令
+/// 一直没跟上。
+/// </summary>
 GroupRules LoadRules()
 {
-    var path = opt.GetValueOrDefault("rules") ?? "rules.json";
+    var path = opt.GetValueOrDefault("rules") is { Length: > 0 } p ? p : AppData.RulesPath();
     if (!File.Exists(path))
         throw new FileNotFoundException($"Rules file not found at {Path.GetFullPath(path)}. Use --rules to point at one.");
     return GroupRules.Load(path);

@@ -40,29 +40,22 @@ public sealed class TaskSession : IDisposable
     /// </summary>
     private const int AwStaleSeconds = 60;
 
-    /// <summary>每秒那次 `?limit=N` 取多少条。十几秒内正常最多几条，20 是很大的余量。</summary>
-    private const int MirrorFetchLimit = 20;
-
     private readonly GroupRules _rules;
     private readonly AwClient _aw;
     private readonly JudgmentBuffer _buffer;
-    private string? _winBucket, _afkBucket;
     private bool _busy;
 
     /// <summary>
-    /// 这一轮的 AW 内存镜像（DESIGN §7.5）。**本会话内所有判定都从它读**——常驻期唯一
-    /// 还在碰 AW 的是 <see cref="RefreshMirrorAsync"/> 那一条路。
+    /// 这一轮的 AW 内存镜像和喂它的那一段（DESIGN §7.5）。**本会话内所有判定都从它读**
+    /// ——常驻期唯一还在碰 AW 的就是它。
+    ///
+    /// 驱动逻辑住在 Core（<see cref="MirrorFeed"/>），**跟 `itami` 用的是同一份**：
+    /// 镜像这条数据路只有一个实现，不会出现"命令行验过了、界面上是另一回事"
+    /// （§15.7 / DECISIONS L25）。
+    ///
     /// （`Backfill` 是例外：它扫的是跨天的历史，245 秒的镜像装不下，走自己的查询。）
     /// </summary>
-    private readonly AwMirror _mirror;
-
-    private bool _mirrorReady;
-
-    /// <summary>上一次探到的两个桶的 <c>last_updated</c>：既是"有没有新东西"的游标，也是陈旧诊断的依据。</summary>
-    private DateTimeOffset _winSeen, _afkSeen;
-
-    /// <summary>AW 掉线的日志只在**状态变化**时打，不是每秒一行。</summary>
-    private bool _awDown;
+    private readonly MirrorFeed _feed;
 
     public TaskRecord Task { get; private set; }
     public IReadOnlyList<MinuteCell> Cells { get; private set; } = [];
@@ -125,7 +118,16 @@ public sealed class TaskSession : IDisposable
         _buffer = new JudgmentBuffer(task.StartedAt, task.FocusMinutes);
         // 镜像跟任务同生共死：Focused/OffTask 相对于选中的小目标才有意义，而目标恰好在
         // 点 Start 这一刻锁定（之后单选框就禁用了）。DECISIONS O2。
-        _mirror = new AwMirror(task.StartedAt, rules, task.Group);
+        _feed = new MirrorFeed(_aw, task.StartedAt, rules, task.Group)
+        {
+            // Core 不打日志，状态变化用回调抛出来（跟 Backfill 的 progress 同一路数）
+            OnInitialized = (win, afk) =>
+                Log.Info($"Mirror initialized: {AwMirror.Capacity}s, {win} window / {afk} afk events absorbed."),
+            OnUnavailable = why =>
+                Log.Warn($"ActivityWatch unreachable; those seconds stay unrecorded (fail-open, counts as focus): {why}"),
+            OnRestored = () =>
+                Log.Info("ActivityWatch is back; the mirror is being refreshed again."),
+        };
         _deficitSeconds = task.FocusMinutes * 60;
         _lastAwMinute = task.StartedAt;
         // The dial needs something to show the instant the button is pressed: the whole
@@ -144,100 +146,24 @@ public sealed class TaskSession : IDisposable
     private int _lastCellCount = -1;
 
     /// <summary>
-    /// 每秒一次：把镜像推到 <paramref name="nowLocal"/>（DESIGN §7.5）。
-    /// **这是常驻期唯一还在碰 AW 的地方。**
+    /// **每秒调一次**（由 <c>MainWindow.OnFrame</c> 那唯一的钟驱动，DECISIONS L8）。
+    /// 具体怎么喂在 <see cref="MirrorFeed.RefreshAsync"/>：每秒推进 + 预测（纯内存），
+    /// 每 5 秒才真的跟 AW 说一次话。
     ///
-    /// 流程：
-    /// <list type="number">
-    ///   <item>第一次调用 → 初始化：拿"覆盖镜像起点的那条事件"外加一次范围查询，
-    ///         两条加起来就是完备的，不需要任何放宽（见 <see cref="InitializeMirrorAsync"/>）。</item>
-    ///   <item>之后每秒探一次两个桶的 <c>last_updated</c>（实测 739 字节），
-    ///         **前进了才**去拉事件。稳态下事件查询约每 10 秒才真的发生一次。</item>
-    ///   <item>没前进也要 <see cref="AwMirror.Apply"/> 空列表——镜像仍然要推进到 now，
-    ///         让预测把空隙和末尾填上。</item>
-    ///   <item>查询失败 → <see cref="AwMirror.MarkUnavailable"/>，那些秒留在
-    ///         <see cref="JudgmentCode.AwOffline"/>（= 算专注，§3.1 的知情 fail-open）。</item>
-    /// </list>
-    ///
-    /// **日志只在掉线/恢复那一下打**：每秒一行足够把日志淹掉，而 §8.1a 要的"原因不能
-    /// 消失"由这两行状态变化完整覆盖。
+    /// 休息期间**没有任何人读镜像**：分钟判定在休息阶段早早 return，闪烁被 `InRest`
+    /// 挡掉，滴答跟着也是关的。照查就是一次 5 分钟的休息白费几十次往返。
     /// </summary>
     public async Task RefreshMirrorAsync(DateTime nowLocal)
     {
-        // 休息期间**没有任何人读镜像**：这个方法自己在休息阶段早早 return，闪烁被
-        // `!InRest` 挡掉，滴答跟着 `_drifting` 也是关的。照查就是一次 5 分钟的休息白费
-        // 300 次往返（2026-08-29）。
         if (Finished || InRest) return;
-        var now = new DateTimeOffset(nowLocal);
-
-        try
-        {
-            if (_winBucket is null || _afkBucket is null)
-                (_winBucket, _afkBucket) = await _aw.FindWatcherBucketsAsync();
-
-            if (!_mirrorReady)
-            {
-                await InitializeMirrorAsync(now);
-                _mirrorReady = true;
-            }
-            else
-            {
-                var seen = await _aw.FetchLastUpdatedAsync();
-                var win = await PullIfChangedAsync(_winBucket, seen, _winSeen);
-                var afk = await PullIfChangedAsync(_afkBucket, seen, _afkSeen);
-                if (seen.TryGetValue(_winBucket, out var w)) _winSeen = w;
-                if (seen.TryGetValue(_afkBucket, out var a)) _afkSeen = a;
-                _mirror.Apply(win, afk, now);
-            }
-
-            if (_awDown)
-            {
-                _awDown = false;
-                Log.Info("ActivityWatch is back; the mirror is being refreshed again.");
-            }
-        }
-        catch (AwUnavailableException ex)
-        {
-            _mirror.MarkUnavailable(now);
-            if (!_awDown)
-            {
-                _awDown = true;
-                Log.Warn($"ActivityWatch unreachable; those seconds stay unrecorded (fail-open, counts as focus): {ex.Message}");
-            }
-        }
-    }
-
-    /// <summary>某个桶的 <c>last_updated</c> 前进了才去拉事件，否则连请求都不发。</summary>
-    private async Task<List<AwEvent>> PullIfChangedAsync(
-        string bucket, IReadOnlyDictionary<string, DateTimeOffset> seen, DateTimeOffset last)
-        => seen.TryGetValue(bucket, out var lu) && lu > last
-            ? await _aw.FetchLatestAsync(bucket, MirrorFetchLimit)
-            : [];
-
-    /// <summary>
-    /// 镜像初始化（DESIGN §7.5）：把 <c>[镜像起点, now]</c> 查全，一次灌进去。
-    ///
-    /// "跨进区间的那几条"由 <see cref="AwClient.FetchEventsAsync"/> 自己负责（2026-08-29
-    /// 起它就是"头 + 精确区间"两步走），所以这里不用再自己拼一遍——你可能六个小时前
-    /// 就开着那个窗口没动过，而 AW 只按事件自己的 start 过滤（T1）。
-    /// </summary>
-    private async Task InitializeMirrorAsync(DateTimeOffset now)
-    {
-        var from = _mirror.Oldest;
-
-        var win = await _aw.FetchEventsAsync(_winBucket!, from, now);
-        var afk = await _aw.FetchEventsAsync(_afkBucket!, from, now);
-
-        _mirror.Apply(win, afk, now);
-        Log.Info($"Mirror initialized: {AwMirror.Capacity}s ending {now:HH:mm:ss}, " +
-                 $"{win.Count} window / {afk.Count} afk events absorbed.");
+        await _feed.RefreshAsync(new DateTimeOffset(nowLocal));
     }
 
     /// <summary>
     /// 镜像里某一秒的观测（DESIGN §7.5）。**只读，不发任何请求**——镜像已经由每秒那次
     /// 刷新维护好了，这里就是一次数组下标。
     /// </summary>
-    public MirrorSecond MirrorAt(DateTimeOffset second) => _mirror.At(second);
+    public MirrorSecond MirrorAt(DateTimeOffset second) => _feed.Mirror.At(second);
 
     /// <summary>
     /// 这一分钟该做的事。**由 <c>MainWindow.OnMinute</c> 在整分钟边界调用，这个类自己
@@ -305,13 +231,14 @@ public sealed class TaskSession : IDisposable
             // 这一分钟被判成 AwOffline，而 AwOffline 算专注（§3.1 的知情 fail-open）。
             // **这一拍照样跑完**——跳过等于把 ElapsedSeconds、承诺弧、休息扇形一起冻住，
             // 那是"暂停"不是 fail-open（2026-08-02 实机踩过）。
-            var (win, afk) = _mirror.EventsIn(queryStart, queryEnd);
+            var (win, afk) = _feed.Mirror.EventsIn(queryStart, queryEnd);
 
             // 诊断（只写日志，绝不改判定，§16.5）：watcher 悄悄死掉时 AwOffline 仍然算
             // 专注，出了事只能靠日志回头查。⚠️ **判据换成探针的 last_updated**——镜像里的
             // 秒会被预测填满，拿它判"新不新鲜"永远为真，等于把这条诊断安静废掉。
-            if (_winSeen != default && queryEnd - _winSeen > TimeSpan.FromSeconds(AwStaleSeconds))
-                Log.Warn($"aw-watcher-window hasn't written for {(queryEnd - _winSeen).TotalSeconds:F0}s - it may be stuck (or the machine just woke up)");
+            var winSeen = _feed.WindowLastUpdated;
+            if (winSeen != default && queryEnd - winSeen > TimeSpan.FromSeconds(AwStaleSeconds))
+                Log.Warn($"aw-watcher-window hasn't written for {(queryEnd - winSeen).TotalSeconds:F0}s - it may be stuck (or the machine just woke up)");
             // ⚠️ afk 桶**故意不判**（DECISIONS O9）：实测它的 last_updated 卡住 38 秒还在涨，
             // 正常节奏就比 window 慢得多，同一个阈值会误报；而误判成"死了"的代价是 afk
             // 覆盖失效 → 离开被算成跑偏 → 冤枉人。阈值要先实测再定。
