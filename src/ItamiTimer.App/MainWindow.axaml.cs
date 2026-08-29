@@ -436,17 +436,22 @@ public partial class MainWindow : Window
         var sec = DateTime.Now.Second;
         if (sec == _tickedSecond) return;
         _tickedSecond = sec;
-        // #5 reversed (2026-08-13, user): Force on now means unconditional -- it overrides
-        // everything, including focus/rest, which is the whole point of "force".
+        // **滴答就是"你走神了，回来"这句提醒**（2026-08-29 用户推翻 C7/C8，DESIGN §10）：
+        // 跟钟面的闪烁**共用同一个判据**——镜像里上一秒是 `OffTask`，就既闪又响。
         //
-        // Not forced: **quiet is earned, not the default** (2026-08-13, DECISIONS C7). The
-        // tick is a reminder, not a punishment -- it's just what a clock does -- and the one
-        // thing that buys silence is the previous whole minute having been genuinely judged
-        // as focus.
-        var duringFocus = _session is { Finished: false, InRest: false };
-        var lastMinuteFocused = duringFocus && _session!.LastCompletedMinute is { } m
-            && m.Tier is CellTier.FocusFull or CellTier.FocusMid;
-        var ticking = _settings.ForceTicking || (_settings.TickEnabled && !lastMinuteFocused);
+        // ⚠️ 这推翻了 2026-08-13 定下的"安静是挣来的"（C7）：那一版里滴答是"时钟本来就
+        // 在走"的中性信号，默认响，只有上一整分钟真的专注过才换来这一分钟安静，AFK 和
+        // AW 掉线照响。现在滴答有了明确的含义，于是**没有跑偏就没有理由响**：
+        // 专注、离开、AW 没数据、休息、空闲——全部安静。
+        //
+        // 连带效果（知情）：**没有任务在跑时程序完全不响**。以前空闲时它像个普通时钟
+        // 一直嘀嗒，现在只有"专注期间跑偏"这一种情况出声。想要一个一直走的钟，
+        // Settings 第一张卡的 **Force Ticking** 就是干这个的——它无条件响，不看任何判据，
+        // 那才是"force"的字面意思（C6）。
+        //
+        // `_drifting` 由每秒那次镜像刷新维护（见 UpdateInversion），跟闪烁读的是同一格，
+        // 所以两个信号天然同步，不可能一个响一个不闪。
+        var ticking = _settings.ForceTicking || (_settings.TickEnabled && _drifting);
         if (ticking) Tick.Play(sec, _settings.TickVolume);
 
         // 每一秒：把 AW 内存镜像推到此刻（DESIGN §7.5）。**这是常驻期唯一还在碰 AW
