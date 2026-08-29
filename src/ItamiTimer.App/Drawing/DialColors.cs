@@ -101,6 +101,31 @@ public sealed record DialPalette(
         AlarmsDot: Color.FromRgb(0xE9, 0x63, 0x5C));
 
     /// <summary>
+    /// 跑偏反色用的**半反色调色板**（DESIGN §8.9）：只把**钟面、刻度、指针**换成另一档，
+    /// 其余原样保留。
+    ///
+    /// 翻的五个：<see cref="Face"/>、<see cref="FaceRim"/>、<see cref="Ink"/>（数字 + 时针
+    /// 分针 + 轴心）、<see cref="Tick"/>、<see cref="Sweep"/>（秒针）。
+    ///
+    /// **不翻的，以及为什么**：
+    /// - 木边框（<c>Bezel*</c>）——换主题换的是表盘的照明，不是换一只钟（DECISIONS M10）；
+    /// - 色环的绿/黄/红（<c>Focus/Amber/Slack</c>）、休息蓝扇形、闹钟黄针、Alarms 小红圈
+    ///   ——**那是账本本身**，反了就把"绿=专注、红=偷懒"这套语义拆了；
+    /// - 骨牌——它压根不在表盘上。
+    ///
+    /// 卡片、控件、右上角四个图标同样不跟：它们由用户设定的底色决定，跟这个方法无关
+    /// （反色只作用于 <c>DialControl.Palette</c> 一处）。
+    /// </summary>
+    public DialPalette WithFaceFrom(DialPalette other) => this with
+    {
+        Face = other.Face,
+        FaceRim = other.FaceRim,
+        Ink = other.Ink,
+        Tick = other.Tick,
+        Sweep = other.Sweep,
+    };
+
+    /// <summary>
     /// §8.2.3's three-stop transition: focus -> amber -> slack.
     ///
     /// Why not interpolate RGB directly (§0.4's option A): a direct interpolation lands on

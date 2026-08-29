@@ -392,10 +392,23 @@ public partial class MainWindow : Window
         if (Application.Current is { } app)
             app.RequestedThemeVariant = _settings.DarkTheme ? ThemeVariant.Dark : ThemeVariant.Light;
 
-        F<DialControl>("Dial").Palette = _palette;
+        ApplyDialPalette();
         var row = F<DominoRow>("Dominoes");
         row.Palette = _palette;
         row.Fallen = DominoRow.FallenForToday(DateTime.Now);
+    }
+
+    /// <summary>
+    /// 表盘用哪一套色：底色，跑偏时把**钟面、刻度、指针**换成另一档（DESIGN §8.9）。
+    ///
+    /// ⚠️ **反色只作用于这一处**。骨牌、卡片、右上角四个图标、Settings 窗口、确认框
+    /// 全部认用户设定的底色，`Application.RequestedThemeVariant` 也不跟着动——那是主题，
+    /// 这是提示，两件事。
+    /// </summary>
+    private void ApplyDialPalette()
+    {
+        var other = _settings.DarkTheme ? DialPalette.Light : DialPalette.Dark;
+        F<DialControl>("Dial").Palette = _inverted ? _palette.WithFaceFrom(other) : _palette;
     }
 
     private int _tickedSecond = -1;
@@ -454,8 +467,56 @@ public partial class MainWindow : Window
         var ticking = _settings.ForceTicking || (_settings.TickEnabled && !lastMinuteFocused);
         if (ticking) Tick.Play(sec, _settings.TickVolume);
 
+        // 每 5 秒：跑偏反色的采样（DESIGN §8.9）。挂在同一个 `_frame` 上，**不新开定时器**
+        // ——DECISIONS L8 定过，这个程序里只有一个钟。跟下面的 OnMinute 各走各的，
+        // 互不等待、互不影响。
+        if (sec % Inversion.SampleSeconds == 0) SampleInversion(DateTime.Now);
+
         // 整分钟：所有"以分为单位"的功能都在 OnMinute 里按固定顺序走一遍。
         if (sec == 0) OnMinute(DateTime.Now);
+    }
+
+    /// <summary>
+    /// 钟面此刻是不是反着的（DESIGN §8.9）。**推导值，绝不落盘**：用户按钮定的是底色
+    /// （<see cref="Settings.DarkTheme"/>），这个只在它上面把钟面那几个色号换一下。
+    /// </summary>
+    private bool _inverted;
+
+    /// <summary>上一次采样还没回来的闸门。AW 卡住时（默认超时 10 秒）5 秒一次会摞起来。</summary>
+    private bool _inversionBusy;
+
+    /// <summary>
+    /// 5 秒一次的跑偏采样（DESIGN §8.9）。
+    ///
+    /// `async void`：跟 <see cref="OnMinute"/> 同一个理由——它是事件处理器的延长线，没有谁
+    /// 能 await 它。里面不抛异常：AW 那一路的失败在
+    /// <see cref="TaskSession.SampleInversionAsync"/> 里已经收敛成"不反色"。
+    ///
+    /// **专注阶段之外一律回到底色**：休息时跑偏没有意义（那是挣来的），空闲时更没有对象。
+    /// 任务结束/放弃也走这一条，不留一块反着的钟面在那儿。
+    /// </summary>
+    private async void SampleInversion(DateTime now)
+    {
+        var wanted = false;
+        if (_session is { Finished: false, InRest: false } session)
+        {
+            if (_inversionBusy) return;
+            _inversionBusy = true;
+            try { wanted = await session.SampleInversionAsync(new DateTimeOffset(now)); }
+            finally { _inversionBusy = false; }
+        }
+
+        if (wanted == _inverted) return;
+        _inverted = wanted;
+
+        // **日志记一行**：界面全程沉默，事后能查的只有日志（§8.1a），而"钟面自己反了"
+        // 这件事必须能对得上时间点。只在**变化**那一下记，不是每次采样都记。
+        var (from, to) = Inversion.WindowFor(new DateTimeOffset(now));
+        Log.Info(_inverted
+            ? $"Off-task seconds in [{from:HH:mm:ss}, {to:HH:mm:ss}); dial face inverted"
+            : "No off-task seconds in the sampled window; dial face restored");
+
+        ApplyDialPalette();
     }
 
     /// <summary>上一分钟的处理还没跑完的闸门（见 <see cref="OnMinute"/>）。</summary>
@@ -1060,7 +1121,12 @@ public partial class MainWindow : Window
         if (saved is not null) saved.IsChecked = true;
         else if (_goalRadios.Count > 0) _goalRadios[0].IsChecked = true;
 
+        // 钟面立刻回到底色（DESIGN §8.9）。5 秒后那次采样本来也会把它收回去，但"任务结束了
+        // 钟面还反着五秒"没有道理——结束这一刻就该干净。
+        _inverted = false;
+
         var dial = F<DialControl>("Dial");
+        ApplyDialPalette();
         dial.Cells = [];
         dial.StartedAt = null;
         dial.RestFrom = null;

@@ -136,6 +136,40 @@ public sealed class TaskSession : IDisposable
     /// 就是白做；而 `done` 是整分钟、`RestMinutes` 是整数，`done + rest` 必然落在整分钟上，
     /// 所以按分钟判断"休息结束了没有"跟按秒判断的结果**完全一样**，一秒都不会晚。
     /// </summary>
+    /// <summary>
+    /// 跑偏反色的一次采样（DESIGN §8.9）：查 <see cref="Inversion.WindowFor"/> 给的那 5 秒，
+    /// 返回"钟面要不要反色"。
+    ///
+    /// **跟判定完全无关**：不碰 <see cref="_buffer"/>、不动缺口、不发 <see cref="Updated"/>，
+    /// 只是拿这个会话现成的 AW 客户端和已缓存的 bucket id 多问一句。表盘上那一格是红是绿，
+    /// 永远只由每整分钟那次重放决定。
+    ///
+    /// **AW 出问题一律 false（= 用用户设定的底色）**，这是用户 2026-08-29 定的条款 1：
+    /// AW 挂了那一分钟会被 fail-open 判成全绿，此时还反色就是让屏幕跟账本对着说话。
+    /// **并且不写日志**——这条路 5 秒一次，AW 一停就是每分钟 12 行同样的话；而"AW 连不上"
+    /// 每整分钟那次 tick 已经记过了（`ActivityWatch unreachable this tick`），信息一条没少。
+    /// </summary>
+    public async Task<bool> SampleInversionAsync(DateTimeOffset now)
+    {
+        if (Finished || InRest) return false;
+
+        try
+        {
+            _winBucket ??= await _aw.FindBucketIdAsync(AwClient.WindowBucketType);
+            _afkBucket ??= await _aw.FindBucketIdAsync(AwClient.AfkBucketType);
+
+            var (from, to) = Inversion.WindowFor(now);
+            var win = await _aw.FetchEventsAsync(_winBucket, from, to);
+            var afk = await _aw.FetchEventsAsync(_afkBucket, from, to);
+
+            return Inversion.Evaluate(now, win, afk, _rules, Task.Group);
+        }
+        catch (AwUnavailableException)
+        {
+            return false;
+        }
+    }
+
     public async Task TickMinuteAsync(DateTime nowLocal)
     {
         if (_busy || Finished) return;

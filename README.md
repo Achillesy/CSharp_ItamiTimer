@@ -67,6 +67,20 @@ where a click would take you: a sun by day, a bitten cookie of a moon by night. 
 repaints everything at once, the dial and dominoes included, and the choice is remembered.
 There is no "follow the system" option; the two states are the whole set.
 
+Since 3.1.0 **the clock face flips to the other theme while you are off task**. Every five
+seconds, during a focus block, it looks at one five-second slice of your ActivityWatch
+history — the one ending fifteen seconds ago, by which time the data has settled — and if a
+single second of it was spent outside your goal, the face, the ticks and the hands switch
+to the opposite theme. The wooden bezel, the coloured ring, the card and every other window
+stay exactly as you set them: this is a signal, not a theme change. It is silent, like
+everything else here.
+
+Two things worth knowing. **It is showing you the last twenty seconds, not this instant** —
+glance at a chat window for one second and the face flips fifteen seconds later, by which
+time you are back; it restores itself five seconds after that. And when ActivityWatch is
+down, the face simply stays the way you set it: that minute is counted as focus anyway, and
+a signal that contradicts the ledger would be worse than no signal.
+
 The window remembers where you left it. If a position ends up off-screen — you dragged it
 past an edge, or the monitor it was on is gone — it returns to the visible area on its own
 once you let go. Dragging *between* monitors is unaffected: it settles onto whichever
