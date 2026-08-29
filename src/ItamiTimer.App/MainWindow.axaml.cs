@@ -415,8 +415,16 @@ public partial class MainWindow : Window
     private int _tickedSecond = -1;
 
     /// <summary>
-    /// One frame every 33ms. Two jobs: keeping the second hand's jump timely (≤33ms
-    /// latency), and **placing one tick sound on the second boundary**.
+    /// One frame every 33ms — but **everything below happens once a second**: the 33ms
+    /// cadence exists only to catch the second boundary within 33ms, not to do work 30
+    /// times a second.
+    ///
+    /// ⚠️ **表盘重画也在秒边界上，不是每帧**（2026-08-29）：`DrawHands` 读的是
+    /// `DateTime.Now`，而**秒针是一秒一跳的**（2026-07-28 用户定：扫秒针的钟不会响），
+    /// 格子一分钟一变，闪烁一秒一翻，闹钟黄针靠 `AffectsRender` 自己触发——**秒与秒
+    /// 之间表盘上没有任何东西在变**。重画放在"秒变化后的第一帧"，跟原来每帧都画**落在
+    /// 同一帧上**，延迟一模一样（≤33ms），但重画次数是原来的 1/30。矢量表盘带渐变、
+    /// 投影、六十个格子，这是全天候的开销。
     ///
     /// **It still ticks when the window is minimized** (user, 2026-07-28): the tick is the
     /// clock itself running, independent of whether you're watching it. Only the repaint
@@ -430,12 +438,12 @@ public partial class MainWindow : Window
     /// </summary>
     private void OnFrame(object? sender, EventArgs e)
     {
-        var visible = WindowState != WindowState.Minimized && IsVisible;
-        if (visible) F<DialControl>("Dial").InvalidateVisual();
-
         var sec = DateTime.Now.Second;
         if (sec == _tickedSecond) return;
         _tickedSecond = sec;
+
+        if (WindowState != WindowState.Minimized && IsVisible) F<DialControl>("Dial").InvalidateVisual();
+
         // **滴答就是"你走神了，回来"这句提醒**（2026-08-29 用户推翻 C7/C8，DESIGN §10）：
         // 跟钟面的闪烁**共用同一个判据**——镜像里上一秒是 `OffTask`，就既闪又响。
         //

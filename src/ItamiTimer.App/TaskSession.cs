@@ -164,7 +164,10 @@ public sealed class TaskSession : IDisposable
     /// </summary>
     public async Task RefreshMirrorAsync(DateTime nowLocal)
     {
-        if (Finished) return;
+        // 休息期间**没有任何人读镜像**：这个方法自己在休息阶段早早 return，闪烁被
+        // `!InRest` 挡掉，滴答跟着 `_drifting` 也是关的。照查就是一次 5 分钟的休息白费
+        // 300 次往返（2026-08-29）。
+        if (Finished || InRest) return;
         var now = new DateTimeOffset(nowLocal);
 
         try
