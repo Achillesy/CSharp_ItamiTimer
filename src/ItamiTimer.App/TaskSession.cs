@@ -233,6 +233,12 @@ public sealed class TaskSession : IDisposable
     }
 
     /// <summary>
+    /// 镜像里某一秒的观测（DESIGN §7.5）。**只读，不发任何请求**——镜像已经由每秒那次
+    /// 刷新维护好了，这里就是一次数组下标。
+    /// </summary>
+    public MirrorSecond MirrorAt(DateTimeOffset second) => _mirror.At(second);
+
+    /// <summary>
     /// 这一分钟该做的事。**由 <c>MainWindow.OnMinute</c> 在整分钟边界调用，这个类自己
     /// 不再持有定时器**（用户 2026-08-08：所有以分为单位的功能收到一条直线上）。
     ///

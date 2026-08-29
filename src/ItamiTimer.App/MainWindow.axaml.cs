@@ -392,10 +392,24 @@ public partial class MainWindow : Window
         if (Application.Current is { } app)
             app.RequestedThemeVariant = _settings.DarkTheme ? ThemeVariant.Dark : ThemeVariant.Light;
 
-        F<DialControl>("Dial").Palette = _palette;
+        ApplyDialPalette();
         var row = F<DominoRow>("Dominoes");
         row.Palette = _palette;
         row.Fallen = DominoRow.FallenForToday(DateTime.Now);
+    }
+
+    /// <summary>
+    /// 表盘用哪一套色：用户设定的底色，跑偏时把**钟面、刻度、指针**换成另一档
+    /// （DESIGN §8.9）。
+    ///
+    /// ⚠️ **反色只作用于这一处**。骨牌、卡片、右上角四个图标、Settings 窗口、确认框全部
+    /// 认底色，`Application.RequestedThemeVariant` 也不跟着动——那是主题，这是提示，
+    /// 两件事。
+    /// </summary>
+    private void ApplyDialPalette()
+    {
+        var other = _settings.DarkTheme ? DialPalette.Light : DialPalette.Dark;
+        F<DialControl>("Dial").Palette = _inverted ? _palette.WithFaceFrom(other) : _palette;
     }
 
     private int _tickedSecond = -1;
@@ -464,8 +478,61 @@ public partial class MainWindow : Window
         if (_mirrorBusy) return;
 
         _mirrorBusy = true;
-        try { await session.RefreshMirrorAsync(now); }
+        try
+        {
+            await session.RefreshMirrorAsync(now);
+            UpdateInversion(session, now);
+        }
         finally { _mirrorBusy = false; }
+    }
+
+    /// <summary>钟面此刻是不是反着的（DESIGN §8.9）。**推导值，绝不落盘**。</summary>
+    private bool _inverted;
+
+    /// <summary>上一秒是不是跑偏（只用来决定日志打不打，不决定画什么）。</summary>
+    private bool _drifting;
+
+    /// <summary>
+    /// 跑偏就让钟面**一秒一翻**（DESIGN §8.9）。镜像铺好之后，判据只剩一句话：
+    /// **上一秒是不是 <see cref="JudgmentCode.OffTask"/>**。
+    ///
+    /// ⚠️ **是「翻」不是「设成反色」**：跑偏期间每一秒都把钟面倒一次个儿——黑、白、黑、白
+    /// ——一直闪到你回来。这是用户 2026-08-29 明确要的效果，而且是他撤掉 3.1.0 那一版的
+    /// 全部理由："5 秒一次的反转视觉影响太小，**需要一个频繁闪烁的东西才能吸引注意力**"。
+    /// 稳定反着的钟面看两分钟就变成壁纸了，抓不住眼睛；**闪**才抓得住。
+    /// 一秒一翻 = 完整周期 2 秒 = 0.5 Hz，远在光敏性癫痫的 3 Hz 风险区间之外。
+    ///
+    /// 不跑偏（<see cref="JudgmentCode.Focused"/> / <see cref="JudgmentCode.Afk"/> /
+    /// <see cref="JudgmentCode.AwOffline"/>）就立刻回到用户自己设的那一档，不留半个相位。
+    ///
+    /// 读 <c>now-1</c> 而不是 <c>now</c>：当前这一秒还在被这一拍写，上一秒才是稳定的。
+    /// 镜像的预测已经把 AW 那 3~10 秒的滞后填上了（§7.5 规则 3）。
+    ///
+    /// ⚠️ **判据必须是 `== OffTask`，不能写成"不是 Focused"**（DECISIONS N4）：
+    /// <see cref="JudgmentCode.AwOffline"/> 按约定算专注，写成"不是 Focused"的话
+    /// `aw-watcher-window` 一死钟面就会永远闪下去，而账本这段时间全判绿——屏幕跟账本
+    /// 对着说反话。
+    /// </summary>
+    private void UpdateInversion(TaskSession session, DateTime now)
+    {
+        var second = session.MirrorAt(new DateTimeOffset(now).AddSeconds(-1));
+        var offTask = !session.InRest && second.Code == JudgmentCode.OffTask;
+
+        // 日志只在**进入/离开跑偏**那一下记，不是每秒一行——闪烁本身每秒都在发生，
+        // 照着记就是每分钟 60 行（§8.1a 要的是"原因不能消失"，不是"把日志淹掉"）。
+        if (offTask != _drifting)
+        {
+            _drifting = offTask;
+            Log.Info(offTask
+                ? $"Off task ({second.App} \"{second.Title}\"); dial face blinking"
+                : "Back on task; dial face restored");
+        }
+
+        // 跑偏 → 倒一次个儿；不跑偏 → 回底色。
+        var next = offTask && !_inverted;
+        if (next == _inverted) return;
+        _inverted = next;
+        ApplyDialPalette();
     }
 
     /// <summary>上一分钟的处理还没跑完的闸门（见 <see cref="OnMinute"/>）。</summary>
@@ -1069,6 +1136,12 @@ public partial class MainWindow : Window
             r.Content?.ToString() == _settings.SelectedGroup);
         if (saved is not null) saved.IsChecked = true;
         else if (_goalRadios.Count > 0) _goalRadios[0].IsChecked = true;
+
+        // 钟面立刻回到底色（DESIGN §8.9）：下一秒那次刷新本来也会收回去，但"任务都结束了
+        // 钟面还反着一秒"没有道理。
+        _inverted = false;
+        _drifting = false;
+        ApplyDialPalette();
 
         var dial = F<DialControl>("Dial");
         dial.Cells = [];

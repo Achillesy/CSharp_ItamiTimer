@@ -67,6 +67,14 @@ where a click would take you: a sun by day, a bitten cookie of a moon by night. 
 repaints everything at once, the dial and dominoes included, and the choice is remembered.
 There is no "follow the system" option; the two states are the whole set.
 
+Since 3.3.0 **the clock face blinks while you are off task** — every second it flips to the
+opposite theme and back, dark, light, dark, light, until you return. Only the face, the ticks
+and the hands take part; the wooden bezel, the coloured ring, the card and every other window
+stay exactly as you set them. This is a signal, not a theme change, and like everything else
+here it is silent — nothing pops up, nothing beeps. A steadily inverted dial becomes wallpaper
+within a minute; a blinking one does not, which is the entire point. (It alternates once a
+second — a 0.5 Hz flash, far below the threshold associated with photosensitive seizures.)
+
 One thing worth knowing: ActivityWatch reveals a window switch a few seconds after it
 happens, so expect three to ten seconds of delay in each direction. And when ActivityWatch
 is down the face simply stays the way you set it — those minutes are counted as focus
