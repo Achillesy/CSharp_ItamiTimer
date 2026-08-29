@@ -43,7 +43,7 @@ public static class Backfill
     /// 代价有两条，都可以接受：
     /// <list type="bullet">
     ///   <item>请求数 ×7（150 天 = 300 次），但这是一次性的；</item>
-    ///   <item><see cref="AwClient.FetchEventsAsync"/> 每次往前放宽 6 小时（Note T1），
+    ///   <item><see cref="AwClient.FetchEventsAsync"/> 自己保证完备（Note T1），
     ///         按天切就是每 24 小时多拉 6 小时 = 1.25 倍冗余（按周只有 1.04 倍）。
     ///         纯粹是网络开销，不影响正确性——重复拉到的事件会被 span 的边界裁掉。</item>
     /// </list>
@@ -137,8 +137,12 @@ public static class Backfill
             var n = (int)Math.Round((to - from).TotalSeconds);
             if (n <= 0) continue;
 
-            // FetchEventsAsync 内部已经往前放宽 6 小时（Note T1：AW 只按事件自己的开始
-            // 时刻过滤，跨进查询窗口的事件会凭空消失），Paint 会把越界的部分裁掉。
+            // FetchEventsAsync 自己会把"跨进这一片的那几条"一并查出来（Note T1：AW 只按
+            // 事件自己的开始时刻过滤，跨进查询窗口的事件会凭空消失），Paint 把越界的部分
+            // 裁掉。⚠️ 2026-08-29 之前那条对策是"统一往前放宽 6 小时"——**一个窗口连续
+            // 保持同一标题超过 6 小时就照样整条丢掉**，而这里是 fail-closed 的，丢掉的秒
+            // 不计入，也就是那个洞一直在**少算用户的时间**（挂机、长视频、盯着一个 PDF
+            // 过夜都够得着）。顺带每块也不再白拉一遍 6 小时的重叠。
             var win = await aw.FetchEventsAsync(winBucket, from, to).ConfigureAwait(false);
             var afk = await aw.FetchEventsAsync(afkBucket, from, to).ConfigureAwait(false);
 

@@ -129,21 +129,46 @@ public sealed class AwClient : IDisposable
     }
 
     /// <summary>
-    /// Range query.
+    /// 覆盖 <c>[since, until)</c> 的全部事件：**「跨进区间的那几条」+「区间本身」**，
+    /// 两次请求，结果完备。
     ///
-    /// **Note T1** (measured by the sibling AWJ project on 2026-07-26): ActivityWatch only
-    /// filters by an event's **own start time**, not by interval overlap. An event that
-    /// started before `since` and extends into the range will **silently disappear**. So
-    /// this widens the query window 6 hours into the past internally, and the caller clips
-    /// it themselves afterward (§14.2).
+    /// **Note T1**（姊妹项目 AWJ 2026-07-26 实测）：ActivityWatch **只按事件自己的开始
+    /// 时刻过滤**，不按区间相交。一条在 `since` 之前开始、延伸进区间的事件会**凭空消失**。
+    ///
+    /// ⚠️ **这里原来的对策是"统一往前放宽 6 小时"，2026-08-29 换掉了**，因为那个 6 小时
+    /// **既是猜的、又不可证充分**：
+    /// - 不够时**不报错**——一个窗口连续保持同一标题超过 6 小时（挂机、长视频、盯着一个
+    ///   PDF 过夜）照样整条丢掉。而 <see cref="Backfill"/> 是 fail-closed 的，丢掉的秒
+    ///   **不计入**，也就是这个洞在**少算用户的时间**；
+    /// - 够用时也很贵——实测一次拉回 337 条 / 65.7 KB，只为裁出其中几分钟，而
+    ///   `Backfill` 按 24 小时分块，每块都白拉一遍那 6 小时的重叠。
+    ///
+    /// 现在改成先问一句"<b>谁跨进了这个区间</b>"（`?limit=N&amp;end=since`，实测 367 字节
+    /// 就能拿到覆盖起点的那条，哪怕它是三天前开始的），再精确查区间本身。**没有任何
+    /// 需要猜的常数**，而且更便宜。
     /// </summary>
     public async Task<List<AwEvent>> FetchEventsAsync(string bucketId, DateTimeOffset since, DateTimeOffset until)
     {
-        var widened = since.AddHours(-6);
-        var q = $"?start={Uri.EscapeDataString(widened.UtcDateTime.ToString("o"))}" +
+        // ① 跨进区间的那几条。
+        // ⚠️ **不能只取 1 条**：afk 桶里有 start 相同、duration 不同的**重叠事件**（实测
+        // 308.1 / 313.1 / 293.0 / 298.0 秒），只取最新开始的那条可能漏掉更长的那条，
+        // 于是"人不在"的一段就被算成在座——正是最不能犯的那类错。
+        var events = await FetchLatestAsync(bucketId, CrossingHeadLimit, before: since);
+
+        // ② 区间本身，精确，不放宽
+        var q = $"?start={Uri.EscapeDataString(since.UtcDateTime.ToString("o"))}" +
                 $"&end={Uri.EscapeDataString(until.UtcDateTime.ToString("o"))}";
-        return Parse(await GetAsync($"/api/0/buckets/{Uri.EscapeDataString(bucketId)}/events{q}"));
+        events.AddRange(Parse(await GetAsync($"/api/0/buckets/{Uri.EscapeDataString(bucketId)}/events{q}")));
+
+        events.Sort((x, y) => x.Start.CompareTo(y.Start));
+        return events;
     }
+
+    /// <summary>
+    /// 问"谁跨进了这个区间"时取几条。窗口事件不重叠、1 条就够；afk 桶有重叠事件，
+    /// 多取几条兜住。取多了没有代价——越界的部分 <see cref="Judgment.Paint"/> 会裁掉。
+    /// </summary>
+    private const int CrossingHeadLimit = 5;
 
     /// <summary>
     /// 每个 bucket 的 <c>last_updated</c>（<see cref="AwMirror"/> 每秒的探针，DESIGN §7.5）。

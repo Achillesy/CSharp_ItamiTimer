@@ -215,20 +215,18 @@ public sealed class TaskSession : IDisposable
             : [];
 
     /// <summary>
-    /// 镜像初始化（DESIGN §7.5）：**"覆盖起点的那条事件" + "[起点, now] 范围查询"**。
+    /// 镜像初始化（DESIGN §7.5）：把 <c>[镜像起点, now]</c> 查全，一次灌进去。
     ///
-    /// 第一条不可省：AW 只按事件自己的 start 过滤（T1），而你可能六个小时前就开着那个
-    /// 窗口没动过——范围查询根本看不到它。实测 367 字节就够，而且对"三天前打开的窗口"
-    /// 同样正确；靠"往前放宽 N 小时"去猜是猜不完的（DECISIONS O11）。
+    /// "跨进区间的那几条"由 <see cref="AwClient.FetchEventsAsync"/> 自己负责（2026-08-29
+    /// 起它就是"头 + 精确区间"两步走），所以这里不用再自己拼一遍——你可能六个小时前
+    /// 就开着那个窗口没动过，而 AW 只按事件自己的 start 过滤（T1）。
     /// </summary>
     private async Task InitializeMirrorAsync(DateTimeOffset now)
     {
         var from = _mirror.Oldest;
 
-        var win = await _aw.FetchLatestAsync(_winBucket!, 1, before: from);
-        var afk = await _aw.FetchLatestAsync(_afkBucket!, 1, before: from);
-        win.AddRange(await _aw.FetchEventsAsync(_winBucket!, from, now));
-        afk.AddRange(await _aw.FetchEventsAsync(_afkBucket!, from, now));
+        var win = await _aw.FetchEventsAsync(_winBucket!, from, now);
+        var afk = await _aw.FetchEventsAsync(_afkBucket!, from, now);
 
         _mirror.Apply(win, afk, now);
         Log.Info($"Mirror initialized: {AwMirror.Capacity}s ending {now:HH:mm:ss}, " +
