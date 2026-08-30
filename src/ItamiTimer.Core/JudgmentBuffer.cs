@@ -103,9 +103,6 @@ public sealed class JudgmentBuffer
 
     public JudgmentCode this[int index] => _buf[index];
 
-    // Read-only views for tests and the CLI to inspect internals directly
-    public ReadOnlySpan<JudgmentCode> Raw => _buf;
-    public ReadOnlySpan<JudgmentCode> DrawSpan => _buf.AsSpan(PaddingSeconds, DrawSeconds);
 
     /// <summary>Seconds counted as focus so far = the count of codes >= Focused within <c>[180, 7380)</c>. <b>Excludes padding.</b></summary>
     public int FocusedSeconds => CountFocused(PaddingSeconds, TotalSize);

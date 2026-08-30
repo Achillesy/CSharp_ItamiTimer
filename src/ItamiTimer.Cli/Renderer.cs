@@ -20,7 +20,7 @@ public static class Renderer
     /// `DrawSeconds = 7200` 秒 = 120 分钟，而圈号由 `cell.Index / 60` 决定（DESIGN §8.3），
     /// 所以第一行就是外圈、第二行就是内圈，第 N 列就是第 N 格。
     /// </summary>
-    public const int Lap = 60;
+    private const int Lap = 60;
 
     /// <summary>
     /// ⚠️ **这里一个 ANSI 转义码都不许有**（2026-08-30 全部拆掉）。
@@ -56,7 +56,7 @@ public static class Renderer
     /// 按 §3.1 那条知情的 fail-open 算作专注（`AwOffline(5) >= Focused(4)`）。反直觉，
     /// 但那正是设计：拿不出数据是 AW 的错，不该罚用户。
     /// </summary>
-    public static char CellChar(MinuteCell c) => c.Tier switch
+    private static char CellChar(MinuteCell c) => c.Tier switch
     {
         CellTier.FocusFull => 'F',
         CellTier.FocusMid => 'M',
