@@ -37,45 +37,36 @@ DECISIONS.md 有没有这条；有，就先跟用户确认再动；没有，也�
   平台调用一律收口在 `App/Platform/` 的单个文件里。
 - 仓库不放位图和音频；界面文字英文（窗口标题中文是产品名）；`rules.json` 是用户数据
   不翻译。
-- **`itami commands` 的试跑跑的必须是 App 到点时跑的那份代码**：`Command.cs`/`Log.cs`/
-  `AppData.cs` 由 Cli 的 csproj 用 `<Compile Include>` **link** 进去，不是抄一份。
-  抄一份 = CLI 测过了 App 照样能坏（DECISIONS L5），这个工具的意义就没了。
+- **CLI 跑的必须是 App 跑的那份代码**：`Command.cs` / `Log.cs` / `AppData.cs` /
+  `Settings.cs` / `During.cs` 由 Cli 的 csproj 用 `<Compile Include>` **link** 进去，
+  不是抄一份。抄一份 = CLI 测过了 App 照样能坏（DECISIONS L5），这个工具就没意义了。
+  ⚠️ CLI 对 `during.json` **只读**：推进 checkpoint 是界面点 Start 那一刻唯一的写入点
+  （DESIGN §11.2）。
 
 ## ⚠️ 平台验证进度：两边各过了一轮，各自还欠一些
 
-**2.0.x 的无边框透明窗口**（拖表盘移动、右键关窗、记住位置、拖出屏幕自动归位）
-2026-08-08 在 macOS 上验证过一轮了：`WorkingArea`（菜单栏 + Dock 都正确扣除）、位置
-记忆、坐标原点、置顶四条**程序化实测通过**；透明观感和拖动手感只是**人眼简测**；
-命中范围和右键菜单**没专门验证**。逐条状态和依据见 DESIGN §13.1，规格见 §8.7。
+**逐条状态和依据见 DESIGN §13.1 那两张表**，这里只留结论：
 
-**分钟序列（DESIGN §9.2）在 Windows 上**：编译、134 个单元测试、`itami commands --list`
-✅ 都过了；**`shutdown /s /t 0` 的 `await` 行为和 winmm 截断顺序仍未验证**（前者不打算
-直接测——那条命令真的会关机）。逐条见 DESIGN §13.1 末尾那张表。
+| | 已程序化实测 | 只人眼简测 / 没验 |
+|---|---|---|
+| macOS 无边框透明窗口（§8.7） | `WorkingArea` 扣除、位置记忆、坐标原点、置顶 | 透明观感、拖动手感（人眼）；命中范围、右键菜单（没验） |
+| Windows 分钟序列（§9.2） | 编译、170 个单测、`itami commands --list` | `shutdown /s /t 0` 的 `await` 行为、winmm 截断顺序（前者不打算测——那条命令真会关机） |
+| macOS 闹钟执行（§9.3） | 两条执行路的输出收集、`Preview` 与执行同源、卡片顺序 | 测法是临时探针直接调 `LaunchDetached`，**没走 `OnMinute` 第 ④ 步、没开过真实窗口** |
 
-**2.2.4 起两个平台统一：都是 `Command.LaunchDetached` 直接跑命令、不开任何窗口、输出
-收进 `itami.log`**（DESIGN §9.3、DECISIONS L26/L29）。中途 Windows 单独走过"起一个控制台
-窗口跑 `itami commands --execute --yes`"（2.2.0~2.2.3），唯一理由是 `shutdown /h` 绕过
-管道只讲给控制台听（L17）；**后来把范围测清楚了**——同样重定向下 `shutdown /?`/`/x` 的
-4390 字节帮助文本照样抓得到，命令不存在、路径不存在也都有 stderr，**只有 `/h`「休眠未
-启用」这一条分支既不吐字节、退出码还是 0**。为一个罕见分支每次到点闪黑窗不划算。
-⚠️ **代价**：那类失败在日志里只剩 `exited with 0`，诊断手段是**终端里跑
-`itami commands --execute`**（有真控制台就看得见）。
-⚠️ **`BuildShell` 里 `CreateNoWindow = redirect`，两个值都是实测定的，别图省事改成常量**：
-App 那条路（重定向）不设它，Windows 会给子进程新建控制台窗口、黑窗回来；CLI 那条路
-（不重定向）设了它**子进程输出会整个消失**（实测退出码收得到、一个字都没有），
-而那正是唯一的诊断手段。
-⚠️ macOS 侧已知代价（L26）：Apple 事件授权记在 ItamiTimer 头上而它不在自动化列表里，
-所以 `osascript ... System Events` 那几条第一次会弹授权框。
-**2.2.4/2.3.0 是在 Windows 上写的、Windows 上测的**；2026-08-09 在 macOS 补了一轮：
-两条执行路的输出收集、`Preview` 与执行同源、Settings 卡片顺序都**程序化实测通过**，
-但**测法是临时探针直接调 `LaunchDetached`，没走 `OnMinute` 第 ④ 步、没开过真实窗口**
-——逐条状态见 DESIGN §13.1 末尾那张表，别把它当成"真闹钟到点验过了"。
+**执行命令的当前形态**（DESIGN §9.3、DECISIONS L26/L29）：两个平台都是
+`Command.LaunchDetached` 直接跑、不开任何窗口、输出收进 `itami.log`。三条不许动的：
 
-⚠️ 2.0.8/2.0.9 重排了分钟序列（最终顺序：① 提示条到期收起 ② AW 查询+判定+三声通知
-③ Alarms 清单 ④ 闹钟判断+执行命令/响铃；DESIGN §9.2、DECISIONS L13，推翻了 L9）：
-原来"命令优先 + `await`"的保护完全依赖"关机会把进程杀掉，后面几步不会执行"，而那
-**只在 macOS 成立**；Windows 的 `shutdown` 提交请求就返回，后面的 AW 查询照跑。
-2.2.0 之后 App 根本不等命令，这条依赖已经不存在了。
+- ⚠️ **`BuildShell` 里 `CreateNoWindow = redirect`，两个值都是实测定的，别改成常量**：
+  App 那条路（重定向）不设它，Windows 会给子进程新建控制台窗口、黑窗回来；CLI 那条路
+  （不重定向）设了它**子进程输出会整个消失**（实测退出码收得到、一个字都没有）。
+- ⚠️ **知情代价**：`shutdown /h`「休眠未启用」是唯一一条既不吐字节、退出码还是 0 的
+  失败分支，日志里只剩 `exited with 0`。**诊断手段是终端里跑 `itami commands --execute`**
+  ——有真控制台就看得见。这也是 `commands` 子命令承重的原因，别砍它。
+- ⚠️ **macOS**：Apple 事件授权记在 ItamiTimer 头上而它不在自动化列表里，
+  `osascript ... System Events` 那几条第一次会弹授权框。
+
+**分钟序列的顺序是定死的**：① 提示条到期收起 ② AW 查询 + 判定 + 三声通知
+③ Alarms 清单 ④ 闹钟判断 + 执行命令/响铃 ⑤ 骨牌核对星期（DESIGN §9.2、DECISIONS L13）。
 
 **两边都别把编译通过当验证通过**——这个项目正是在「照文档推断 → 编译通过 → 功能
 安静失效」上栽过好几次（H12 的滚轮 `Delta/120`、L1 的命令引号）。

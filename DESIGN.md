@@ -1,10 +1,7 @@
 # ItamiTimer（一袋米要扛几楼）—— 系统设计
 
-> **本文是唯一的设计文档**：当前实现的系统设计 + 待办需求 + 已知 Bug。
-> 原 `ISSUE.md`（需求清单）和 `ISSUE_FIX.md`（实施记录）已于 2026-08-02 并入本文。
->
-> §3 / §4 是 2026-08-02 定稿的**第二版判定引擎**，Core / CLI / 界面层**全部已落地**，
-> 拿真实 AW 历史干跑验证过、样张也重新渲染过。剩下的事见 §4.8——**实机验证还没做**。
+> **本文是唯一的设计文档**：第一部分是当前实现的系统设计，第二部分是已知 Bug，
+> 第三部分是待办需求。**已经解决的条目只留一行结论**——过程在 git 里。
 >
 > 配套：[`DECISIONS.md`](./DECISIONS.md) 护栏清单（被推翻的方案、知情接受的代价、
 > 「不要翻案」）；[`README.md`](./README.md) 英文对外介绍；[`CLAUDE.md`](./CLAUDE.md) 工作规则。
@@ -99,9 +96,8 @@ Radio（2026-07-31 由多选 CheckBox 改），Start 之后锁定不可改——
 
 ## 4. 判定引擎（第二版，2026-08-02 定稿）
 
-> 第一版（`Judgment.ClassifySeconds` 逐秒查找）的三个 Bug ——休息起点回退、
-> `IsFocusComplete` 与 `FocusCompletedAt` 口径分裂、承诺弧另算一套——在这一版里
-> **是被消解的，不是被修补的**。落地进度见 §4.8。
+> 第一版逐秒查找留下的三个 Bug——休息起点回退、`IsFocusComplete` 与 `FocusCompletedAt`
+> 口径分裂、承诺弧另算一套——在这一版里**是被消解的，不是被修补的**。
 
 ### 4.1 存储
 
@@ -295,99 +291,6 @@ nFocus == 0  →  在 Init / Gray / Afk / OffTask 里取【计数最大】的那
   代价如实记：`> 40` 意味着**偷懒 19 秒仍然满绿满高**，短板在 41~60 这一段看不出来。
 - **色块只为好看，不是账**（用户 2026-08-02）。真正参与判定的只有 §4.5 那个缺口 `D`，
   染色怎么分档都不影响任务什么时候完成。
-
-### 4.7 这一版消掉了什么
-
-| 原来要处理的 | 现在 |
-|---|---|
-| 每秒两次线性扫描（240 秒 × 上千条事件） | 每条事件画一次自己的区间，O(事件数) |
-| T4 零时长事件桥接 | 不需要（§4.3 的注） |
-| 一秒多条事件的 tie-break | 覆盖顺序自动决定 |
-| afk 优先级 | 覆盖顺序自动决定 |
-| AW 连不上的兜底路径 | = 空事件列表，无分支 |
-| 点采样的亚秒相位漂移 | 锚整分钟，消失 |
-| `FocusCompletedAt()` 回溯推导 | 删除，达成 = `D ≤ 0` 的那一拍 |
-| 承诺弧另算一套（`RemainingMinutes`） | 删除，数 buffer 里的 `Gray` 即可 |
-| 休息起点被追溯消费（§15.1） | 消失 |
-
-### 4.8 落地进度
-
-**Core 已完成**（2026-08-02，`dotnet test` 全绿，`itami bench` 已跑通）：
-
-| | 内容 | 落点 |
-|---|---|---|
-| ✅ | 码值改成 `enum JudgmentCode : byte`，判定一律写 `>= Focused` | `JudgmentCode.cs` |
-| ✅ | 逐秒查找 → 分层覆盖；`ClassifySeconds` / `CoveringAt` / `AwOfflineFallback` 删除 | `Judgment.Paint` |
-| ✅ | 查询区间与写入偏移锚到整分钟 | `JudgmentBuffer.Cover` |
-| ✅ | 初始化范围用水位线，并在窗口边界切一刀（§4.3 第 3 条） | 同上 |
-| ✅ | 归档结算范围 `[0,3600)` → `[180,3780)`（§15.5） | `JudgmentBuffer.Archive` |
-| ✅ | 睡眠越界不再冻死：先滚动到这一拍落得进 buffer（§15.6） | `JudgmentBuffer.Cover` |
-| ✅ | 达成 = 缺口 ≤ 0 的那一拍；`FocusCompletedAt()` 删除 | `TickOutcome` |
-| ✅ | `Gray` 每拍重算，构造函数复用同一套算法 | `JudgmentBuffer.RefreshGray` |
-| ✅ | `RestMinutes` 改成 `⌈f/5⌉`，测试覆盖 1~120 每个整数 | `TaskRecord` / `TaskRecordTests` |
-| ✅ | `TaskSession.RemainingMinutes` 那套算式删除，改读缺口 | `TaskSession` |
-| ✅ | `MinuteCell` 多带一个 `GraySeconds`，Gray 与 Init 分得开 | `MinuteCell` |
-| ✅ | 新引擎的第一批单元测试（16 条不变量） | `JudgmentBufferTests` |
-
-**CLI 与账本也已完成**（2026-08-02 第二批）：
-
-| | 内容 | 落点 |
-|---|---|---|
-| ✅ | `during.json` 落盘 | `During.cs` |
-| ⛔ | ~~归档当场入账（`Settled` 事件）；终结时幂等地取走剩余~~ | 2026-08-06 整套删除，见 §11.2 |
-| ⛔ | ~~关窗口（专注中确认放弃 / 休息中直接关）也记账~~ | 同上：终结路径不再记账 |
-| ✅ | `Settings.DuringByGroup`、`GoalGroup.AccumulatedSeconds` 两个死字段删除 | — |
-| ✅ | `itami start` / `itami replay` 迁到新引擎，跟实机**同一个引擎、同一个节拍** | `Cli/Program.cs` |
-| ✅ | `Replay.cs` / `TaskState.cs` 及其 5 个测试文件删除 | — |
-| ✅ | 拿 07-27 的真实 AW 历史干跑验证通过（90 分钟 → 8.1 分钟专注 / 52.6 偷懒 / 29.3 离开） | — |
-
-**界面层也已完成**（2026-08-02 第三批）：
-
-| | 内容 | 落点 |
-|---|---|---|
-| ✅ | `Lanes[2]` 删除，螺旋只剩两圈 | `DialControl` |
-| ✅ | 染色按 §4.6 重写：三档 + argmax，`Afk` 画虚线空心框（D3 翻案） | `DialControl.DrawRing` |
-| ✅ | 承诺弧不再单独算——`DrawPendingArc` 和 `RemainingMinutes` 全删，画的就是 Gray 格子 | `DialControl` / `TaskSession` |
-| ✅ | 点 Start 那一刻盘面就有灰弧：构造 buffer 时就铺好了，投影一次即可 | `TaskSession` 构造函数 |
-| ✅ | 滑块量程分构建配置：axaml 写**正式**量程，Debug 在代码里覆盖 | `MainWindow.ApplySliderRange` |
-| ✅ | `--dial-specimens` 十张样张重新渲染，四种结局都可辨 | — |
-
-**全面体检**（2026-08-02，publish 之前）：
-
-| | 内容 |
-|---|---|
-| ✅ | `README.md` **整篇重写**——原来还在讲退化模式、多选 checkbox、`ignore` 名单、「中途补勾追溯生效」、50 分钟上限、tomato icon，全是早已删掉的东西（§15.8） |
-| ✅ | `CLAUDE.md` 清掉两条作废约束（「没装 AW 退化成番茄钟」、「`Neutral` 计入 / 看 `PomodoroFallbackTests`」——那个测试文件早删了），补上 **Avalonia 规则** |
-| ✅ | `GroupRules.Classify` + `IntervalKind` 删除——**只剩测试在用**，生产路径走 `GroupMatches`。`GroupRulesTests` 改成直接守 `GroupMatches`，守的东西没少、守的对象变成真在跑的那个 |
-| ✅ | `TimeGrid.CeilToMinute` 删除——同上，只剩自己的测试在用；A6 那条「为什么选截断」的理由搬进 `FloorToMinute` 的注释 |
-| ✅ | 类注释除锈：`MainWindow` 那张「置顶弹出 / 收进任务栏」的可见状态表（C1 早就砍了）、`TaskState` 的失效 `cref`、`AwClient` 里对 `FocusCompletedAt` 的引用、`GroupRules` 里对 `ISSUE_FIX` 的引用 |
-| ✅ | 端到端回归：`bench` / `replay`（真实 AW 历史）/ `--dial-specimens` 三条路全跑通 |
-
-⚠️ 回归时抓到一个**刚引入的**精度丢失：`MinuteCell` 从 `double` 改成 `int` 之后，
-CLI 账单里的 `off / 60` 变成了**整数除法**，`52.6 min` 悄悄打成 `52.0 min`。
-数字还在、还像模像样，只是小数位没了——**只有拿改动前的输出逐字对比才看得出来**。
-已改成 `/ 60.0`。教训归档在 DECISIONS G。
-
-**还没做**：
-
-1. ~~`MinuteCell` 的过渡形状~~ —— 2026-08-02 收拾完：五个整数计数
-   （`FocusSeconds` / `OffTaskSeconds` / `AfkSeconds` / `GraySeconds` / `InitSeconds`），
-   跟 §3 的码表一一对应，加起来恒为 60。顺带删掉两个**零引用**的遗物：
-   `Purity` 和 `TotalSeconds`——它们是 D1 那套连续纯度编码的残留，第二版染色改成
-   三档 + argmax 之后就没人用了。类注释也重写了（原来还在讲已删除的 `Replay`
-   和「末格可能不足 60 秒」）。
-2. ~~测试净减少~~ —— 2026-08-02 补齐：新增 `JudgmentBufferBoundaryTests`（12 条），
-   把删掉的 `BoundaryTests` / `CheckpointCatchUpTests` 守的**问题**搬了过来
-   （跨整点与午夜、漏拍追赶、buffer 尽头裁剪、多次归档、长事件跨窗口、padding 不计入、
-   afk 收缩让弧末端前移）。Core 现在 64 条。
-
-   其中「归档只结算任务开始之后的那一小时」是**做过变异测试**的：把结算范围改回
-   `[0, 3600)`，它当场变红（3600 → 3540）。原来那条同名断言抓不到——测试里整个 buffer
-   都是专注，两种写法算出来一样。**护栏要能守住才算护栏**，写完顺手把 bug 塞回去
-   验一次很便宜。
-3. 实机验证还没做——要用户点头才 publish（CLAUDE.md：只编译 Debug）。
-4. ~~§15.2（Give Up 后按钮不恢复）没动~~——**这条写完之后才修的，已经过期**：
-   `RefreshGoalItems` 现在只改 `.Text`，控件树只在 `LoadRules` 建一次，见 §15.2。
 
 ## 5. 规则文件 `rules.json`
 
@@ -700,6 +603,20 @@ T1 说 AW **只按事件自己的开始时刻过滤**，不按区间相交——
   **外加 `OnMinute` 分钟节拍第 ⑤ 步每分钟核对一次**（2026-08-13，取代"只在启动/Start
   时查"，DECISIONS D12：故意保留的"跨午夜不刷新"神秘感被用户直接否掉）。
 
+### 8.3 只有两圈，以及每小时一次的「塌缩」
+
+buffer 的 7200 秒绘制区**不是内存考虑，是画图考虑**：钟面一圈 60 分钟，螺旋只留两圈，
+所以能画的就是 120 分钟。原来写的「螺旋三圈、lane 2 [0.14,0.26]」是**够不到的**
+——`ToMinuteCells` 最多吐 120 格，`Index/60` 最大是 1。`Lanes[2]` 删掉。
+
+于是归档（§4.4）在盘面上的表现是：**内圈的内容整体跳到外圈、内圈清空**，记录长度从
+两小时缩回一小时。**第一次发生在满 2 小时，之后每 1 小时一次**（归档后 `ElapsedSeconds`
+回到 3600）。
+
+这不是 bug，是「1 小时前放弃又重开」那个语义的直接后果，用户 2026-08-02 知情接受：
+**归档存在的理由本来就是让盘面永远只画最近的一到两小时**。所以圈号就该跟 buffer 位置
+绑定（`cell.Index / 60`），归档后跟着外移一圈是对的，不要去「修」它。
+
 ### 8.7 窗口本身：无边框 + 透明背景（2.0.0 起）
 
 **这一节讲的是表盘周围那一圈"窗子"，不是表盘内容。** 决策依据在 DECISIONS K 节，
@@ -790,13 +707,7 @@ Give Up 确认框一起白拿，两张 ThemeDictionaries 也是按这个变体�
 让 DIP 和物理像素不是一回事，只能试）。现在下排跟上排用完全相同的结构——同一个 Horizontal
 `StackPanel`、`Spacing="2"`、右边距 `-4`——两列是**几何上精确**对齐的，不再靠试。
 
-### 8.9 跑偏时钟面一秒一翻（3.1.0 初版，3.2.0 撤下，3.3.0 基于镜像重做）
-
-> **改过一版**：3.1.0 是"每 5 秒查一次 AW、看那 5 秒里有没有跑偏"，用户装机实测后判定
-> **"5 秒一次的反转对视觉的影响太小"**，3.2.0 整个删掉。3.3.0 在内存镜像（§7.5）之上
-> 重做，判据缩成一句话，而且**一次额外的 AW 查询都不需要**。翻哪几个色号、为什么色环
-> 不能跟着翻、为什么 AW 挂了不能反色——这几条从初版原样保留。
-
+### 8.9 跑偏时钟面一秒一翻（3.3.0）
 
 专注期间跑偏时，**钟面每秒在两档之间来回翻**——黑、白、黑、白，一直闪到你回来；
 不跑偏就是用户自己设的那一档。不弹窗、不出声——跟表盘上的红格和越滑越远的截止弧
@@ -855,20 +766,6 @@ watcher 死了但服务还在 → 镜像里也全是 `AwOffline` → 同样不�
 （§7.5），所以你切到别的窗口后，AW 要 **3~10 秒**才吐出这条新事件；在那之前镜像的预测说
 的是"你还在旧窗口"。改这边的任何参数都突破不了这个下限。
 
-### 8.3 只有两圈，以及每小时一次的「塌缩」
-
-buffer 的 7200 秒绘制区**不是内存考虑，是画图考虑**：钟面一圈 60 分钟，螺旋只留两圈，
-所以能画的就是 120 分钟。原来写的「螺旋三圈、lane 2 [0.14,0.26]」是**够不到的**
-——`ToMinuteCells` 最多吐 120 格，`Index/60` 最大是 1。`Lanes[2]` 删掉。
-
-于是归档（§4.4）在盘面上的表现是：**内圈的内容整体跳到外圈、内圈清空**，记录长度从
-两小时缩回一小时。**第一次发生在满 2 小时，之后每 1 小时一次**（归档后 `ElapsedSeconds`
-回到 3600）。
-
-这不是 bug，是「1 小时前放弃又重开」那个语义的直接后果，用户 2026-08-02 知情接受：
-**归档存在的理由本来就是让盘面永远只画最近的一到两小时**。所以圈号就该跟 buffer 位置
-绑定（`cell.Index / 60`），归档后跟着外移一圈是对的，不要去「修」它。
-
 ## 9. 闹钟、Command 与 Alarms 清单
 
 表盘即输入设备：**在钟面上滚滚轮**调闹钟，没有独立按钮，左右键点击刻意留白。
@@ -905,83 +802,6 @@ buffer 的 7200 秒绘制区**不是内存考虑，是画图考虑**：钟面一
   界面上不加选择器。三个模式互不重叠——`--list` 只看（`*` 标出 #0）、`--select [N]` 只改
   文件、`--execute [--yes]` 只跑 #0 且**不带下标**（想试别的先 `--select` 成 #0）。这样
   "试的那条"和"闹钟真会跑的那条"在设计上就是同一条。执行细节见 §9.3。
-
-### 9.3 命令怎么被执行：两个平台同一条路（2.2.4，DECISIONS L17/L21/L25~L29）
-
-到点且 Execute 开着时，**两个平台都走 `Command.LaunchDetached`**：直接把命令跑起来、
-**起完就返回**，输出交给后台任务收进 `itami.log`。**不起任何窗口。**
-
-```
-分钟序列第 ④ 步 → LaunchDetached
-    ├─ 现读 rules.json，取 #0（刚 --select 换过的立刻生效，不用重启）
-    ├─ Process.Start(cmd.exe /c … | /bin/sh -c …)   ← 解释器两边各自沿用，见下
-    └─ 立刻 return；后台 Task 并发读两个流、等退出、写日志
-```
-
-**中途存在过一版"Windows 另开一个控制台窗口"**（2.2.0~2.2.3），唯一理由是
-`shutdown /h` 在休眠被禁用时**退出码 0、stdout 空、stderr 空、机器纹丝不动**——那句
-"此系统上没有启用休眠 (126)"只讲给控制台听（L17）。2026-08-09 把这个现象的**范围**
-测清楚之后推翻了（L29）：
-
-| 命令（`cmd /c`，两个流都重定向） | 退出码 | stdout | stderr |
-|---|---|---|---|
-| `shutdown /h`（真失败） | **0** | **0 B** | **0 B** |
-| `shutdown /?` | 1 | 4390 B | 0 |
-| `shutdown /x`（无效参数） | 1 | 4390 B | 0 |
-| `nosuchcommand123` | 1 | 0 | 107 B |
-| `dir C:\不存在的路径` | 1 | 91 B | 16 B |
-
-**不是"Windows 的失败信息普遍绕过管道"，是一条命令的一个分支**——`shutdown.exe` 连
-4390 字节的帮助文本都老实走 stdout。为这一个罕见分支让每次到点都闪一个黑窗、还多养
-一条平台专有代码，不划算。macOS 侧本来就没有这个病（`pmset -x` → stdout、
-`shutdown`（非 root）/ `open /nonexistent` / 找不到的命令 → stderr，**没有一条是两个流
-都空的**）。
-
-⚠️ **知情接受的代价**：`shutdown /h` 那一类失败在 App 日志里只剩 `exited with 0`。
-**诊断手段是在真实终端里跑 `itami commands --execute`**——那里有真控制台，那句话就出来
-了。**四份 README 都写了这条指引**（`README.md` / `README_ZH.md` / `installer/README.txt`
-/ `pack-macos.sh` 里那段进 .dmg 的 heredoc——第四份漏过一次，见 DECISIONS L30）。
-
-**几条不能动的实现细节**：
-
-- **命令解释器一个字没改**：`cmd.exe /c`（Windows）/ `sh -c`（Unix），`rules.json` 里
-  所有既有条目语义不变（`start notepad` 照旧是 cmd 的内建 `start`），L1/L2 那两条引号
-  护栏继续有效，`CommandQuotingTests` 不用重写（L21）。中途认真考虑过换成默认 shell
-  （PowerShell/zsh），代价是重新解释用户所有既有条目——**能不能看见输出跟解释器是谁
-  无关**，这两件事被混为一谈过一次。
-- ⚠️ **`CreateNoWindow` 必须跟着 `redirect` 走，不能无条件设 `true`**（L29，2026-08-09
-  实测）：
-  - App 那条路（`redirect: true`）**必须设**——App 是 GUI 进程、自己没有控制台，
-    `UseShellExecute = false` 起 `cmd.exe` 时 Windows 会**给子进程新建一个控制台窗口**，
-    正是这次要消掉的那个黑窗。
-  - CLI 那条路（`redirect: false`）**绝不能设**——实测 `echo HELLO && dir C:\不存在`：
-    设了之后**退出码 1 收得到、输出一个字都没有**；不设则 `HELLO`、目录清单、
-    `File Not Found` 全在。而 CLI 的全部意义就是让输出落在真控制台上，设上去等于
-    **把本节唯一的诊断手段废掉**。
-- ⚠️ **后台收尾必须 `Task.WhenAll` 并发读两个流**（L27）：串行读（先读完 stdout 再读
-  stderr）在 300KB stderr 下 **macOS 实测必死锁**；Windows 的管道缓冲区更小（约 4KB
-  vs 64KB），**只会更容易撞上**。`redirect: false` 的 CLI 那条路没有管道，不受影响。
-- **卡住时只记一行，不杀进程**：60 秒后日志出现 `still running`。命令合法地跑很久
-  （关机流程）跟卡在权限框上，从外面分辨不了，杀错了比等着糟。
-- **绝不 await**：分钟序列调完立刻往下走，命令挂死也只是线程池里停着一个任务。
-  L14 那套"分钟边界取消"因此整个删掉；`_minuteBusy` 保留，但它守的只剩 AW 查询
-  （本来就有 10 秒超时）。
-
-**职责边界**：
-
-| 谁 | 负责什么 | 不负责什么 |
-|---|---|---|
-| App | 把命令起起来；`Process.Start` 抛异常时记 Error（**这是唯一还能真判断的失败**）；后台收输出写日志 | 命令跑没跑成——退出码在 `shutdown /h` 上就是撒谎的（L17） |
-| `itami commands --execute` | 读 rules.json、跑 #0、**输出留在真控制台上** | 窗口活多久（`itami` 自己永远不停顿，L20） |
-
-**`--yes`**：`--execute` 默认先打印要跑什么再等 y/N（清单里躺着 shut down / restart）。
-L29 之后 App 不再调用 CLI，所以 `--yes` 只剩"手动跑时跳过确认"这一个用途。
-
-**CLI 仍然跟 App 一起装**（L22/L23/L25a）：两个打包脚本各多 publish 一次 CLI 到同一个
-目录，App 的 csproj 用 `ProjectReference ReferenceOutputAssembly="false"` + 拷贝 target
-让 `bin\Debug` 的布局跟安装目录一致。**L29 之后这不再是"不装就坏"**——App 到点已经不
-调用 CLI 了——**而是"装了用户才有诊断手段"**：上面那条"命令看着没生效就去终端里跑
-`itami commands --execute`"的指引，得有那个 exe 才成立。
 
 ### 9.1 Alarms 清单（1.2.0，DECISIONS J）
 
@@ -1104,6 +924,83 @@ L29 之后 App 不再调用 CLI，所以 `--yes` 只剩"手动跑时跳过确认
 `RestMinutes` 是整数，`done + rest` 必然落在整分钟上，按分钟判断"休息结束了没有"跟
 按秒判断**结果完全一样**，一秒都不会晚。
 
+### 9.3 命令怎么被执行：两个平台同一条路（2.2.4，DECISIONS L17/L21/L25~L29）
+
+到点且 Execute 开着时，**两个平台都走 `Command.LaunchDetached`**：直接把命令跑起来、
+**起完就返回**，输出交给后台任务收进 `itami.log`。**不起任何窗口。**
+
+```
+分钟序列第 ④ 步 → LaunchDetached
+    ├─ 现读 rules.json，取 #0（刚 --select 换过的立刻生效，不用重启）
+    ├─ Process.Start(cmd.exe /c … | /bin/sh -c …)   ← 解释器两边各自沿用，见下
+    └─ 立刻 return；后台 Task 并发读两个流、等退出、写日志
+```
+
+**中途存在过一版"Windows 另开一个控制台窗口"**（2.2.0~2.2.3），唯一理由是
+`shutdown /h` 在休眠被禁用时**退出码 0、stdout 空、stderr 空、机器纹丝不动**——那句
+"此系统上没有启用休眠 (126)"只讲给控制台听（L17）。2026-08-09 把这个现象的**范围**
+测清楚之后推翻了（L29）：
+
+| 命令（`cmd /c`，两个流都重定向） | 退出码 | stdout | stderr |
+|---|---|---|---|
+| `shutdown /h`（真失败） | **0** | **0 B** | **0 B** |
+| `shutdown /?` | 1 | 4390 B | 0 |
+| `shutdown /x`（无效参数） | 1 | 4390 B | 0 |
+| `nosuchcommand123` | 1 | 0 | 107 B |
+| `dir C:\不存在的路径` | 1 | 91 B | 16 B |
+
+**不是"Windows 的失败信息普遍绕过管道"，是一条命令的一个分支**——`shutdown.exe` 连
+4390 字节的帮助文本都老实走 stdout。为这一个罕见分支让每次到点都闪一个黑窗、还多养
+一条平台专有代码，不划算。macOS 侧本来就没有这个病（`pmset -x` → stdout、
+`shutdown`（非 root）/ `open /nonexistent` / 找不到的命令 → stderr，**没有一条是两个流
+都空的**）。
+
+⚠️ **知情接受的代价**：`shutdown /h` 那一类失败在 App 日志里只剩 `exited with 0`。
+**诊断手段是在真实终端里跑 `itami commands --execute`**——那里有真控制台，那句话就出来
+了。**四份 README 都写了这条指引**（`README.md` / `README_ZH.md` / `installer/README.txt`
+/ `pack-macos.sh` 里那段进 .dmg 的 heredoc——第四份漏过一次，见 DECISIONS L30）。
+
+**几条不能动的实现细节**：
+
+- **命令解释器一个字没改**：`cmd.exe /c`（Windows）/ `sh -c`（Unix），`rules.json` 里
+  所有既有条目语义不变（`start notepad` 照旧是 cmd 的内建 `start`），L1/L2 那两条引号
+  护栏继续有效，`CommandQuotingTests` 不用重写（L21）。中途认真考虑过换成默认 shell
+  （PowerShell/zsh），代价是重新解释用户所有既有条目——**能不能看见输出跟解释器是谁
+  无关**，这两件事被混为一谈过一次。
+- ⚠️ **`CreateNoWindow` 必须跟着 `redirect` 走，不能无条件设 `true`**（L29，2026-08-09
+  实测）：
+  - App 那条路（`redirect: true`）**必须设**——App 是 GUI 进程、自己没有控制台，
+    `UseShellExecute = false` 起 `cmd.exe` 时 Windows 会**给子进程新建一个控制台窗口**，
+    正是这次要消掉的那个黑窗。
+  - CLI 那条路（`redirect: false`）**绝不能设**——实测 `echo HELLO && dir C:\不存在`：
+    设了之后**退出码 1 收得到、输出一个字都没有**；不设则 `HELLO`、目录清单、
+    `File Not Found` 全在。而 CLI 的全部意义就是让输出落在真控制台上，设上去等于
+    **把本节唯一的诊断手段废掉**。
+- ⚠️ **后台收尾必须 `Task.WhenAll` 并发读两个流**（L27）：串行读（先读完 stdout 再读
+  stderr）在 300KB stderr 下 **macOS 实测必死锁**；Windows 的管道缓冲区更小（约 4KB
+  vs 64KB），**只会更容易撞上**。`redirect: false` 的 CLI 那条路没有管道，不受影响。
+- **卡住时只记一行，不杀进程**：60 秒后日志出现 `still running`。命令合法地跑很久
+  （关机流程）跟卡在权限框上，从外面分辨不了，杀错了比等着糟。
+- **绝不 await**：分钟序列调完立刻往下走，命令挂死也只是线程池里停着一个任务。
+  L14 那套"分钟边界取消"因此整个删掉；`_minuteBusy` 保留，但它守的只剩 AW 查询
+  （本来就有 10 秒超时）。
+
+**职责边界**：
+
+| 谁 | 负责什么 | 不负责什么 |
+|---|---|---|
+| App | 把命令起起来；`Process.Start` 抛异常时记 Error（**这是唯一还能真判断的失败**）；后台收输出写日志 | 命令跑没跑成——退出码在 `shutdown /h` 上就是撒谎的（L17） |
+| `itami commands --execute` | 读 rules.json、跑 #0、**输出留在真控制台上** | 窗口活多久（`itami` 自己永远不停顿，L20） |
+
+**`--yes`**：`--execute` 默认先打印要跑什么再等 y/N（清单里躺着 shut down / restart）。
+L29 之后 App 不再调用 CLI，所以 `--yes` 只剩"手动跑时跳过确认"这一个用途。
+
+**CLI 仍然跟 App 一起装**（L22/L23/L25a）：两个打包脚本各多 publish 一次 CLI 到同一个
+目录，App 的 csproj 用 `ProjectReference ReferenceOutputAssembly="false"` + 拷贝 target
+让 `bin\Debug` 的布局跟安装目录一致。**L29 之后这不再是"不装就坏"**——App 到点已经不
+调用 CLI 了——**而是"装了用户才有诊断手段"**：上面那条"命令看着没生效就去终端里跑
+`itami commands --execute`"的指引，得有那个 exe 才成立。
+
 ## 10. 声音
 
 **只用系统自带的音，不打包音频资源**。Windows 枚举 `C:\Windows\Media\*.wav` 走 winmm；
@@ -1129,7 +1026,7 @@ macOS 三级枚举 `*.aiff` 走 AudioToolbox。找不到、放不出一律安静
   喇叭图标隐藏、滴答**无条件**响，专注/休息期间也不例外——这就是"force"的字面意思，
   不再有任何静音例外（2026-08-13 用户推翻旧决策，见 DECISIONS C6）。
 - **关（默认）时，滴答就是"你走神了，回来"这句提醒**（2026-08-29 用户推翻 C7/C8，
-  见 DECISIONS C9）：喇叭图标照旧手动开关（`TickEnabled` 关着就永远不响，人为选择
+  见 DECISIONS C10）：喇叭图标照旧手动开关（`TickEnabled` 关着就永远不响，人为选择
   优先级最高，没有任何情况能覆盖）；开着时**跟钟面的闪烁共用同一个判据**——
   镜像里上一秒是 `OffTask`，就既闪又响（§8.9）。
 
@@ -1376,7 +1273,7 @@ fire-and-forget；后者才是每次启动都走的路径。
 
 ```
 src/ItamiTimer.Core/   net10.0  判定与投影。无 UI、无平台调用（csproj 强制）
-src/ItamiTimer.Cli/    net10.0  itami：start / replay / bench，真实或合成数据干跑
+src/ItamiTimer.Cli/    net10.0  itami：start / backfill / commands，跟界面共用 Core
 src/ItamiTimer.App/    net10.0  Avalonia 界面
   ├── Platform/        平台差异每处收口在单个文件，没有散落的 #if
   └── Drawing/         表盘、骨牌、图标——全部矢量计算
@@ -1384,8 +1281,13 @@ tests/                 xUnit
 ```
 
 Core 的关键类型：`JudgmentBuffer`（秒级存储 + 覆盖/归档/承诺弧）、`Judgment`（分层覆盖，纯函数）、
-`GroupRules`（规则编译与匹配）、`AwClient`（唯一碰网络的地方）、`TaskRecord`、
+`AwMirror` + `MirrorFeed`（区间事件摊平成每秒一个判定，§7.5）、`GroupRules`（规则编译与匹配）、
+`AwClient`（唯一碰网络的地方）、`OffTaskAttribution`、`AlarmsList`、`TaskRecord`、
 `MinuteCell`（渲染契约）、`TimeGrid`。
+
+**数据路只有一条**：`AwClient` → `MirrorFeed` → `AwMirror` → `Judgment.Paint` →
+`JudgmentBuffer` → `MinuteCell`。界面和 `itami` 挂在同一条路的末端，**谁也不许自己
+再走一遍**（§15.7 那次事故的形状）。
 
 **两条改错不报错、只把账算错的身份标识**：`App.axaml` 的 `Name="ItamiTimer"`、
 csproj 的 `AssemblyName=ItamiTimer`。macOS 上 AW 报的 `data.app` 就是前者。
@@ -1507,227 +1409,71 @@ Microsoft.WindowsDesktop.App` 有没有 `10.*` 子目录，没有就提示用户
 
 # 第二部分 · 已知 Bug
 
-## 15.1 ✅ 休息起点落在过去，短任务下休息被吃光（2026-08-02 由第二版引擎消解）
+> **编号是地址**：代码注释和 `DECISIONS.md` 里到处引用 `§15.x`，所以已修的条目保留
+> 编号、只留一行结论。过程在 git 里。
 
-**现象**：17:05 的计时点发现专注达成，但休息像是从 **17:04** 开始的；`RestMinutes`
-只有 1 分钟时休息实际为 0，扇形一闪而过甚至根本看不见。
+## 已修（存档）
 
-**根因**（原文写的机制是错的，一并订正）：原文说「17:04 那一格末尾几秒还是 `Init`
-（不计入）」——查不到窗口事件的秒在第一版里判 `AwOffline` 且**计入**，那几秒是白送的，
-不是少算的。真正能让「跨过阈值的那一格」往回退的是另外三条：
+| | 现象 | 结局 |
+|---|---|---|
+| 15.1 | 休息起点落在过去，短任务下休息被吃光 | 第二版引擎消解（§4）。真正的成因是 afk 回填/收缩让跨阈值那一格后退，不是原文写的「末尾几秒不计入」 |
+| 15.2 | Give Up 后按钮不恢复 `Start` | 已修：`RefreshGoalItems` 只改 `.Text`，控件树只在 `LoadRules` 建一次 |
+| 15.3 | `duringByGroup` 未持久化 | 整套删除，改成 checkpoint 模型（§11.2） |
+| 15.5 | 归档的结算范围偏了 180 秒 | `[0,3600)` → `[180,3780)`。**做过变异测试**：改回去当场变红（3600 → 3540） |
+| 15.6 | 机器睡眠超过 2 小时 3 分 → 会话永久冻死 | `JudgmentBuffer.Cover` 先滚动到这一拍落得进 buffer |
+| 15.8 | `README.md` 严重过时 | 整篇重写。四份面向用户的说明书要一起改，见 CLAUDE.md |
+| 15.9 | `IconExport` 被清理误删，`pack-macos.sh` 跑不通 | 恢复。**`TomatoIcon.Render` / `IconExport` 绝不能删**——`.ico` 和 `.icns` 的唯一来源（DECISIONS D11） |
 
-1. **afk 回填/收缩（T5/T6）**——人回来那一刻 afk 事件的末端被钉回最后一次输入，
-   原本判 `Afk` 的几十秒改判 `Focused`，累计增加，跨阈值的格子后退；
-2. **某一拍整个没跑**——AW 查询抛异常时只写一行日志跳过，下一拍一次补 4 分钟；
-3. **亚秒相位漂移**——`bufferOffset` 取整而采样点带着 `now` 的零头，每拍相位不同，
-   边界那一秒会翻面；累计正好卡在整分钟边界时，一秒足以让整格回退。
+## 15.4 rules.json 只许有一个类型模型、一个解析器
 
-三条的共同根子只有一句话：**达成时刻是从一块每分钟都在被重写的账本上重新推导出来的，
-而这块账本的重写既不幂等也不单调。**
+原来 `executeCommand` 有**两条读取路径**，不同时间、不同 AI 各写一半造出来的，谁也
+不知道对方那套设置。它咬过两次，症状一模一样——**文件的一半好用、另一半安静地不
+工作，而程序照常启动**：
 
-**另一半跟 AW 无关，纯算术**：`⌊focus/5⌋+1` 的补偿只在专注时长是 5 的倍数时才够，
-而 07-31 把滑块改成步进 1 之后，8 个取值破了 6 个（详见 §6.1 的警示）。
+- 一次是那边没开 `JsonCommentHandling.Skip`（文档鼓励写注释 → 写了就失效）；
+- 一次是 `TryGetProperty` **永远区分大小写**，而这边不区分。
 
-**已消解**，不是修补：第二版里达成的定义变成「这一拍算出缺口 `D ≤ 0`」（§4.5），
-它是个事件不是推导值，不可能回退，也就不需要 latch；`RestMinutes` 改成 `⌈focus/5⌉`
-（§6.1），对所有整数成立。`FocusCompletedAt()` 整个删除。
+现在整个 `rules.json` 只剩 `RulesFile` 一个类型模型、`GroupRules.Parse` 一个解析器，
+`Command` 从 `GroupRules.CommandsFor(os)` 取，不再自己读文件。
 
-**教训归档**：这条 Bug 的第一版根因分析写在文档里、看起来言之凿凿，但跟代码对不上
-（`Judgment.cs` 第 4 步返回的是 `AwOffline` 不是 `Init`）。**根因描述也要按代码核对，
-不能只按印象写**——它决定了后来所有人往哪个方向修。
+⚠️ **往 rules.json 里加新的节，就往 `RulesFile` 加字段，别再另起一条路。**
 
-## 15.2 ✅ Give Up 后按钮不恢复 "Start"（2026-08-02 已修）
+## 15.7 验证工具和被验证对象必须是同一个引擎
 
-**现象**：点 Give Up 确认 → 表盘清空 → 按钮仍显示 "Give up" 且灰色不可点；
-点一下 Radio 才恢复。
+`itami start` 曾经走 `Replay.Run` 全量重放，只有 `itami bench` 用 `JudgmentBuffer`——
+**CLI 给的是另一套判定的账**，而 CLAUDE.md 当时管它叫「唯一给账单的地方」。同时
+Core 的测试大半打在已经没人调用的 `Replay` 上：**护栏守着一段不跑的代码**。
 
-**日志**：`The control RadioButton already has a visual parent DockPanel while trying
-to add it as a child of DockPanel.`
+已修：干跑跟实机走**同一个引擎、同一个节拍**（干跑只是把 `now` 喂进去），`Replay.cs` /
+`TaskState.cs` 连同 5 个测试文件删除。代价如实记：测试从 125 条降到 71 条，后来补回。
 
-**根因**：`RefreshGoalItems()` 每次把同一个 RadioButton 实例塞进**新建的** DockPanel，
-而它已有旧的视觉父。Avalonia 不允许一个控件有两个视觉父 → 抛异常 → `EndSession`
-后续代码（含 `RefreshStartButton()`）被整段跳过。
-
-**试过但没生效**：先置 `_session = null` 再 `Dispose`、防重入锁、`InvalidateVisual()`、
-加入前先从旧父 `Remove`。
-
-> 补一条（2026-08-02 核查）：「加入前先从旧父 Remove」那行代码**在**
-> （`MainWindow.axaml.cs` 的 `if (_goalRadios[i].Parent is Panel oldP) oldP.Children.Remove(...)`），
-> 但**只对 RadioButton 做了，`_duringLabels[i]` 那个 TextBlock 一次都没从旧父移除过**。
-> 所以「试过没生效」很可能只做了一半。结论不变——下面那个方向才是对的。
-
-**已修**（按上面这个方向）：`RadioButton` / `TextBlock` / `DockPanel` 在 `LoadRules` 里
-**一次性**建好，`ItemsSource` 也只设一次；`RefreshGoalItems` 现在只改 `Text`，
-**一行都不碰控件树**。
-
-真正的教训不是「忘了 Remove 谁」，而是**拿活控件当 `ItemsSource` 本身就是错的**。
-小目标列表在一次运行里根本不会变（`rules.json` 只在启动时读一次），每次任务结束
-重建一遍布局既没必要，又制造了一个「加一个控件就得多记一次 Remove」的陷阱——
-当时正是漏了 `TextBlock` 那一半。
-
-日志里那几十条 `already has a visual parent` 是实证：08-01 / 08-02 每次 Give Up 之后
-必然跟一条，`RadioButton` 和 `TextBlock` 两种都出现过。
-
-## 15.3 ✅ `duringByGroup` 未持久化（2026-08-02 已修）
-
-~~很可能是 15.2 那个异常导致 `EndSession` 中途退出~~ —— **归因错了**（2026-08-02 核查）：
-`EndSession` 里 `_settings.Save()` 在前、抛异常的 `RefreshGoalItems()` 在后，**保存发生在
-异常之前**。修好 15.2 不会自动解决这一条。
-
-真正的成因见 §11.2：`=` 不是 `+=`，而且三条关窗口退出的路径一条都不记账。
-**已按 §11.2 重做**：独立的 `during.json`、`+=`、归档当场入账、三条终结路径都记账，
-`Settings.DuringByGroup` 删除。
-
-## 15.4 遗留的不一致
-
-- ~~`GoalGroup.AccumulatedSeconds` 死字段~~ —— 2026-08-02 删除（§11.2）。
-- ~~`Slider Value="25"` 超出量程~~ —— 2026-08-02 修复：axaml 回到正式量程 10~50，
-  Debug 由代码覆盖（§6.2）。上方那段注释也跟实际属性对上了。
-- ~~`Shutdown.cs` 应改名 `Command.cs`~~ —— 2026-08-02 改了。
-- ~~`executeCommand` 两条读取路径~~ —— **2026-08-02 根治**。它现在在 `RulesFile`
-  类型模型里，`GroupRules.Parse` 一次解析出全部；`Command` 从 `GroupRules.CommandsFor(os)`
-  取，**不再自己读文件**。整个 rules.json 只剩一个类型模型、一个解析器。
-
-  来龙去脉值得记：这两条路径是**不同时间、不同 AI 各写一半**造出来的（Visual Studio 里
-  一次、Claude 一次），谁也不知道对方那套设置。它咬过两次，症状一模一样——
-  **文件的一半好用、另一半安静地不工作，而程序照常启动**：一次是那边没开
-  `JsonCommentHandling.Skip`（文档鼓励写注释 → 写了就失效），一次是 `TryGetProperty`
-  永远区分大小写而这边不区分。
-
-  **往 rules.json 里加新的节，就往 `RulesFile` 加字段，别再另起一条路。**
-
-## 15.5 ✅ 归档的结算范围偏了 180 秒（2026-08-02 发现，同日修复）
-
-`TryArchive` 统计 `[0, 3600)`，而 `CountFocused` 从 `[180, …)` 开始数——**同一个量两处
-口径不一致**。后果是两个方向的错同时存在：
-
-- 把 padding 里「点 Start 之前」的专注秒算进账（多算 ≤180 秒）；
-- 旧 `[3600, 3780)` 那 180 秒既没进结算、左移之后又落进新 padding 被跳过（少算 ≤180 秒）。
-
-**归档瞬间「还差多少」会跳一下，正负都可能。跳负时快达成的任务会突然倒退，而且盘面上
-一点提示都没有。** 正确范围是 `[180, 3780)`，推导见 §4.4。**已修**：`Archive()` 现在就是
-`CountFocused(PaddingSeconds, PaddingSeconds + ArchiveSeconds)`，即 `[180, 3780)`。
-
-## 15.6 ✅ 机器睡眠超过 2 小时 3 分 → 会话永久冻死（2026-08-02 修复）
-
-原状：`len = Min(240, 7380 − bufferOffset)`，`bufferOffset ≥ 7380` 时 `len ≤ 0` 直接
-return，`ElapsedSeconds` 不再前进 → `TryArchive` 的条件永远不成立 → 表盘冻住、达成永远
-不来、只能放弃，整个过程没有任何日志和提示。
-
-**已修**：`JudgmentBuffer.Cover` 开头加了 guard 循环——查询窗口末端落不进 buffer 时
-先强制 `Archive()` 滚动，最多 64 次（= 64 小时，够任何一次挂起），滚到落得进为止
-（DECISIONS 见 §4.3 引用的实现）。`bufferOffset < 0` 目前仍无显式检查，靠 `startedAt`
-截断到整分钟撑着（A6）——这条不是 bug，是有前提的安全，前提变了要重新核查。
-
-## 15.7 ✅ 验证工具和被验证对象不是同一个引擎（2026-08-02 已修）
-
-`itami start` 走的仍然是 `Replay.Run` 全量重放，休息起点用 `state.FocusCompletedAt`
-（跨阈值区间里**插值**出的精确时刻）；只有 `itami bench` 用 `JudgmentBuffer`，喂的还是
-合成数据。而 CLAUDE.md 说 CLI 是「唯一给账单的地方」——**它给的是另一套判定的账**。
-
-同时 `tests/ItamiTimer.Core.Tests` 里除 `TaskRecordTests` / `TimeGridTests` /
-`GroupRulesTests` 外全部打在 `Replay` 上，而 `Replay` 已经不被调用：**护栏守着一段不跑
-的代码**。新引擎至今零测试。
-
-**已处理**：`itami start` / `itami replay` 都迁到了新引擎，跟实机跑的是**同一个引擎、
-同一个节拍**（干跑只是把 `now` 喂进去）。`Replay.cs` / `TaskState.cs` 连同 5 个测试文件
-一起删除——`Bridge` 里那段 T4 实测记录已经搬进 §7.2 保住了。
-
-代价如实记：**测试从 125 条降到 71 条**。删掉的 54 条守的是已经不存在的代码，但其中
-`BoundaryTests` / `CheckpointCatchUpTests` 覆盖的边界（跨圈、漏拍追赶）在新引擎上只补了
-一部分，见 §4.8 的「还没做」。
-
-## 15.8 ✅ `README.md` 严重过时（2026-08-02 整篇重写，见 §4.8「全面体检」）
-
-曾经还在讲退化模式（degraded mode / plain pomodoro）、多选 checkbox、`ignore` 名单、
-「中途补勾追溯生效」、50 分钟上限、tomato icon。**已核查现在的 README.md**：这些提法
-都不在了，明确写着 "no degraded mode"、滑块量程也是当前的 10–50（Release）。
-它是**唯一对外可见**的文档，以后用户看见的行为变了要继续同步（CLAUDE.md 的规矩）。
-
-## 15.9 ✅ `IconExport` 被 #6 清理误删，`pack-macos.sh` 曾经跑不通（2026-08-02 发现并修复）
-
-2026-07-31 commit `085a474`（删 Pomodoro 退化路径）把 `TomatoIcon.cs`（番茄美术，删得对，
-产品早就不是番茄钟了）和 `IconExport.cs`（把美术导成 `.ico` / `.iconset` 的**通用**导出
-工具）绑在一起删了，连带删掉 `Program.cs` 的 `--export-icon` / `--export-iconset` 两个
-调试出口。`IconExport` 本身跟番茄无关，是任何图标美术都要用的格式转换器——这次清理把
-不该删的工具当成番茄的附属品一起清掉了。
-
-**留下的烂摊子，一直没人发现**：`ItamiTimer.App.csproj` 的 `ApplicationIcon=tomato.ico`
-和它的注释仍然指向已删除的 `IconExport`/`TomatoIcon`；`pack-macos.sh` 仍然调用
-`--export-iconset`，但 `Program.cs` 不再认这个参数，命令会直接落进正常启动分支——
-**`pack-macos.sh` 从那次提交之后其实一直是坏的**，只是没人在这之间真正跑过它。
-
-**已修复**：从 `085a474^` 原样取回 `IconExport.cs` / `TomatoIcon.cs`，`Program.cs` 补回
-两个开关。macOS 上实测过完整链路：`--export-icon` 出合法 `.ico`（9 档）、
-`--export-iconset` 出合法 `.iconset`（10 档 PNG），`iconutil -c icns` 能正常压出 `.icns`。
-图标美术仍是番茄——**这不是占位，是对的**：这个项目的骨架就是番茄工作法（§1），
-番茄图标跟产品身份没有冲突，不需要重新设计（2026-08-02 用户澄清，此前 §16.6
-那条"该不该换图标"的疑问是我看错了产品定位，已撤销）。
-
-**教训**：清理"一整块过时功能"时，工具类代码（能被任何美术复用）跟它当次唯一的调用方
-（这次是过时的番茄美术）要分开判断，别因为"现在只有它在用"就把工具本身也当成过时的一部分删掉。
-
----
+⚠️ **这条事故的形状会反复出现**：任何「两个地方各算一遍同一件事」都是它的变体。
+最近的两次——`Judgment` 的镜像被两个前端各驱动一遍（3.5.0 收进 `MirrorFeed`）、
+「刚跑完那一分钟」被两个前端各取一遍且不等价（3.6.0 收进 `JudgmentBuffer.LastCompleted`）。
 
 # 第三部分 · 待办需求
 
-> 按处理顺序排。**单实例限制排在最后**（用户 2026-08-02 指定）。
->
 > ⚠️ **优先级规则（用户 2026-08-02）：第二、三部分的优先级高于第一部分和
 > `DECISIONS.md` 的护栏。** 需求跟既有设计冲突时不要拿护栏去否决需求——按需求做，
 > 做完把翻案补进 DECISIONS。但代价要先说清楚再动手。
+>
+> **惯例**：设计定下来就写进第一部分，这里只留一行已完成标记。编号是地址，代码里
+> 到处在引用，所以不删号。
 
-## 16.0 实现第二版判定引擎（最高优先级）
+## 已完成（存档）
 
-规格见 §4，逐条差异清单见 §4.8。**先在 CLI 上跑通，界面不动**（用户 2026-08-02：
-「计算引擎是在 CLI 层面测试的，与界面无关」）。落地时一并处理 §15.5 / §15.6 / §15.7。
+| | 需求 | 结局 |
+|---|---|---|
+| 16.0 | 第二版判定引擎 | 规格见 §3/§4，Core / CLI / 界面全部落地 |
+| 16.1 | 骨牌左侧亮面宽度随倒下数量递减 | 按 `j + max(0, Fallen−1)` 移窗查表，DECISIONS D8 |
+| 16.2 | 为什么全是矢量绘制而不用图片 / emoji | 维持矢量，DECISIONS D5（图标字体在 macOS 是豆腐块） |
+| 16.3 | 启动 / 退出时的 AW 查询能否移除 | 已移除 |
+| 16.4 | 单实例限制 | 机器级 Mutex，后启动的把先启动的窗口拉到前台然后自己退出 |
+| 16.5.1 | AW 整个连不上时冻住整拍，不是 fail-open | 已修：连不上 = 空事件列表，走 §3.1 的 fail-open |
+| 16.6 | exe / app 图标该画什么 | 用户澄清：不用换 |
+| 17 | Alarms 清单：从外部文件读定时提醒 | 完整规格并入 §9.1，取舍见 DECISIONS J |
 
-## 16.1 ✅ 骨牌左侧亮面宽度随倒下数量递减（原 ISSUE #12，2026-08-02 已修）
-
-原实现按固定屏幕位置查表（`SidePx[Count-1-i]`），跟 `Fallen` 无关——最左边那块骨牌
-物理上整周是同一块（世界坐标恒为 `Count-1`），亮面宽度因此恒为 6px。改成按
-`j + max(0, Fallen-1)` 移窗查表，随一周推进逐日变窄，且宽度用尽正好是它倒下那天，
-决策记在 DECISIONS D8。
-
-## 16.2 ✅ 为什么全是矢量绘制而不用图片 / emoji（原 ISSUE #3，2026-08-02 定稿：维持矢量）
-
-**表盘和骨牌得分开看**：表盘不可能是静态图——指针、色环、承诺弧、休息扇形每拍都在变，
-图片只能顶替背景，指针色块必须留矢量，没有讨论空间。骨牌才是真问题——一天只有 8 种
-状态（`Fallen` 0~7），日内不变，「why not just 切 8 张图」是成立的质疑。
-
-原纪律的四条理由重新过一遍，两条站不住：**「跨平台渲染一致」**——图片反而更一致，
-矢量代码里字体渲染/DPI 取整才是差异来源；**「图标字体在 macOS 是豆腐块」**——打错了
-对象，那是字形问题，PNG 不是字体不受影响。剩下两条也不算赢：**「零外部美术依赖」**——
-手搓凸多边形接触求解、消失点透视，工作量不比切图小，只是换了个门槛（数学 vs 美术）；
-**「几何参数可计算可微调」**是唯一站得住的，而且是**当前阶段**特有的优势——本次调
-骨牌亮面宽度（§16.1）改一个数字、跑一次 `--dial-specimens`、一分钟内出新图；换成位图，
-同样的调整要开图形工具重画 8 张、两套主题各出一份、再提交二进制，代价高一个数量级。
-
-**结论：骨牌维持矢量，不改。** 不是「矢量天生更好」，是这个项目现在还在高频微调
-视觉细节（DECISIONS 里全是当天推翻当天的记录），这正是矢量的强项、位图的弱项。
-等骨牌视觉真正定稿、几个月没人再碰，那时候换预生成图省一点体积和代码行数才划算——
-**不是现在**。
-
-## 16.3 ✅ 启动 / 退出时的 AW 查询能否移除（原 ISSUE #10）
-
-**已经一处都没有了**（2026-08-02 核查）：`FindBucketIdAsync` 只在第一个计时点惰性触发。
-启动与退出路径上零 AW 访问。
-
-**2026-08-06 修正**：提交任务那一刻现在有 AW 访问了——回填（§11.2）就挂在那儿。但它
-**不阻塞**（fire-and-forget，界面立刻就绪），连不上也只是不推进 checkpoint、下次重试，
-所以「提交路径不能被 AW 拖住」这条约束仍然成立。程序启动 / 退出路径依旧零 AW 访问。
-
-## 16.4 ✅ 单实例限制（原 ISSUE #12 的另一条，2026-08-02 实现）
-
-`SingleInstance.TryAcquire()`（[SingleInstance.cs](src/ItamiTimer.App/Platform/SingleInstance.cs)）：
-命名 `Mutex` 判活——不扫进程名，操作系统保证进程退出必然释放，不会有僵尸占用。
-第二个实例抢不到锁时，Windows 上 `FindWindow`（按窗口标题「一袋米要扛几楼」）+
-`ShowWindow(SW_RESTORE)` + `SetForegroundWindow` 把已有窗口拉到前台，自己安静退出；
-macOS 没有零依赖的等价 API，退化成**静默拒绝**（单实例仍然成立，只是不会把老窗口
-自动调出来）。只挡 `BuildAvaloniaApp().StartWithClassicDesktopLifetime` 这条正常启动
-路径，`--dial-specimens` 等一次性调试出口不受影响（见 [Program.cs](src/ItamiTimer.App/Program.cs)）。
-
-## 16.5 ✅ AW 异常检测（2026-08-02 定稿：仅日志，不改判定）
+## 16.5 AW 异常检测：只记日志，不改判定
 
 「没有任何记录 → 算专注」是知情的 fail-open（§3.1），代价是两条路一直开着：
 
@@ -1738,155 +1484,66 @@ macOS 没有零依赖的等价 API，退化成**静默拒绝**（单实例仍然
 根子相同：`FindBucketIdAsync` 只检查 bucket **存在**，而 bucket 一旦建过就永远存在。
 
 **结论：只记日志，判定逻辑不动**（用户 2026-08-02：「这个应用程序本意只是辅助…
-用户自己故意偷懒，不予考虑」）。检测信号不需要额外查 AW——watcher 只要活着就会
-持续心跳，某条事件的 `End` 会一直贴着 `now` 往前挪；某一拍的 4 分钟窗口里，`win`/`afk`
+用户自己故意偷懒，不予考虑」）。检测信号不需要额外查 AW——watcher 只要活着就会持续
+心跳，某条事件的 `End` 会一直贴着 `now` 往前挪；某一拍的 4 分钟窗口里，`win`/`afk`
 事件列表**连一条 `End` 贴近 `now` 的都没有**，watcher 大概率已经死了。落点在
-`TaskSession`（[TaskSession.cs](src/ItamiTimer.App/TaskSession.cs)），不碰 Core——
-`JudgmentBuffer`/`Judgment.Paint` 保持零分支、每拍重算的纯函数状态。
+`TaskSession`，不碰 Core——`JudgmentBuffer`/`Judgment.Paint` 保持零分支的纯函数状态。
 
-一个已知的假阳性不打算处理：机器休眠时两个 watcher 也会真的停发心跳，跟「被杀掉」
-在这个信号下看着一样。日志措辞直接写「过去 60 秒没有新事件」，不去猜是死是睡——
-反正只是日志，用户翻的时候自己会知道当时机器在不在干活。
+一个已知的假阳性不打算处理：机器休眠时两个 watcher 也会真的停发心跳，跟被杀掉在这个
+信号下看着一样。日志措辞直接写「过去 60 秒没有新事件」，不去猜是死是睡。
 
-### 16.5.1 ✅ AW 整个连不上时冻住整拍，不是 fail-open（2026-08-02 实机测试发现并修复）
+### 16.5.2 ⏳ 还开着：提交任务时要不要探活
 
-上面两条是「server 活着、某个 watcher 死了」；这条是更狠的一种——**`aw-server` 本身
-没起来**。§3.1 明确把这种情况也划进 fail-open（"服务没起来"是原文列的第一个例子），
-§4.3 也写了"整拍连不上 = 事件列表为空"，理论上应该跟"连上了但没记录"走同一条路，
-判 `AwOffline`、计入专注。
+半独立的问题：中途断线判 fail-open 是合理的（不该拿 AW 的毛病惩罚用户），但**开局
+就没有 AW** 是另一回事——那样整个约束从一开始就形同虚设。
 
-**但代码没有做到**：`AwClient` 连不上时抛 `AwUnavailableException`，这个异常一路
-冒到 `TaskSession.OnTick` 最外层的 `catch`，**整拍被跳过**——`_buffer.Tick()` 根本
-没被调用。缺口不重算、`ElapsedSeconds` 不前进、§8.2 那个休息扇形投影也跟着冻住。
-后果不是「fail-open 计入专注」，而是**整个任务暂停**：盘面停在关掉 AW 那一刻的样子，
-既不吃亏也不进账，跟设计意图完全相反。
+- `AwClient.ProbeAsync` 曾经是为这个准备的，但从头到尾没有调用点，2026-08-06 已删除
+  ——留着一个没人调的探活函数，只会让下一个读代码的人以为这条路走通了。
+- **现状**：回填（§11.2）挂在提交那一刻，连不上会写一条 WARN 日志。所以「开局就没有
+  AW」不是完全无痕的了，只是仍然不拦提交。
+- **没拍板**：要不要在提交按钮那里加一次探活。
 
-用户实机测试时关掉 AW 服务器，肉眼发现盘面停在灰色不是该有的绿色，抓到了这个。
+### 16.5.3 跑偏归因：日志里说清楚「为什么」
 
-**已修**：`TaskSession.OnTick` 里单独 catch `AwUnavailableException`，转成空的
-`win`/`afk` 列表照常调用 `_buffer.Tick()`——不再跳过整拍。跟"某个 watcher 死掉、
-查询返回零事件"走的现在是**同一条路径**，`Judgment.Paint` 那边不用改一行。
-真正意外的异常（bug）才继续走"跳过并记日志"那条兜底。
+**跟 16.5 同一类，诊断专用，绝不反哺判定。** §8.1a「界面可以沉默，但原因不能消失」
+这条原则本来就该覆盖到日志层——用户问「1:20 到 1:30 明明在看书，为什么表盘上是红的」
+时，唯一的查证手段曾经是翻 AW 的原始事件。
 
-### 16.5.2 还开着：提交任务时要不要探活
+- [`OffTaskAttribution.Attribute`](src/ItamiTimer.Core/OffTaskAttribution.cs)（Core，纯函数）：
+  拿该分钟内**不命中**当前小目标的窗口事件，按 `(App, Title)` 累加重叠秒数，报占用最长的。
+- 跟真实判定用**同一次** `GroupRules.GroupMatches` 调用（`group is null` 时永不命中），
+  保证「为什么」和「算不算」永远对得上号。
+- **结果只进日志**，不进 buffer，不影响任何一次判定：
 
-半独立的问题，跟上面那条不是一回事：中途断线判 fail-open 是合理的（不该拿 AW 的
-毛病惩罚用户），但**开局就没有 AW** 是另一回事——那样整个约束从一开始就形同虚设。
-`AwClient.ProbeAsync` 曾经就是为这个准备的（§6.2 原本要求"连不上就拒绝提交"），
-但从头到尾没有调用点，**2026-08-06 已删除**——留着一个没人调的探活函数，只会让下一个
-读代码的人以为这条路走通了。真要加回来，那时候写一个就是了。
+  ```
+  The minute just past had 55s off-task: chrome.exe "YouTube - some title"
+  ```
 
-要不要在提交按钮那里加一次探活，仍然没拍板。**注意现在的现状**：回填（§11.2）挂在提交
-那一刻，连不上会写一条 WARN 日志。所以「开局就没有 AW」这件事已经不是完全无痕的了，
-只是仍然不拦提交。
+- 取哪一分钟走 `JudgmentBuffer.LastCompleted`（**不是 `cells[^1]`**，那是承诺弧的灰色
+  投影尾巴，`OffTaskSeconds` 恒为 0——这条日志因此在生产里一次都没触发过，DECISIONS L31）。
+- 遵守 D3：**只在 `OffTaskSeconds` 占主导时记，AFK 不记**——人不在不是用户的错。
 
-### 16.5.3 ✅ 跑偏归因：日志里说清楚"为什么"（2.8.0，2026-08-27）
+## 17.1 点小红圈瞄一眼下一条
 
-同一条原则的延伸——**跟 16.5 的 AW 异常检测同一类，诊断专用，绝不反哺判定**。
-起因是 2026-08-23 一次真实排查：用户问"1:20 到 1:30 明明在看书，为什么表盘上是
-红的"，唯一的查证手段是翻 AW 的原始事件——因为**程序自己的日志里一个字都没提**
-那一分钟到底撞上了哪个窗口。§8.1a「界面可以沉默，但原因不能消失」这条原则本来
-就该覆盖到日志层，这里之前是有洞的。
+红圈本来只是个纯装饰的角度指示（下一条 Alarms 什么时候到）。给它加了唯一一种交互：
+**精确点在红圈上，弹一次提示条**，内容正是红圈代表的那一条（`AlarmsList.Next`）。
 
-**实现**：新增 [`OffTaskAttribution.Attribute`](src/ItamiTimer.Core/OffTaskAttribution.cs)
-（Core，纯函数）：拿该分钟内**不命中**当前小目标的窗口事件，按 `(App, Title)` 累加
-重叠秒数，报占用最长的那一个。跟真实判定用的是同一次 `GroupRules.GroupMatches` 调用
-（`Judgment.Paint` 那个空值语义：`group is null` 时永不命中），保证"为什么"和"算不算"
-永远对得上号，但**结果只进日志，不进 buffer，不影响任何一次判定**。
+- **命中测试，不是 Button**：`DialControl` 是纯手绘控件，红圈没有子控件。
+  [`DialControl.HitTestAlarmsDot`](src/ItamiTimer.App/Drawing/DialControl.cs) 的圆心和半径
+  跟 `DrawAlarmsDot` **共用 `FaceGeometry()`**——画在哪就能点哪，两处不会各算各的。
+  ⚠️ 特意不用 Button（DECISIONS E4：Button 内部把 `PointerPressed` 标 Handled，钟面上
+  其它靠 `+=` 订阅的手势会收不到）。挂在 `MainWindow` 现有的 `dial.PointerPressed` 里。
+- **命中区比画出来的圆大一圈**（固定 6px，不跟着表盘缩放）：红圈半径常见只有 7px 左右。
+  这圈容差是隐形的，不改视觉。
+- **按下即分岔，不是「松开才算」**：拖窗口必须在按下那一刻调 `BeginMoveDrag`，所以红圈
+  这个分支也只能挂在按下上——点中的那一下就已经是「瞄一眼」，不会再退化成拖拽。
+- **纯读**：不出声、不弹通知、**不推进 `_alarmsProcessedThrough` 水位线**，跟
+  `CheckAlarmsList`（§9.1）完全隔离。这条不能妥协——点一下绝不能让后面真正到点的那次
+  提醒被冲掉。
+- **停留 3 秒**，不是到点那次的 1 分钟（`ShowAlarmBanner` 的 `visibleFor` 参数）。
+- **没有下一条闹钟时什么都不会发生**：`AlarmsDotMinutes` 为 null 时命中恒 false，
+  那一下照旧走拖窗口——不是专门写的分支，是几何判断的自然结果。
 
-`TaskSession` 每分钟 tick 时调用它，日志从
-
-```
-7.1/25 min  cells 30  deficit 1080s  settled 0s
-```
-
-变成多一行
-
-```
-The minute just past had 55s off-task: chrome.exe "YouTube - some title"
-```
-
-**顺带修复了一个从未被发现的死代码**：这行"跑偏"日志在 2.8.0 之前就存在，但取的
-是 `cells[^1]`——绝大多数时候是承诺弧的灰色投影尾巴，`OffTaskSeconds` 恒为 0，
-导致这条日志**在生产环境里一次都没触发过**（翻遍现有 `itami.log`，含 2026-08-23
-那段实打实跑偏 13 分钟的记录，零命中）。改用已经算对索引的 `LastCompletedMinute`
-（`ElapsedSeconds/60 - 1`，跟它挨着的那条注释早就写明了正确索引，只是没人把下面
-这行也改过来）。
-
-同样遵守 D3：**只在 `OffTaskSeconds` 占主导时记，AFK 不记**——人不在不是用户的
-错，且会话期间频繁上厕所会把日志刷满没意义的行。
-
-## 16.6 ✅ exe / app 图标该画什么（2026-08-02 用户澄清：不用换）
-
-`IconExport` 的导出机制修好之后（§15.9）曾经提过一个疑问：番茄图标是否还贴合产品
-身份。**这个疑问本身站不住**——项目骨架就是番茄工作法（§1「番茄工作法的骨架」），
-删掉的只是「没装 AW 退化成纯番茄钟」那条模式（B3），不是番茄这个意象本身。番茄
-图标继续用，不重新设计。
-
-## 17. ✅ Alarms 清单：从外部文件读取定时提醒（2026-08-06 设计，1.2.0 落地）
-
-完整规格已经并入 §9.1（跟闹钟放在一起，因为都是"到点触发点什么"这类机制），取舍
-记录见 DECISIONS J。这里只留一句指路，不重复内容——这条本身就是"设计定下来、
-写进 Part 1、Part 3 只留个已完成标记"这个惯例的一次实践。
-
-真机验证（Codex-Win11，2026-08-06）：解析、去重水位线、12 小时红圈门槛、跟闹钟
-共存的响铃顺序，均按预期工作；Windows 上 `powershell.exe` 调 WinRT 弹出的 toast
-子进程稳定退出码 0。
-
-### 17.1 ✅ 点小红圈瞄一眼下一条（2.9.0，2026-08-27）
-
-红圈本来只是个纯装饰的角度指示——画出"下一条 Alarms 什么时候到"，但点不动。这次
-给它加了唯一一种交互：**精确点在红圈上，弹一次提示条**，看到的正是红圈本身代表
-的那一条（`AlarmsList.Next`）。
-
-- **命中测试，不是 Button**：`DialControl` 是纯手绘控件（跟表盘上其它一切一样），
-  红圈没有对应的子控件。新增 [`DialControl.HitTestAlarmsDot`](src/ItamiTimer.App/Drawing/DialControl.cs)
-  做几何判断——圆心和半径复用**跟 `DrawAlarmsDot` 完全同一套公式**（新抽出的
-  `FaceGeometry()`），画在哪就能点哪，两处不可能各算各的、慢慢漂移。
-  ⚠️ **特意不用 Button**：DECISIONS E4 记过一次教训——Button 内部把
-  `PointerPressed` 标 Handled，钟面上其它靠 `+=` 订阅的手势会收不到。命中判断挂在
-  `MainWindow` 现有的那个 `dial.PointerPressed` 里，跟拖窗口共用同一次按下事件。
-- **命中区比画出来的圆稍大一圈**（固定 6px，不跟着表盘缩放）：红圈在常见尺寸下
-  半径只有 7px 左右，纯几何精确点太挑手感。这圈容差是隐形的，不改视觉。
-- **按下即分岔，不是"松开才算"**：跟喇叭/图钉/齿轮那几个真正的 `Button`（`Click`
-  在松开时触发）不是同一套手势——拖窗口本来就必须在**按下**那一刻调用
-  `BeginMoveDrag` 才能把控制权交给操作系统（等到松开已经错过时机），所以红圈这个
-  新分支也只能挂在按下上：精确点中红圈的那一下，从按下瞬间起就已经是"瞄一眼"，
-  不会再退化成拖拽，哪怕按住不放再移动鼠标。
-- **纯读，绝不碰到点触发那条路**：`OnAlarmsDotClicked` 不出声、不弹系统通知、
-  **不推进 `_alarmsProcessedThrough` 水位线**——跟 `CheckAlarmsList`（§9.1）完全
-  隔离。这是唯一不能妥协的一条：点这一下绝不能让后面真正到点的那次提醒被冲掉、
-  被提前消费，或者被算作"已经处理过"。
-- **停留 3 秒，不是到点那次的 1 分钟**：`ShowAlarmBanner` 加了个 `visibleFor` 参数，
-  到点真触发传 1 分钟（挂在整分钟节拍上，行为不变），瞄一眼传 3 秒——只是扫一眼，
-  没必要占那么久。两条路复用同一块显示区域和同一套双层文字画法（DECISIONS J11）。
-- **没有下一条闹钟时，什么都不会发生**：`AlarmsDotMinutes` 为 null（没画红圈）
-  时 `HitTestAlarmsDot` 恒为 false，那一下按下照旧走拖窗口——没有专门写"如果没有
-  闹钟"的分支，是几何判断的自然结果。
-
-⚠️ **验证缺口，如实记录**：`ItamiTimer.App.Tests` 项目明确"Avalonia 从不初始化"
-（见其 csproj 注释），而 `HitTestAlarmsDot` 依赖 `Bounds`（由 Avalonia 布局系统
-赋值），没法在现有测试边界内写自动化单元测试——为这一个方法单独引入 headless
-Avalonia 测试基础设施，相对这个小功能的体量不划算。**这次改动只过了编译和现有
-全部测试（未受影响），命中区大小、按下即分岔的手感、提示条内容对不对，都需要
-在真实窗口上点一下才能确认。**
-
----
-
-# 附录 · 2026-07-31 那一轮的实施记录（存档）
-
-| 需求 | 落点 |
-|---|---|
-| #1 音频重叠 | `Tick.cs` 加 `SND_NOSTOP`，通道占用则跳过本次滴答 |
-| #2 闹钟重构 | Settings 删 Alarm 开关改 Command 卡；黄针粒度 5→1 分钟 + 滚轮加速；`Restore` 不激活、新增 `Activate` |
-| #4 Settings 尺寸 | `Width` 460→380（等于主窗口） |
-| #5 Force Ticking | Settings 卡 5（**当时**；2026-08-09 已挪到第 1 张，§10.1）；Force on → 喇叭图标隐藏、滴答强制开；Start 到休息结束静音 |
-| #6 删除退化路径 | 删 `AppMode` / `TomatoIcon` / `IconExport` / `PomodoroFallbackTests`；删 `Neutral` / `SelfApps` / `ignore` / `TodayTomatoes` / `Accumulate`；`Groups`→`Group`；多选→Radio 单选 |
-| #7 判定模型重写 | 新增 `JudgmentBuffer` + `Judgment`；引擎从 `Replay.Run` 切到 buffer；AW 查询改 4 分钟固定窗口；新增 `itami bench` |
-| #8 Shutdown→Command | 读 `rules.json` 的 `executeCommand.{os}`；Execute 与提示音互斥 |
-| #9 累计时间替换番茄 | `Settings.DuringByGroup` 按 goal 存秒数；UI 右对齐显示 `during/3600`（两位小数，无单位） |
-| #11 休息时圆弧保留 | 专注完成后圆弧不再清空；扇形先画、圆弧后画 |
-
-**需求变更对照**：黄针 5→1 分钟/格；Command 提示音由跟随改互斥；专注时长 10-50→3-10 分钟；
-多选→单选；`AlarmEnabled` 删除（黄针即开关）；Shutdown 硬编码→`executeCommand`；
-Pomodoro 退化模式→永远约束模式；`Replay` 全量重放→`JudgmentBuffer` 4 分钟窗口。
+⚠️ **验证缺口**：`HitTestAlarmsDot` 依赖 `Bounds`（Avalonia 布局系统赋值），而
+`ItamiTimer.App.Tests` 明确「Avalonia 从不初始化」，没法在现有测试边界内写单元测试。
+命中区大小、按下即分岔的手感、提示条内容，**都要在真实窗口上点一下才能确认**。
