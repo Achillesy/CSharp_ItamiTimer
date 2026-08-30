@@ -388,7 +388,7 @@ int Help()
     return 0;
 }
 
-// ---------------------------------------------------------------- bench
+// ---------------------------------------------------------------- helpers
 
 static Dictionary<string, string> ParseOptions(string[] args)
 {
