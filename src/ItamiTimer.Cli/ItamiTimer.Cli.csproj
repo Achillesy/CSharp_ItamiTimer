@@ -32,6 +32,17 @@
     <Compile Include="..\ItamiTimer.App\Platform\Command.cs" Link="Shared\Command.cs" />
     <Compile Include="..\ItamiTimer.App\Log.cs" Link="Shared\Log.cs" />
     <Compile Include="..\ItamiTimer.App\AppData.cs" Link="Shared\AppData.cs" />
+    <!-- settings.json 只为读 awBaseUrl（DESIGN §11.1）：把 AW 挪过端口的用户，界面能用
+         而干跑连不上，又一例「验证工具跟被验证对象不一致」。2026-08-30 把 Settings.cs 里
+         「挑默认提示音」那段拆去 SettingsDefaults.cs 之后它才零平台依赖、link 得进来；
+         **不要改成 CLI 自己 JsonDocument 读一遍那个字段**——那是「一个文件两条读取路径」，
+         §15.4 里 executeCommand 被这么咬过两次。 -->
+    <Compile Include="..\ItamiTimer.App\Settings.cs" Link="Shared\Settings.cs" />
+    <!-- during.json 只为读 checkpoint（§11.2）：backfill 的起点必须跟界面一致，
+         否则干跑算的是"首次全量"而界面算的是"上次 checkpoint 到现在"，两个数没有
+         可比性。⚠️ CLI **只读不写**——推进 checkpoint 是界面点 Start 那一刻唯一的
+         写入点（§11.2），干跑绝不能碰它。 -->
+    <Compile Include="..\ItamiTimer.App\During.cs" Link="Shared\During.cs" />
   </ItemGroup>
 
 </Project>

@@ -110,8 +110,11 @@ DESIGN.md §14。
 
 ```
 src/ItamiTimer.Core/   判定与重放（纯函数为主）   ← 逻辑改动优先落这里，可测
-src/ItamiTimer.Cli/    itami 命令行，真实数据干跑  ← 唯一给账单的地方
-                       也管 executeCommand：`itami commands --list/--select/--execute`
+src/ItamiTimer.Cli/    itami 命令行，三个子命令，跟界面共用 Core 的镜像和判定
+                       start（验**引擎**：真实数据干跑，不验会话——没有休息、没有
+                       键鼠空闲、没有休息起点投影）、backfill（干跑累计时长，只读）、
+                       commands（选/试 executeCommand，**唯一入口**，也是 `shutdown /h`
+                       那类静默失败唯一的诊断手段，见 L29）
 src/ItamiTimer.App/    Avalonia 界面              ← 平台差异每处收口在单个文件
 tests/                 xUnit，测试名是中文句子，直接陈述行为
 ```

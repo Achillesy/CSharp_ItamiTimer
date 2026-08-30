@@ -15,85 +15,83 @@ namespace ItamiTimer.Cli;
 /// </summary>
 public static class Renderer
 {
-    private static readonly (int R, int G, int B) FocusC = (0x2F, 0xA3, 0x6B);
-    private static readonly (int R, int G, int B) AmberC = (0xE0, 0x9F, 0x3E);
-    private static readonly (int R, int G, int B) SlackC = (0xD6, 0x45, 0x3F);
-    private static readonly (int R, int G, int B) GrayC = (0x99, 0x99, 0x99);
-
-    private static string Fg((int R, int G, int B) c) => $"[38;2;{c.R};{c.G};{c.B}m";
-    private const string Reset = "[0m";
-    private const string Dim = "[2m";
-    private const string Bold = "[1m";
+    /// <summary>
+    /// 一圈 60 格，最多两圈——**跟表盘严格一一对应**：`JudgmentBuffer` 的可绘制跨度是
+    /// `DrawSeconds = 7200` 秒 = 120 分钟，而圈号由 `cell.Index / 60` 决定（DESIGN §8.3），
+    /// 所以第一行就是外圈、第二行就是内圈，第 N 列就是第 N 格。
+    /// </summary>
+    public const int Lap = 60;
 
     /// <summary>
-    /// **Every displayed moment must go through this function.**
+    /// ⚠️ **这里一个 ANSI 转义码都不许有**（2026-08-30 全部拆掉）。
     ///
-    /// Hit on 2026-07-27: a report printed "Focus achieved at" as 06:40:45 when it was
-    /// actually 14:40:45. The cause was two time zones mixed in the same report --
-    /// StartedAt comes from DateTimeOffset.Now (local offset), while the other moment was
-    /// derived from an ActivityWatch event; ActivityWatch returns UTC,
-    /// DateTimeOffset.Parse keeps +00:00, and formatting it directly prints a UTC clock.
+    /// 原来色环是 24 位色的 `\e[38;2;R;G;Bm`，用户实测**打出来是一串裸转义码**——不是终端
+    /// 不支持，是这个程序从来没调用过 `SetConsoleMode(ENABLE_VIRTUAL_TERMINAL_PROCESSING)`：
+    /// .NET 在 Windows 上不会替你开 VT 处理，Windows Terminal 自己会解释所以看着正常，
+    /// 传统 conhost 就原样吐出来了。
     ///
-    /// Trusting every display site to remember `.ToLocalTime()` is unreliable (that's
-    /// exactly how this slipped through), so it's funneled into one function instead. Any
-    /// new place that displays a moment must go through it.
+    /// 与其补那行 P/Invoke，不如整个不用颜色：表盘本来就**用高度和颜色编同一个量**
+    /// （§8.2.3a"木桶短板"），终端这边改用字符就是把那第二条通道单独拿出来用。白拿的
+    /// 好处是输出能直接 grep、能重定向进文件，不用再剥一层转义码。
     /// </summary>
     public static string Clock(DateTimeOffset t, string fmt = "HH:mm:ss") => t.ToLocalTime().ToString(fmt);
 
     /// <summary>
-    /// One cell -> one character. **Only maps "tier -> character"** -- "what this cell
-    /// should be read as" belongs to the judgment layer (<see cref="MinuteCell.Tier"/>,
-    /// §4.6), not rewritten here.
+    /// 一格 → 一个字符。**只做"档位 → 字符"的映射**——"这一格该读成什么"是判定层的事
+    /// （<see cref="MinuteCell.Tier"/>，§4.6），不在这里重写一遍。
+    ///
+    /// 有专注的三档用字母（F/M/L，自带图例），其余一律不用字母，免得混淆：
+    /// <code>
+    /// F  41-60 秒专注      M  21-40 秒       L  1-20 秒
+    /// #  跑偏（有窗口证据、零专注）          *  离开（不计入，不怪你）
+    /// -  承诺弧，还欠着                      .  程序没在跑
+    /// </code>
+    ///
+    /// ⚠️ `.` 那一档（<see cref="CellTier.NotDrawn"/>）是**程序自己没在查**的那段——
+    /// 合上笔记本超过 4 分钟再打开，中间就是它。`Cover` 特意把那一段清成
+    /// <see cref="JudgmentCode.Init"/> 而不是给 fail-open 的 `AwOffline`，否则"睡一整夜"
+    /// 就能把一轮任务填满。它跟 `#` 是两回事：**不计入专注，也不算你的错**。
+    ///
+    /// ⚠️ 反过来，**AW 连不上的那一分钟会显示成满格 `F`**——查了但 AW 拿不出数据，
+    /// 按 §3.1 那条知情的 fail-open 算作专注（`AwOffline(5) >= Focused(4)`）。反直觉，
+    /// 但那正是设计：拿不出数据是 AW 的错，不该罚用户。
     /// </summary>
-    public static string CellChar(MinuteCell c) => c.Tier switch
+    public static char CellChar(MinuteCell c) => c.Tier switch
     {
-        CellTier.FocusFull => $"{Fg(FocusC)}█{Reset}",
-        CellTier.FocusMid => $"{Fg(AmberC)}█{Reset}",
-        CellTier.FocusLow => $"{Fg(AmberC)}▒{Reset}",
-        CellTier.OffTask => $"{Fg(SlackC)}█{Reset}",
-        CellTier.Away => $"{Dim}□{Reset}",
-        CellTier.Pending => $"{Fg(GrayC)}█{Reset}",
-        _ => $"{Dim}·{Reset}",
+        CellTier.FocusFull => 'F',
+        CellTier.FocusMid => 'M',
+        CellTier.FocusLow => 'L',
+        CellTier.OffTask => '#',
+        CellTier.Away => '*',
+        CellTier.Pending => '-',
+        _ => '.',
     };
 
-    /// <summary>One character per minute, wrapping every 60 (exactly one lap).</summary>
-    public static string Cells(IReadOnlyList<MinuteCell> cells)
+    /// <summary>
+    /// 把格子铺进**固定的两行 × 60 格**画布，右侧用空格补齐。
+    ///
+    /// 固定宽度是刻意的：位置绝对稳定，同一列每分钟都指同一格，盯着看不会跳；而且
+    /// 60 列在任何终端都不会折行。空着的部分**不能用别的字符填**——承诺弧那截 `-`
+    /// 会随着拖延**逐格后移**，补齐的空格数本来就不固定（用户 2026-08-30）。
+    /// </summary>
+    public static string[] Rows(IReadOnlyList<MinuteCell> cells)
     {
-        if (cells.Count == 0) return $"{Dim}(no full minute has elapsed yet){Reset}";
-
-        var sb = new StringBuilder();
-        for (var i = 0; i < cells.Count; i++)
+        var rows = new char[2][];
+        for (var lap = 0; lap < 2; lap++)
         {
-            if (i > 0 && i % 60 == 0) sb.Append('\n');
-            sb.Append(CellChar(cells[i]));
+            rows[lap] = new char[Lap];
+            Array.Fill(rows[lap], ' ');
         }
-        return sb.ToString();
+
+        for (var i = 0; i < cells.Count && i < 2 * Lap; i++)
+            rows[i / Lap][i % Lap] = CellChar(cells[i]);
+
+        return [new string(rows[0]), new string(rows[1])];
     }
 
     public static string Legend()
-        => $"{Fg(FocusC)}█{Reset} on-task   {Fg(AmberC)}█{Reset} partly off-task   "
-         + $"{Fg(SlackC)}█{Reset} off-task   {Dim}□{Reset} away   "
-         + $"{Fg(GrayC)}█{Reset} still owed   {Dim}·{Reset} no data";
-
-    /// <summary>Prints a buffer summary: the colour-block strip plus statistics. Used by bench.</summary>
-    public static void BufferSummary(JudgmentBuffer buf)
-    {
-        var cells = buf.ToMinuteCells();
-        if (cells.Count == 0) { Console.WriteLine("  (buffer empty)\n"); return; }
-
-        Console.WriteLine("  " + Cells(cells).Replace("\n", "\n  "));
-
-        var (focus, off, afk, gray, init) = Totals(cells);
-        var elapsed = (double)(focus + off + afk + init);
-        var pct = elapsed <= 0 ? 0 : focus / elapsed * 100;
-
-        Console.WriteLine($"  {Bold}{focus / 60.0:F1}min focused{Reset}  "
-                        + $"{Fg(SlackC)}{off / 60.0:F1}min slack{Reset}  "
-                        + $"afk {afk / 60.0:F1}min  gray {gray / 60.0:F1}min  init {init / 60.0:F1}min  "
-                        + $"→ {pct:F0}% counted");
-        Console.WriteLine($"  remaining={buf.RemainingTargetSeconds}s  focused={buf.FocusedSeconds}s  "
-                        + $"archived={buf.ArchivedSeconds}s  complete={buf.IsFocusComplete}\n");
-    }
+        => "F 41-60s focus   M 21-40s   L 1-20s   # off-task   * away   "
+         + "- still owed   . not polled";
 
     private static (int Focus, int Off, int Afk, int Gray, int Init) Totals(
         IReadOnlyList<MinuteCell> cells)

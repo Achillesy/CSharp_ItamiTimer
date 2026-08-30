@@ -135,7 +135,7 @@ development build doesn't make you sit through 25 real minutes to see the comple
 ```
 src/ItamiTimer.Core/    net10.0  the accounting engine: rules, judgment buffer, projections.
                                  No UI, no platform calls — enforced by the csproj.
-src/ItamiTimer.Cli/     net10.0  `itami` — dry-run the engine against real ActivityWatch data.
+src/ItamiTimer.Cli/     net10.0  `itami` — dry-run the engine, and pick/test the alarm command.
                                  The only place that ever prints a report.
 src/ItamiTimer.App/     net10.0  Avalonia UI: dial, dominoes, sounds, alarm, alarms list, settings.
 tests/                  xUnit    pure-function tests: synthetic events, no waiting.
@@ -211,15 +211,18 @@ first start that goal.
 ## Dry-running the engine
 
 ```bash
-itami replay --since "2026-07-27 14:00" --until "2026-07-27 15:30" --minutes 25 --group Economics
+itami start                         # lists the goals in rules.json and asks
+itami start --group Economics --minutes 25
 ```
 
-This replays real ActivityWatch history through **the same engine and the same one-minute
-tick** the app uses, and prints the cells plus a report. It's the fastest way to check
-whether your rules actually match what you do.
+`itami start` runs a live round in the terminal against real ActivityWatch data, on the
+same mirror and the same judgment code the window uses. Every minute it prints the time and
+progress, a note if that minute went off task, and a fixed 2x60 canvas — **the dial's two
+laps**, one column per minute, in plain ASCII (`F`/`M`/`L` for 41-60 / 21-40 / 1-20 seconds
+of focus, `#` off task, `*` away, `-` still owed, `.` never polled).
 
-`itami start` runs a live round in the terminal; `itami bench` exercises the engine on
-synthetic events with no ActivityWatch at all.
+It verifies **the engine, not the session** — no break phase, no idle nudge. Focus achieved
+prints the bill and exits. Nothing is written to disk.
 
 ## Picking and testing the alarm's command
 

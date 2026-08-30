@@ -22,9 +22,7 @@ try
     return cmd switch
     {
         "start" => await StartAsync(),
-        "replay" => await ReplayPastAsync(),
         "backfill" => await BackfillAsync(),
-        "bench" => Bench(),
         "commands" => await CommandsAsync(),
         _ => Help(),
     };
@@ -54,14 +52,24 @@ catch (Exception e)
 async Task<int> StartAsync()
 {
     var minutes = int.Parse(opt.GetValueOrDefault("minutes", "25"));
-    var group = opt.GetValueOrDefault("group")
-                ?? throw new ArgumentException("A goal is required: --group <name from rules.json>");
+    // 门槛只挡手滑，不是业务约束：界面 Release 的滑块是 10~50，Debug 放宽到 3~10（为了
+    // 测短任务），所以 CLI 拦在 >2 —— 界面能产生的任务它全都陪得了，而 --minutes 0
+    // 那种（缺口一开始就是 0、第一拍直接"达成"）挡在门外。
+    if (minutes <= 2)
+        throw new ArgumentException($"--minutes must be greater than 2 (got {minutes}).");
 
     var rules = LoadRules();
+
+    // --group 不给就进交互选择；**给了但拼错照旧报错**，不进交互（沿用 L18 那条：
+    // 只有精确合法的形式才做事，含糊的输入不该被"猜"成某个目标）。
+    var group = opt.GetValueOrDefault("group") is { Length: > 0 } g
+        ? g
+        : PickGoal(rules);
     if (!rules.SelectableGroups.Contains(group))
         throw new ArgumentException($"No enabled goal \"{group}\" in rules.json. Available: {string.Join(", ", rules.SelectableGroups)}");
 
-    using var aw = new AwClient();
+    // AW 地址跟界面读同一份 settings.json（§11.1）——CLI 唯一会读的设置项就是它
+    using var aw = new AwClient(Settings.ReadRaw().AwBaseUrl);
 
     // §14.1: truncated to the current whole minute
     var task = new TaskRecord
@@ -72,11 +80,13 @@ async Task<int> StartAsync()
     };
 
     Console.WriteLine($"\nGoal: {group}");
-    Console.WriteLine($"Focus {minutes} min, then a {task.RestMinutes} min break");
+    Console.WriteLine($"Focus {minutes} min. No break — this verifies the engine, not the session.");
     Console.WriteLine($"Started at {Renderer.Clock(task.StartedAt)} (floored to the minute)\n");
     Console.WriteLine(Renderer.Legend());
     Console.WriteLine($"Judgment ticks every {TickSeconds}s; the mirror refreshes every second (ActivityWatch polled every {MirrorFeed.PollSeconds}s)");
-    Console.WriteLine("Ctrl+C = abandon the task\n");
+    Console.WriteLine("Ctrl+C = abandon the task");
+    Console.WriteLine("(the first row lands on the next whole minute)");
+    Console.WriteLine();
 
     var buf = new JudgmentBuffer(task.StartedAt, minutes);
     var settled = 0;
@@ -103,7 +113,12 @@ async Task<int> StartAsync()
 
     // ---- The single loop from §8.3.5. **秒节拍**：镜像每秒推进（预测靠它），
     // 而真正的判定仍然锚在整分钟上（§4.2 / DECISIONS H9）。
-    var lastMinute = DateTimeOffset.MinValue;
+    // ⚠️ **从任务起点那一分钟开始算「已经处理过」**，跟界面一致：`TaskSession` 里是
+    // `_lastAwMinute = task.StartedAt`，所以第一次判定落在**起点后的第一个整分钟**。
+    // 初始化成 MinValue 会在起点分钟多跑一拍——账不会错（那一拍 Cover 画的是任务开始
+    // 之前的 padding 区，ElapsedSeconds 仍是 0），但会凭空多打一行「整整一分钟的承诺弧」，
+    // 看着像已经过去了一分钟。用户 2026-08-30 实测报的就是这个。
+    var lastMinute = task.StartedAt;
     while (true)
     {
         await feed.RefreshAsync(DateTimeOffset.Now);
@@ -123,119 +138,90 @@ async Task<int> StartAsync()
         var outcome = buf.Tick(minute, win, afk, rules, group);
         settled += outcome.SettledSeconds;
         if (outcome.SettledSeconds > 0)
-            Console.WriteLine($"       ⏳ Two hours in — banked {outcome.SettledSeconds / 60} min "
+            Console.WriteLine($"  Two hours in — banked {outcome.SettledSeconds / 60} min "
                             + $"and rolled the ring over.");
 
         var cells = buf.ToMinuteCells();
 
-        // The tick is 60 seconds, so each round gets its own line rather than overwriting
-        // in place with \r -- overwriting is designed for the 3-second tick, and mixing it
-        // with interleaved warnings would smear together. One line per minute is a
-        // readable log as-is.
-        Console.WriteLine($"{Renderer.Clock(minute, "HH:mm")}  {Renderer.Cells(cells)}  " +
-                          $"{(settled + buf.FocusedSeconds) / 60.0:F1}/{task.FocusMinutes} min");
+        // 每分钟一个 block：时间/进度 → （有话才打的）说明 → 两行 60 格画布。
+        // 两行严格对应表盘的两圈（§8.3：圈号 = cell.Index / 60，可绘制跨度 120 分钟），
+        // 所以第 N 列每分钟都指同一格，位置不会跳。
+        Console.WriteLine($"{Renderer.Clock(minute, "HH:mm")}   "
+                        + $"{(settled + buf.FocusedSeconds) / 60.0:F1}/{task.FocusMinutes} min");
 
-        // Uses **the minute that just finished** as the trigger condition, not **what's
-        // happening right now**. Otherwise a brief switch-away-and-back like 10:00:10 to
-        // 10:00:50 would slip through the notification entirely -- even though it's
-        // plainly red on the coloured cells.
-        var last = cells.LastOrDefault(c => c.FocusSeconds + c.OffTaskSeconds + c.AfkSeconds > 0);
-        if (last.OffTaskSeconds >= NudgeFloorSeconds)
-            Console.WriteLine($"       ⚠ The minute just past had {last.OffTaskSeconds}s off-task.");
+        // 跟界面用**同一个取法**（JudgmentBuffer.LastCompleted）和**同一个归因函数**
+        // （OffTaskAttribution，Core 里的纯函数）——这两处原来各写各的，其中取法那处
+        // 已经不等价了（长睡之后 CLI 会报到更早的一分钟去）。
+        // **没话就不打**：闪烁般的空行是噪音，而这条 block 结构不靠空行断句。
+        if (JudgmentBuffer.LastCompleted(cells, buf.ElapsedSeconds) is { OffTaskSeconds: >= NudgeFloorSeconds } last)
+        {
+            var culprit = OffTaskAttribution.Attribute(win, last.Start, rules, group);
+            Console.WriteLine(culprit is null
+                ? $"  The minute just past had {last.OffTaskSeconds}s off-task."
+                : $"  The minute just past had {last.OffTaskSeconds}s off-task: {culprit}");
+        }
 
-        // Completion is this very tick (§4.5): never derived retroactively from an earlier
-        // moment in the ledger, so rest can never be retroactively eaten into (that's
-        // exactly how §15.1 happened).
-        if (outcome.Completed) return Rest(task, buf, settled, minute);
+        var rows = Renderer.Rows(cells);
+        Console.WriteLine($"    0  {rows[0]}");
+        Console.WriteLine($"   60  {rows[1]}");
+        Console.WriteLine();
+
+        // **达成即收尾，不做休息**（2026-08-30）：itami start 验的是引擎，不是会话。
+        // 休息期本来就零 AW 访问、纯本地倒计时，在这里除了让人多等五分钟没有任何验证价值；
+        // 而表盘那条"拖延时休息起点跟着后退"的痛感设计是会话层的事，CLI 从来也没有。
+        if (outcome.Completed)
+        {
+            Console.WriteLine("\n");
+            Console.WriteLine(Renderer.Bill(task, buf, settled, minute, minute));
+            Console.WriteLine("Focus achieved — the engine is done here. (No break: itami start verifies the engine, not the session.)\n");
+            return 0;
+        }
 
         await Task.Delay(1000);
     }
 }
 
 /// <summary>
-/// The rest phase (§8.4.4a): **purely local timing, zero ActivityWatch access**.
-/// A task's last query to ActivityWatch happens at the exact moment focus is achieved.
+/// 没给 `--group` 时，把 rules.json 里的目标列出来让人选一个。
+///
+/// 交互这套在 `commands --select` 里早就有先例（`Console.ReadKey`），这里照抄同一个
+/// 形状。⚠️ **只有完全不给 `--group` 才进这里**：给了但拼错照旧报错并列出可用的，
+/// 不去"猜"用户想要哪个（L18 那条"只有精确合法的形式才做事"）。
 /// </summary>
-int Rest(TaskRecord task, JudgmentBuffer buf, double settled, DateTimeOffset completedAt)
+string PickGoal(GroupRules rules)
 {
-    Console.WriteLine("\n");
-    Console.WriteLine(Renderer.Bill(task, buf, settled, completedAt, completedAt));   // The report is shown at the moment of **completion**
+    var goals = rules.SelectableGroups;
+    if (goals.Count == 0)
+        throw new ArgumentException("No enabled goals in rules.json.");
+    if (goals.Count == 1) return goals[0];
 
-    var rest = TimeSpan.FromMinutes(task.RestMinutes);
-    var restEnds = completedAt + rest;
-    Console.WriteLine($"Break for {task.RestMinutes} min. Where you go and what you do does not matter.\n");
+    Console.WriteLine("\nGoals in rules.json:\n");
+    for (var i = 0; i < goals.Count; i++)
+        Console.WriteLine($"  {i}  {goals[i]}");
 
-    while (DateTimeOffset.Now < restEnds)
+    while (true)
     {
-        // Fades by 100%/rest-minutes each minute (§8.4.4). Not a fixed 10% -- that would
-        // leave half a ring still hanging around when a 25-minute task's rest ends, which
-        // conflicts with "no ring means invitation".
-        var left = rest > TimeSpan.Zero ? 1 - (DateTimeOffset.Now - completedAt) / rest : 0;
-        Console.Write($"\r☕ On a break — {Math.Max(0, left) * 100:F0}% of the ring left   ");
-        Thread.Sleep(1000);
-    }
+        Console.Write($"\nPick one [0-{goals.Count - 1}], or q to quit: ");
+        // ⚠️ 输入被重定向时（管道、脚本、CI）`ReadKey` 直接抛"没有控制台"，所以退回
+        // `ReadLine`。选目标这件事本来就该能写进脚本里。
+        string answer;
+        if (Console.IsInputRedirected)
+        {
+            answer = (Console.ReadLine() ?? "q").Trim();
+            Console.WriteLine(answer);
+        }
+        else
+        {
+            answer = Console.ReadKey(intercept: true).KeyChar.ToString();
+            Console.WriteLine(answer);
+        }
 
-    Console.WriteLine("\n\nBreak over. Start another round yourself — the program never does it for you.\n");
-    return 0;
+        if (answer is "q" or "Q" or "") Environment.Exit(0);
+        if (int.TryParse(answer, out var n) && n >= 0 && n < goals.Count)
+            return goals[n];
+    }
 }
 
-/// <summary>
-/// Dry-runs real past history, no writing to disk, no waiting.
-/// This is the fastest way to check whether your rules are written correctly.
-/// </summary>
-async Task<int> ReplayPastAsync()
-{
-    var minutes = int.Parse(opt.GetValueOrDefault("minutes", "25"));
-    var group = opt.GetValueOrDefault("group")
-                ?? throw new ArgumentException("A goal is required: --group <name from rules.json>");
-    var since = DateTimeOffset.Parse(opt.GetValueOrDefault("since")
-                 ?? throw new ArgumentException("A start time is required: --since \"2026-07-26 20:00\""));
-    var until = opt.TryGetValue("until", out var u) ? DateTimeOffset.Parse(u) : since.AddHours(3);
-
-    var rules = LoadRules();
-    using var aw = new AwClient();
-    var win = await aw.FetchEventsAsync(await aw.FindBucketIdAsync(AwClient.WindowBucketType), since, until);
-    var afk = await aw.FetchEventsAsync(await aw.FindBucketIdAsync(AwClient.AfkBucketType), since, until);
-
-    var task = new TaskRecord
-    {
-        StartedAt = TimeGrid.FloorToMinute(since),
-        FocusMinutes = minutes,
-        Group = group,
-    };
-
-    // Runs the live loop unchanged against real history -- **the same engine, the same
-    // tick**, just with `now` fed in from outside. This way the report the CLI dry-run
-    // produces matches exactly what the real machine would compute (§15.7).
-    var buf = new JudgmentBuffer(task.StartedAt, minutes);
-    var settled = 0;
-    DateTimeOffset? completedAt = null;
-
-    for (var minute = task.StartedAt.AddMinutes(1); minute <= until; minute = minute.AddMinutes(1))
-    {
-        var outcome = buf.Tick(minute, win, afk, rules, group);
-        settled += outcome.SettledSeconds;
-        if (outcome.Completed) { completedAt = minute; break; }
-    }
-
-    Console.WriteLine($"\nDry run: {Renderer.Clock(task.StartedAt, "MM-dd HH:mm")} → {Renderer.Clock(until, "HH:mm")}   goal: {group}");
-    Console.WriteLine($"{win.Count} window events, {afk.Count} afk events\n");
-    Console.WriteLine(Renderer.Legend());
-    Console.WriteLine(Renderer.Cells(buf.ToMinuteCells()));
-    Console.WriteLine();
-    Console.WriteLine(Renderer.Bill(task, buf, settled, completedAt ?? until, completedAt));
-    return 0;
-}
-
-/// <summary>
-/// 干跑累计时长的回填（DESIGN §11.2）：数出一段历史里属于某个小目标的专注秒数。
-///
-/// **不写 during.json**——CLI 从来不碰那个文件，这里也一样。它是用来回答两个问题的：
-/// 「我这条规则在真实历史上到底能捞到多少」，以及「界面上那个数字凭什么是这个数」。
-///
-/// 省略 `--since` 就是模拟**首次启动**：从 window bucket 的 `created` 一路数到现在，
-/// 跟界面上第一次点 Start 走的是同一条路径。
-/// </summary>
 async Task<int> BackfillAsync()
 {
     var group = opt.GetValueOrDefault("group")
@@ -250,14 +236,41 @@ async Task<int> BackfillAsync()
 
     using var aw = new AwClient(timeoutSeconds: Backfill.ClientTimeoutSeconds);
 
+    // 起点跟界面**完全一样**（§11.2 的 checkpoint 模型）：先看 during.json 里这个目标
+    // 记到哪儿了，只有"第一次跑这个目标"（没有 checkpoint）才回退到 bucket 创建时刻。
+    //
+    // ⚠️ 2026-08-30 修：原来这里**无条件**走回退那条，也就是干跑永远在模拟"首次全量"，
+    // 而界面在算"上次 checkpoint 到现在"——两个数根本没有可比性，而这个子命令存在的
+    // 全部意义就是"界面现在会算出多少"。跟 O13（rules.json 路径）同一类毛病。
+    //
+    // ⚠️ **只读，绝不推进 checkpoint**：推进它是界面点 Start 那一刻唯一的写入点（§11.2），
+    // 而"推进 checkpoint 这个动作本身就是回填成功的唯一证明"——干跑写一下就等于替
+    // 界面把那段历史签收了，界面下次启动就再也不会去数它。
     DateTimeOffset? since = opt.TryGetValue("since", out var s) ? DateTimeOffset.Parse(s) : null;
     if (since is null)
     {
-        since = await aw.FindBucketCreatedAsync(AwClient.WindowBucketType);
-        Console.WriteLine(since is null
-            ? "No --since given and the window bucket has no creation time; falling back to one year."
-            : $"No --since given: walking the whole history, from the window bucket's creation ({since:yyyy-MM-dd HH:mm}).");
-        since ??= until.AddYears(-1);
+        since = During.Load().RecordedThrough(group);
+        if (since is not null)
+        {
+            Console.WriteLine($"No --since given: starting from during.json's checkpoint for this goal "
+                            + $"({since:yyyy-MM-dd HH:mm}) — exactly where the GUI would start.");
+        }
+        else
+        {
+            since = await aw.FindBucketCreatedAsync(AwClient.WindowBucketType);
+            Console.WriteLine(since is null
+                ? "No checkpoint for this goal and the window bucket has no creation time; falling back to one year."
+                : $"No checkpoint for this goal yet (never started) — walking the whole history from the "
+                + $"window bucket's creation ({since:yyyy-MM-dd HH:mm}), which is what the GUI does the first time.");
+            since ??= until.AddYears(-1);
+        }
+    }
+
+    if (since >= until)
+    {
+        Console.WriteLine($"\nCheckpoint is already at {Renderer.Clock(since.Value, "yyyy-MM-dd HH:mm")} — "
+                        + "no new ground to walk. (The GUI would just re-align the checkpoint here.)\n");
+        return 0;
     }
 
     Console.WriteLine($"\nBackfill dry run: {Renderer.Clock(since.Value, "yyyy-MM-dd HH:mm")} → " +
@@ -272,7 +285,8 @@ async Task<int> BackfillAsync()
         {
             if (running == lastPrinted) return;   // 空片不刷屏——按天切，一年就是 365 片
             lastPrinted = running;
-            Console.WriteLine($"  through {Renderer.Clock(through, "yyyy-MM-dd HH:mm")}   {running / 3600.0,8:F2} h");
+            Console.WriteLine($"  through {Renderer.Clock(through, "yyyy-MM-dd HH:mm")}   "
+                            + $"{running,9:N0} s = {running / 3600.0,7:F2} h");
         });
 
     Console.WriteLine($"\n{group}: {seconds} s = {seconds / 3600.0:F2} hours   ({sw.Elapsed.TotalSeconds:F1}s)\n");
@@ -326,11 +340,22 @@ int Help()
 
         ItamiTimer (一袋米要扛几楼) — command-line layer
 
-          itami start    --minutes 25 --group <goal>
-          itami replay   --since "2026-07-26 20:00" [--until ...] --minutes 25 --group <goal>
+          itami start    [--group <goal>] [--minutes 25]
           itami backfill --group <goal> [--since ...] [--until ...]
-          itami bench    --minutes 25 [--pattern focused|mixed|slack]
           itami commands [--list | --select [N] | --execute]
+
+        start dry-runs **the engine** against live ActivityWatch, on the same mirror and the
+        same judgment code the window runs (DESIGN §7.5). Every minute it prints a block: the
+        time and progress, a note if the minute just past went off task, then a fixed 2x60
+        canvas -- the dial's two laps, one column per minute, plain ASCII:
+
+          F 41-60s focus   M 21-40s   L 1-20s
+          # off-task       * away     - still owed   . not polled
+
+        Omit --group and it lists the goals in rules.json and asks. --minutes must be > 2.
+
+        It verifies the engine, not the session: no break phase, no idle nudge, no rest-wedge
+        projection. Focus achieved = it prints the bill and exits.
 
         commands works on executeCommand in the rules.json the app actually uses. The alarm
         always runs entry #0 (marked * in the listing), and re-reads the file when it fires
@@ -338,9 +363,12 @@ int Help()
 
           --list       just print them, change nothing
           --select N   move entry N to #0   (rewrites rules.json, keeps a .bak)
-          --select     same, but print the list and ask for the number
-          (no flag)    same as --select
           --execute    run #0 now, after a y/N confirm
+
+        Anything else -- a bare --select, a misspelled switch, a number that isn't in the
+        list -- prints the list with an "ignored:" note and changes nothing. Only those
+        exact forms do anything, so a typo can never run or rewrite something by accident.
+        (--execute also refuses piped input: pass --yes to run unattended, deliberately.)
 
         --execute takes no number on purpose: to try a different entry, --select it first.
         That way the entry you tested and the entry the alarm will actually run are the
@@ -352,7 +380,8 @@ int Help()
         which is what the GUI does the first time you start that goal. It writes nothing.
 
         A task lives only in this process and is never written to disk: quitting itami
-        abandons the current task.
+        abandons the current task. start and backfill only read; commands --execute writes
+        to itami.log, on purpose -- that log line is the whole point of running it.
         The rules file defaults to the one the app actually uses; override it with --rules <path>.
 
         """);
@@ -361,140 +390,6 @@ int Help()
 
 // ---------------------------------------------------------------- bench
 
-/// <summary>
-/// Dry-runs the judgment model (JudgmentBuffer + Judgment) against synthetic data.
-/// Doesn't touch ActivityWatch, doesn't write to disk -- purely verifies buffer
-/// initialization and state transitions.
-/// </summary>
-int Bench()
-{
-    var minutes = int.Parse(opt.GetValueOrDefault("minutes", "25"));
-    var pattern = opt.GetValueOrDefault("pattern", "mixed");
-
-    Console.WriteLine($"\n══════════════════════════════════════════════");
-    Console.WriteLine($"  Judgment Buffer Bench — {minutes} min focus, pattern: {pattern}");
-    Console.WriteLine($"══════════════════════════════════════════════\n");
-
-    // 1. Initialization
-    var now = new DateTimeOffset(2026, 7, 31, 9, 1, 0, TimeSpan.FromHours(8));
-    var taskStart = TimeGrid.FloorToMinute(now); // 09:01:00
-    var buf = new JudgmentBuffer(taskStart, minutes);
-    var rules = GroupRules.Parse("""{ "groups": { "bench": { "rules": [ { "app": "^goal$" } ] } } }""");
-
-    Console.WriteLine($"Task start: {Renderer.Clock(taskStart)}");
-    Console.WriteLine($"WallClock:  {Renderer.Clock(buf.WallClock)}  (buffer[0])");
-    Console.WriteLine($"Buffer[0..{JudgmentBuffer.PaddingSeconds}) = padding, "
-                    + $"[{JudgmentBuffer.PaddingSeconds}..{JudgmentBuffer.TotalSize}) = draw zone");
-    Console.WriteLine($"Focus: {minutes} min ({buf.RemainingTargetSeconds}s)\n");
-    Renderer.BufferSummary(buf);
-
-    // 2. Feed a synthetic ActivityWatch event once a minute (cap: target minutes + 1h of slack + archiving headroom)
-    // Runs until "target length + one hour of slack", or at least crosses one archive (2h + 10min)
-    var maxElapsed = Math.Max(JudgmentBuffer.DrawSeconds + 600, minutes * 60 + 3600);
-    var elapsed = 0;
-    var tick = 0;
-    var settled = 0;
-    while (elapsed < maxElapsed && !buf.IsFocusComplete)
-    {
-        tick++;
-        elapsed += 60;
-        var queryEnd = taskStart.AddSeconds(elapsed);
-        var queryStart = queryEnd.AddSeconds(-JudgmentBuffer.QueryWindowSeconds);
-
-        var (win, afk) = SyntheticEvents(queryStart, queryEnd, taskStart, pattern);
-        var outcome = buf.Tick(queryEnd, win, afk, rules, "bench");
-        settled += outcome.SettledSeconds;
-
-        if (outcome.SettledSeconds > 0)
-        {
-            Console.WriteLine($"\n--- ARCHIVE at tick {tick} (elapsed {elapsed}s = {elapsed / 60}min) ---");
-            Console.WriteLine($"  settled += {outcome.SettledSeconds}s  remaining target → {buf.RemainingTargetSeconds}s");
-            Console.WriteLine($"  task start → {Renderer.Clock(buf.TaskStart)}");
-        }
-
-        if (tick % 5 == 0 || outcome.SettledSeconds > 0 || outcome.Completed)
-            Renderer.BufferSummary(buf);
-    }
-
-    // 3. Final results
-    Console.WriteLine($"\n══════════════════════════════════════════════");
-    Console.WriteLine($"  Done. Ticks: {tick}  Elapsed: {elapsed}s ({elapsed / 60}min)");
-    Console.WriteLine($"  Archived out of the buffer: {settled}s ({settled / 3600.0:F2} hours)");
-    Console.WriteLine($"  Focus complete: {buf.IsFocusComplete}");
-    Console.WriteLine($"══════════════════════════════════════════════\n");
-
-    return 0;
-}
-
-/// <summary>
-/// Synthesizes ActivityWatch events for one 4-minute query window, imitating what
-/// ActivityWatch would return.
-///
-/// Three patterns: focused (entirely on the goal app), mixed (interleaved off-task and
-/// AFK stretches), slack (mostly off-task). Events are chopped into 10-second pieces, and
-/// the last 10 seconds are <b>deliberately left empty</b> -- simulating T3's 6-12 second
-/// lag, to see whether it gets judged AwOffline (it should, and self-heals next tick).
-/// </summary>
-static (List<AwEvent> Win, List<AwEvent> Afk) SyntheticEvents(
-    DateTimeOffset qStart, DateTimeOffset qEnd, DateTimeOffset taskStart, string pattern)
-{
-    var win = new List<AwEvent>();
-    var afk = new List<AwEvent>();
-    var n = (int)(qEnd - qStart).TotalSeconds;
-
-    for (var i = 0; i + 10 <= n - 10; i += 10)
-    {
-        var t = qStart.AddSeconds(i);
-        if (t < taskStart) continue;               // Don't fabricate data before the task started
-
-        var slot = (int)(t - taskStart).TotalSeconds / 10;
-        var (app, isAfk) = pattern switch
-        {
-            "focused" => ("goal", false),
-            "slack" => (slot % 3 == 0 ? "goal" : "chrome", false),
-            _ => slot % 15 == 3 ? ("goal", true)   // Occasionally step away
-               : slot % 5 == 0 ? ("chrome", false) // A stretch of off-task every 50 seconds
-               : ("goal", false),
-        };
-
-        win.Add(new AwEvent(t, 10, app, $"{app} window", null));
-        if (isAfk) afk.Add(new AwEvent(t, 10, null, null, "afk"));
-    }
-    return (win, afk);
-}
-
-// ---------------------------------------------------------------- Misc
-
-/// <summary>
-/// 默认读**程序真正在用的那一份 rules.json**（<see cref="AppData.RulesPath"/> 的三级
-/// 查找链），`--rules` 仍然可以指向任意文件。
-///
-/// ⚠️ **2026-08-29 改的，原来默认是当前目录下的 `./rules.json`**。改的理由是这个工具
-/// 存在的意义：`itami start` 是"界面到底会怎么判"的干跑，`backfill` 算的是界面要写进
-/// during.json 的同一个数——**判的规则跟界面不是同一份，这两件事就都不成立**
-/// （§15.7：验证工具和被验证对象必须是同一个）。
-///
-/// 现场就是这么撞见的：界面里有"学习经济学"和"编程"两个目标，而 `itami start --group
-/// 学习经济学` 直接报"没有这个目标，可用的只有 ItamiTimer"——它读的是仓库里那份默认
-/// 规则。`itami commands` 早就用 <see cref="AppData.RulesPath"/> 了，只是其余子命令
-/// 一直没跟上。
-/// </summary>
-GroupRules LoadRules()
-{
-    var path = opt.GetValueOrDefault("rules") is { Length: > 0 } p ? p : AppData.RulesPath();
-    if (!File.Exists(path))
-        throw new FileNotFoundException($"Rules file not found at {Path.GetFullPath(path)}. Use --rules to point at one.");
-    return GroupRules.Load(path);
-}
-
-/// <summary>
-/// `--key value` 成对参数，外加**不带值的布尔开关**（`--list` / `--test`）。
-///
-/// 开关的判定是"下一个参数不存在、或者它自己也是 `--` 开头"——2026-08-08 加 `commands`
-/// 时发现原来的版本会把结尾的 `--list` **整个丢掉**（它要求后面必须跟一个值），于是
-/// `itami commands --list` 悄悄退化成了默认的"挪到第一位"模式：**不报错，只是干了另一件事**，
-/// 而且是会写文件的那件。现有的 `--minutes 25` 这类调用不受影响，它们的值从不以 `--` 开头。
-/// </summary>
 static Dictionary<string, string> ParseOptions(string[] args)
 {
     var d = new Dictionary<string, string>();
@@ -506,4 +401,21 @@ static Dictionary<string, string> ParseOptions(string[] args)
         d[key] = hasValue ? args[++i] : "";
     }
     return d;
+}
+
+/// <summary>
+/// 默认读**程序真正在用的那一份 rules.json**（<see cref="AppData.RulesPath"/> 的三级
+/// 查找链），`--rules` 仍然可以指向任意文件。
+///
+/// ⚠️ **2026-08-29 改的，原来默认是当前目录下的 `./rules.json`**。改的理由是这个工具
+/// 存在的意义：`itami start` 是"界面到底会怎么判"的干跑，`backfill` 算的是界面要写进
+/// during.json 的同一个数——**判的规则跟界面不是同一份，这两件事就都不成立**
+/// （§15.7：验证工具和被验证对象必须是同一个）。
+/// </summary>
+GroupRules LoadRules()
+{
+    var path = opt.GetValueOrDefault("rules") is { Length: > 0 } p ? p : AppData.RulesPath();
+    if (!File.Exists(path))
+        throw new FileNotFoundException($"Rules file not found at {Path.GetFullPath(path)}. Use --rules to point at one.");
+    return GroupRules.Load(path);
 }
