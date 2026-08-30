@@ -21,7 +21,7 @@ namespace ItamiTimer.App;
 /// Read/write failures are always swallowed and fall back to defaults -- failing to read
 /// settings shouldn't stop the program from starting.
 /// </summary>
-public sealed class Settings
+public sealed partial class Settings
 {
     [JsonPropertyName("focusDoneEnabled")] public bool FocusDoneEnabled { get; set; } = true;
     [JsonPropertyName("focusDoneSound")] public string? FocusDoneSound { get; set; }
@@ -126,68 +126,34 @@ public sealed class Settings
     private static string Path_ => System.IO.Path.Combine(AppData.Dir, "settings.json");
 
 
-    public static Settings Load()
+    /// <summary>
+    /// **只读文件，不补任何默认值**（2026-08-30 从 <see cref="Load"/> 里拆出来）。
+    ///
+    /// 拆的理由：`itami` 也需要读 `awBaseUrl`（否则把 AW 挪过端口的用户，界面能用而
+    /// 干跑连不上——又一例"验证工具跟被验证对象不一致"）。而原来的 `Load()` 顺手还干了
+    /// "挑默认提示音"，那一段要调 <c>Sound.PreferredOrFirst</c>，把整个平台音频层拖进
+    /// 一个控制台工具里，每次启动还得扫一遍系统音效目录。
+    ///
+    /// ⚠️ **不要为了省事让 CLI 自己 `JsonDocument` 读一遍那个字段**——那就是"一个文件
+    /// 两条读取路径"，§15.4 里 `executeCommand` 被这么咬过两次（一次注释处理不一致、
+    /// 一次大小写敏感不一致），症状都是"半个文件正常、另一半安静失效"。
+    /// </summary>
+    public static Settings ReadRaw()
     {
-        Settings s;
         try
         {
-            s = File.Exists(Path_)
+            return File.Exists(Path_)
                 ? JsonSerializer.Deserialize<Settings>(File.ReadAllText(Path_)) ?? new Settings()
                 : new Settings();
         }
         catch (Exception e)
         {
             Log.Error("Failed to read settings; falling back to defaults", e);
-            s = new Settings();
+            return new Settings();
         }
-
-        // Shutting down at the due time **doesn't persist across sessions** (user,
-        // 2026-07-30): forced back to off on every launch. An unexpired alarm still fires
-        // after a restart, but it will never run the shutdown command again -- shutting
-        // down requires re-enabling the toggle in the current session. This lives in Load
-        // rather than being cleared on exit: a crash gets covered too (fail-safe).
-        s.CommandEnabled = false;
-
-        // On first run (or if the file doesn't set it), pick a sound the OS already ships
-        // with. If none can be found it's null = silent.
-        //
-        // The two platforms' sound libraries don't share a single name, so the candidate
-        // lists are written out separately per platform. Picks among macOS's 14 aiff
-        // sounds: Glass for completion (bright, carries a sense of "done"), Submarine for
-        // rest ending (a low single note, announcing rather than urging), Tink for idle --
-        // it's the lightest of the 14.
-        if (OperatingSystem.IsMacOS())
-        {
-            s.FocusDoneSound ??= Sound.PreferredOrFirst("Glass", "Hero", "Blow");
-            s.RestDoneSound ??= Sound.PreferredOrFirst("Submarine", "Bottle", "Purr");
-            s.IdleSound ??= Sound.PreferredOrFirst("Tink", "Pop", "Morse");
-            // The alarm needs to be loud: Sosumi is the most "alarm-like" of the 14 system sounds.
-            // ⚠️ Don't copy the names from the Windows branch -- Alarm01/Alarm02 don't
-            // exist on macOS, and PreferredOrFirst would silently fall back to whichever
-            // comes first alphabetically (Basso, a dull thud).
-            s.CommandSound ??= Sound.PreferredOrFirst("Sosumi", "Glass", "Ping");
-            // Alarms 清单跟闹钟共用同一分钟时靠音色分清是哪一路（DESIGN §17），必须是
-            // 跟 CommandSound 不同的候选列表，否则两边极大概率选中同一个文件。
-            s.AlarmsListSound ??= Sound.PreferredOrFirst("Funk", "Pop", "Tink");
-        }
-        else
-        {
-            s.FocusDoneSound ??= Sound.PreferredOrFirst(
-                "Windows Notify System Generic", "Windows Notify", "Alarm01", "chimes");
-            s.RestDoneSound ??= Sound.PreferredOrFirst(
-                "Windows Notify Calendar", "Windows Proximity Notification", "Alarm02", "notify");
-            // The idle sound needs to be **light**: it might fire twice a minute, and what
-            // it's asking is "are you still there", not "you're done"
-            s.IdleSound ??= Sound.PreferredOrFirst(
-                "Windows Message Nudge", "Windows Balloon", "Windows Background", "ding");
-            // This used to be missing a default for AlarmSound, so the first run was always null = silent
-            s.CommandSound ??= Sound.PreferredOrFirst("Alarm02", "Alarm01", "Ring01");
-            // Alarms 清单跟闹钟共用同一分钟时靠音色分清是哪一路（DESIGN §17），必须是
-            // 跟 CommandSound 不同的候选列表，否则两边极大概率选中同一个文件。
-            s.AlarmsListSound ??= Sound.PreferredOrFirst("Windows Notify Messaging", "notify", "chimes");
-        }
-        return s;
     }
+
+
 
     public void Save()
     {

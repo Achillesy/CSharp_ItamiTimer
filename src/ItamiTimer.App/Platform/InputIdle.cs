@@ -12,10 +12,14 @@ namespace ItamiTimer;
 /// net10.0 blocks UI frameworks, but not P/Invoke; that half is enforced by discipline
 /// alone.
 ///
-/// The file lives in App (§8.5: platform-specific code belongs to this layer), and gets
-/// linked into ItamiTimer.Cli.csproj with &lt;Compile Link&gt; -- the same source compiled
-/// on both sides, not copied. That's why the namespace is the neutral ItamiTimer, not tied
-/// to either project.
+/// The file lives in App (§8.5: platform-specific code belongs to this layer).
+///
+/// ⚠️ **It is NOT linked into ItamiTimer.Cli** -- this comment used to claim it was, and
+/// that was simply false (2026-08-30: the csproj links Command.cs / Log.cs / AppData.cs /
+/// Settings.cs, never this one). The consequence is real and intended: `itami start` has
+/// no idle nudge. That is fine -- it is a dry run of **the engine**, and poking a human to
+/// come back to work has no meaning there. The neutral `ItamiTimer` namespace is a leftover
+/// from when linking was planned; harmless, so left alone.
 ///
 /// Why not just treat this as the presence signal and drop afk entirely: **ActivityWatch
 /// keeps recording even while ItamiTimer is closed; this program's own sampling doesn't**.

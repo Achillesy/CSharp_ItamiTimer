@@ -42,6 +42,25 @@ public sealed class JudgmentBuffer
     /// <summary>The ActivityWatch query window is a fixed 4 minutes: afk defaults to taking 180 seconds to settle and backfill, so 4 minutes is guaranteed to cover it.</summary>
     public const int QueryWindowSeconds = 240;
 
+    /// <summary>
+    /// **刚跑完的那一分钟**是 <paramref name="cells"/> 里的哪一格。
+    ///
+    /// ⚠️ **绝不是 `cells[^1]`。** <c>ToMinuteCells</c> 吐的是"真实分钟 + 承诺弧那截灰色
+    /// 投影"，而投影在缺口归零之前一直非空——所以本轮的绝大部分时间里，`[^1]` 都是一个
+    /// **还没发生**的格子，`OffTaskSeconds` 恒为 0。DECISIONS L31 记的正是这个：那条
+    /// "上一分钟跑偏了多少"的诊断日志**在生产里一次都没触发过**，翻遍历史日志零命中。
+    ///
+    /// 收进 Core 是因为**两个前端各写过一遍**，而且写法不等价：App 用的是这里这个
+    /// 索引，`itami` 用的是"最后一个有秒数的格子"——长睡之后中间会出现纯
+    /// <see cref="JudgmentCode.Init"/> 的格子（五个计数全 0），后者会跳过它、报到更早的
+    /// 一分钟去。同一个规则两处定义，迟早漂（§15.7 那次事故的形状）。
+    /// </summary>
+    public static MinuteCell? LastCompleted(IReadOnlyList<MinuteCell> cells, int elapsedSeconds)
+    {
+        var real = elapsedSeconds / 60;
+        return real > 0 && real <= cells.Count ? cells[real - 1] : null;
+    }
+
     /// <summary>How many seconds one archive roll evicts.</summary>
     public const int ArchiveSeconds = 3600;
 

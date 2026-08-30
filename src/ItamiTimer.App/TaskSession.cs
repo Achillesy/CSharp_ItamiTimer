@@ -276,8 +276,7 @@ public sealed class TaskSession : IDisposable
             // The real (already-ticked) minutes come first in `cells`, the commitment arc's
             // grey projection is tacked on after them (see LastCompletedMinute's doc) -- so
             // the minute that just completed is at index ElapsedSeconds/60 - 1, never `[^1]`.
-            var realMinutes = _buffer.ElapsedSeconds / 60;
-            if (realMinutes > 0) LastCompletedMinute = cells[realMinutes - 1];
+            LastCompletedMinute = JudgmentBuffer.LastCompleted(cells, _buffer.ElapsedSeconds);
 
             Updated?.Invoke();
 
