@@ -71,6 +71,12 @@ public sealed class AwMirror
     /// <summary>已经写到的最新一秒（含）。</summary>
     public DateTimeOffset Newest { get; private set; }
 
+    /// <summary>
+    /// **真实事件画到的最新一秒**（不含预测）。`Newest` 与它之间那一段，是 AW 还没吐出来、
+    /// 只能外推的部分——`Predict` 第 ② 步每拍拿它重铺一次。<c>default</c> = 还没画过任何事件。
+    /// </summary>
+    private DateTimeOffset _observedThrough;
+
     /// <summary>环里最老的那一秒（含）。</summary>
     public DateTimeOffset Oldest => Newest.AddSeconds(-(Capacity - 1));
 
@@ -114,7 +120,7 @@ public sealed class AwMirror
     /// 而且「算专注 ⟺ <c>&gt;= Focused</c>」——`AwOffline = 5 &gt; Focused = 4` 正是靠这个
     /// 才让「无记录算专注」成立。新插一个码，插在哪儿都会动到这两条规则（DECISIONS H1）。
     /// </summary>
-    public void MarkUnavailable(DateTimeOffset now) => Advance(Floor(now));
+    public void MarkUnavailable(DateTimeOffset now) => Advance(Floor(now), carryForward: false);
 
     /// <summary>
     /// 把这一批事件吸收进来，并把镜像推进到 <paramref name="now"/>。
@@ -136,7 +142,8 @@ public sealed class AwMirror
     /// </summary>
     public void Apply(IReadOnlyList<AwEvent> windowEvents, IReadOnlyList<AwEvent> afkEvents, DateTimeOffset now)
     {
-        Advance(Floor(now));
+        var before = _observedThrough;
+        Advance(Floor(now), carryForward: true);
 
         foreach (var e in windowEvents.OrderBy(e => e.Start))
         {
@@ -150,7 +157,8 @@ public sealed class AwMirror
             if (e.Status == "afk")
                 PaintAfk(e);
 
-        Predict();
+        // 取到新数据了才重算；没取到就什么都不做——前沿已经由 Advance 沿用着。
+        if (_observedThrough > before) Predict();
     }
 
     /// <summary>
@@ -217,25 +225,52 @@ public sealed class AwMirror
     }
 
     /// <summary>规则 2「推进即清空」：跳过的槽位一律回到 <see cref="JudgmentCode.AwOffline"/>，绝不让旧数据冒充新观测。</summary>
-    private void Advance(DateTimeOffset to)
+    /// <summary>
+    /// 把环推进到 <paramref name="to"/>。**每秒 O(1)**：指针挪一格，新格按
+    /// <paramref name="carryForward"/> 决定写什么。
+    ///
+    /// <list type="bullet">
+    ///   <item><b>carryForward = true</b>（正常一拍）：新格**沿用前一格**。外推本身就是
+    ///         这么发生的——两次取数之间没有任何新信息，前沿只能是"还是刚才那样"。</item>
+    ///   <item><b>carryForward = false</b>（<see cref="MarkUnavailable"/>）：新格写
+    ///         <see cref="JudgmentCode.AwOffline"/>。**AW 连不上时绝不能外推**，否则
+    ///         钟面会拿着掉线前的判定一直闪下去（DECISIONS N8：AW 出问题一律回底色）。</item>
+    /// </list>
+    ///
+    /// ⚠️ 无论哪种模式，新格都被**显式写过**——绝不让环里 245 秒前的旧数据冒充新观测
+    /// （DECISIONS O4）。O4 原话是"一律回 AwOffline"，这里把它放宽成"一律显式重写"：
+    /// 守的东西（旧数据不许冒充新观测）一点没少，而"新的一秒沿用前一秒"正是外推的定义。
+    /// </summary>
+    private void Advance(DateTimeOffset to, bool carryForward)
     {
         if (to <= Newest) return;
 
         var gap = (to - Newest).TotalSeconds;
         if (gap >= Capacity)
         {
-            // 睡了一觉回来：整个环都过期了
+            // 睡了一觉回来：整个环都过期了，连"最后一个真实观测"也失效
             Array.Fill(_code, JudgmentCode.AwOffline);
             Array.Clear(_app);
             Array.Clear(_title);
+            _observedThrough = default;
         }
         else
         {
             for (var s = Newest.AddSeconds(1); s <= to; s = s.AddSeconds(1))
             {
                 var i = Index(s);
-                _code[i] = JudgmentCode.AwOffline;
-                _app[i] = _title[i] = null;
+                if (carryForward)
+                {
+                    var p = Index(s.AddSeconds(-1));
+                    _code[i] = _code[p];
+                    _app[i] = _app[p];
+                    _title[i] = _title[p];
+                }
+                else
+                {
+                    _code[i] = JudgmentCode.AwOffline;
+                    _app[i] = _title[i] = null;
+                }
             }
         }
         Newest = to;
@@ -261,6 +296,7 @@ public sealed class AwMirror
         for (var s = from; s < to; s = s.AddSeconds(1))
         {
             if (s > Newest || s < Oldest) continue;
+            if (s > _observedThrough) _observedThrough = s;
             var i = Index(s);
             _code[i] = code;
             _app[i] = app;
@@ -275,6 +311,7 @@ public sealed class AwMirror
         for (var s = from; s < to; s = s.AddSeconds(1))
         {
             if (s > Newest || s < Oldest) continue;
+            if (s > _observedThrough) _observedThrough = s;
             _code[Index(s)] = JudgmentCode.Afk;
         }
     }
@@ -287,8 +324,19 @@ public sealed class AwMirror
     /// 部分。⚠️ 预测**只往后传**，不会跨过环的起点——所以 watcher 死掉时它最多把最后那个
     /// 窗口延续 <see cref="Capacity"/> 秒，不会像无上限外推那样画出几小时。
     /// </summary>
+    /// <summary>
+    /// 规则 3 的两步，**只在这一拍真的取到了新数据时才跑**（`Apply` 用
+    /// <c>_observedThrough</c> 有没有前进来判断）。两次取数之间的那几秒，前沿由
+    /// <see cref="Advance"/> 的"沿用前一格"维持着，什么都不用重算。
+    ///
+    /// ⚠️ **这里不认识"5 秒"这个数字**：节拍由 <see cref="MirrorFeed.PollSeconds"/> 决定，
+    /// 改成 3 秒或 15 秒，这个类一个字都不用动（用户 2026-08-31 要的通用性）。
+    /// </summary>
     private void Predict()
     {
+        // ① 空隙：事件与事件之间那 ~1 秒的洞，以及初始化时历史事件之间的洞，
+        //    沿用**前一秒**。（正常推进产生的秒已经由 Advance 沿用过了，这里只补
+        //    真正没被任何事件画到、又还停在 AwOffline 上的格子。）
         for (var s = Oldest.AddSeconds(1); s <= Newest; s = s.AddSeconds(1))
         {
             var i = Index(s);
@@ -300,6 +348,30 @@ public sealed class AwMirror
             _code[i] = _code[p];
             _app[i] = _app[p];
             _title[i] = _title[p];
+        }
+
+        // ② 末尾：真实画笔够不到的那 3~10 秒，拿 `_observedThrough` 那一格
+        //    **把整段覆盖掉**——不是逐格继承，也不是"只填还空着的"。
+        //
+        // ⚠️ **必须是「覆盖」，写成「只填还空着的秒」就会炸**（2026-08-31 实机事故，
+        // 用户定位并指定算法）：AW 的 ongoing 事件 duration 恒定落后实时 ~10 秒，环的
+        // 最前沿**永远够不到真实画笔**，只能外推。若外推值写下去就锁死，切窗口那一刻
+        // 外推的旧判定会被永久钉在前沿上——真实事件随后只能改正它身后那段，前沿始终
+        // 差最后一两格，而**逐秒读前沿的正是钟面闪烁（§8.9）和滴答（§10）**。实机表现
+        // 为进出跑偏晚 58 秒、113 秒，甚至整轮都不翻：延迟由 AW 提交周期(~10s) 与轮询
+        // 周期(5s) 的拍频决定，**无上限**。账本不受影响（每个整分钟读四分钟窗口，末尾
+        // 那十秒早被重画对了），所以现象是「计时完全正确、只有闪烁瞎」，极难往镜像上想。
+        if (_observedThrough < Oldest || _observedThrough >= Newest) return;
+
+        var src = Index(_observedThrough);
+        if (_code[src] == JudgmentCode.AwOffline) return;   // 没有可外推的值
+
+        for (var s = _observedThrough.AddSeconds(1); s <= Newest; s = s.AddSeconds(1))
+        {
+            var i = Index(s);
+            _code[i] = _code[src];
+            _app[i] = _app[src];
+            _title[i] = _title[src];
         }
     }
 }
