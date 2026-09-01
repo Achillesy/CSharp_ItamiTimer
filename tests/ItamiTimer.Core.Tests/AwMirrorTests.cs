@@ -129,6 +129,39 @@ public class AwMirrorTests
     }
 
     [Fact]
+    public void 切走之后前沿要跟着变_哪怕真实事件永远够不到最后十秒()
+    {
+        // ⚠️ 2026-08-31 的真实事故。上面那条测试**抓不住它**：那里喂的事件 span 正好
+        // 盖住了预测过的秒，而真实的 AW 永远盖不住——ongoing 事件的 duration 恒定落后
+        // 实时约 10 秒（实测），所以环最前面那十秒**只能靠预测**。
+        //
+        // 钟面闪烁和滴答读的正是 `now-1`（DESIGN §8.9），落在这个"只能靠预测"的带子里。
+        // 预测过的秒如果不许再改，切走那一刻猜下的旧判定就被永久钉在前沿上：用户跑偏
+        // 一整轮，钟面一次都不闪。实机上表现为进出跑偏晚 58 秒、113 秒，甚至永远不变
+        // ——延迟由 AW 的提交周期(~10s)和轮询周期(5s)的**拍频**决定，无上限。
+        //
+        // 账本不会暴露这个 bug：它每个整分钟读四分钟的窗口，末尾那十秒早被重画对了。
+        const int Lag = 10;
+        var m = New(-60);
+
+        // ① 切走之前，一直在目标窗口里
+        m.Apply([Win(-60, 60, "Reader.exe")], [], At(0));
+        Assert.Equal(JudgmentCode.Focused, Code(m, -1));
+
+        // ② 0 秒切走。之后每秒推进一次，而 AW 吐出来的新事件**永远短 10 秒**
+        for (var t = 1; t <= 60; t++)
+        {
+            var seen = new List<AwEvent> { Win(-60, 60, "Reader.exe") };
+            if (t - Lag > 0) seen.Add(Win(0, t - Lag, "Chat.exe"));
+            m.Apply(seen, [], At(t));
+        }
+
+        // ③ 一分钟之后，前沿必须已经跟上，而不是被钉死在切走前那一刻的判定上
+        Assert.Equal(JudgmentCode.OffTask, Code(m, 59));   // now-1：闪烁读的就是这一格
+        Assert.Equal(JudgmentCode.OffTask, Code(m, 60));   // now
+    }
+
+    [Fact]
     public void 改正的范围由事件自己的start决定不受四分钟窗口以外的影响()
     {
         // 三分半之前的那一秒照样改得动——只要还在环里
