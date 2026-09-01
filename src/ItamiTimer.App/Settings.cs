@@ -68,7 +68,6 @@ public sealed partial class Settings
     /// </summary>
     [JsonPropertyName("tickEnabled")] public bool TickEnabled { get; set; }
 
-    /// <summary>Force ticking: when on, the main window's ticking icon is hidden and can't be manually turned off.</summary>
     /// <summary>The last selected goal's name. Restored on startup.</summary>
     [JsonPropertyName("selectedGroup")] public string? SelectedGroup { get; set; }
 
@@ -76,6 +75,7 @@ public sealed partial class Settings
     // This file gets rewritten wholesale by the program at any time, while accumulated
     // time is the one piece of data that, once lost, can never be recovered.
 
+    /// <summary>Force ticking: when on, the main window's ticking icon is hidden and can't be manually turned off.</summary>
     [JsonPropertyName("forceTicking")] public bool ForceTicking { get; set; }
 
     /// <summary>Tick volume, 0-100. The timbre is synthesized, no options to choose from (<see cref="Tick"/>).</summary>
