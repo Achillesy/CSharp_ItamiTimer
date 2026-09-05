@@ -95,6 +95,14 @@ public partial class MainWindow : Window
     private const int AlarmsListRings = 2;
 
     /// <summary>
+    /// 提示条正文最多几行（3.7.0）。**算出来的硬上限，不是保守取值**——提示条跟骨牌叠在
+    /// 同一个 <c>Auto</c> 高的 Grid 格子里，第三行会把那一行撑高、把下面的卡片顶下去，
+    /// 而卡片那个 <c>-4</c> 的负边距是按骨牌 76px 死算的（DECISIONS K16）。完整的高度
+    /// 预算写在 <c>MainWindow.axaml</c> 提示条上面那段注释里。
+    /// </summary>
+    private const int BannerMaxLines = 2;
+
+    /// <summary>
     /// Alarms 清单的去重水位线：(after, now] 区间内到点的条目才算"新到点"（见
     /// <see cref="AlarmsList.Due"/>）。**纯内存，不持久化，初始化成启动那一刻而不是
     /// null**——已经定了"不补响、只看未来"，程序关闭期间错过的条目重新打开后直接跳过，
@@ -673,15 +681,27 @@ public partial class MainWindow : Window
 
         if (due.Count > 0)
         {
-            // 跟闹钟的 Command.Execute 同一个理由记一笔：提示条只显示一分钟，这行日志是
-            // 之后唯一还能查到"当时到底响过什么"的地方。
-            foreach (var entry in due) Log.Info($"Alarms 清单到点: {entry.Text}");
+            // **这行历史是唯一的反馈渠道**（3.7.0，用户 2026-09-03 定）：写错的 cron 一律
+            // 安静跳过、不报警，所以"提醒没响"要靠翻这里查不到记录来反推。因此**带上命中
+            // 的那条表达式原文**——多条规则时不带它就只知道响过，不知道是哪一行响的。
+            // 一条一行，绝不合并。
+            // ⚠️ 前缀必须是 `Alarms list fired`，**不能只写 `Alarm fired`**：手拨闹钟那条
+            // 路已经在用 `Alarm fired; running executeCommand: ...`（见上面第 4 步），
+            // 两条撞在一起 grep 出来分不开，而这行日志正是排查"提醒怎么没响"的唯一手段。
+            foreach (var entry in due)
+                Log.Info($"Alarms list fired {entry.At:HH:mm} [{entry.Expression}] {entry.Text}");
             ShowAlarmBanner(due, now, TimeSpan.FromMinutes(1));   // 无条件：屏幕上一定看得见
-            foreach (var entry in due) Notify.Show(entry.Text);   // 无条件：系统通知，多一份关掉程序也能翻看的记录（DECISIONS J13）
+            // 无条件，而且**一条事件一个通知，永远不合并**（用户 2026-09-03 点名）：提示条
+            // 那边受两行的硬上限约束、多出来的只剩一个 `+N`，通知中心这份才是不丢的那份。
+            foreach (var entry in due) Notify.Show(entry.Text);
             if (_settings.AlarmsListEnabled) Sound.Repeat(_settings.AlarmsListSound, AlarmsListRings);
         }
 
-        F<DialControl>("Dial").AlarmsDotMinutes = AlarmsList.DotPosition(AlarmsList.Next(entries, now), now);
+        // 红圈：下一条的角度 + 那一分钟是不是不止一条（不止一条画双圈，DESIGN §9.1）
+        var next = AlarmsList.NextDue(entries, now);
+        var dial = F<DialControl>("Dial");
+        dial.AlarmsDotMinutes = AlarmsList.DotPosition(next.Count > 0 ? next[0] : null, now);
+        dial.AlarmsDotMultiple = next.Count > 1;
     }
 
     /// <summary>
@@ -697,8 +717,15 @@ public partial class MainWindow : Window
     /// </summary>
     private void ShowAlarmBanner(IReadOnlyList<AlarmEntry> due, DateTime now, TimeSpan visibleFor)
     {
+        // **一条一行，不是 `A / B / C` 挤成一行**（3.7.0）：同一分钟多条在 crontab 下变得
+        // 寻常，挤一行读起来很容易漏掉后面那几条——这正是用户提这一轮的起因。
+        //
+        // ⚠️ **最多两条**，硬上限，理由在 MainWindow.axaml 那段注释里（提示条跟骨牌叠在
+        // 同一个 Auto 高的格子里，第三行会把整个窗口撑高）。多出来的缀在**时间行**末尾
+        // 写成 `+N`，不占新的一行。屏幕上省掉的那几条**在系统通知和 itami.log 里一条不少**。
         var time = due[0].At.ToString("HH:mm");
-        var text = string.Join(" / ", due.Select(e => e.Text));
+        if (due.Count > BannerMaxLines) time += $"  +{due.Count - BannerMaxLines}";
+        var text = string.Join("\n", due.Take(BannerMaxLines).Select(e => e.Text));
 
         // 深色底层 + 蓝色错位叠层，内容完全一样，两层都要设（DESIGN §9.1）
         F<TextBlock>("AlarmBannerTime").Text = time;
@@ -719,36 +746,53 @@ public partial class MainWindow : Window
     /// 那条到点真正触发的路径完全隔离，点这一下绝不会让后面真正到点时的提醒被冲掉或
     /// 提前消费——这是这个功能唯一不能妥协的一条。
     ///
-    /// 没有下一条（<c>alarms.md</c> 是空的，或者压根没红圈可点）就什么都不做，
+    /// 没有下一条（<c>alarms.cron</c> 是空的，或者压根没红圈可点）就什么都不做，
     /// 静默返回；红圈都没画出来时 <see cref="DialControl.HitTestAlarmsDot"/> 已经先
     /// 挡掉了这一条分支，这里理论上不会走到，多一层判断只是防御性的。
+    ///
+    /// 拿的是 <see cref="AlarmsList.NextDue"/>（那一分钟上的**全部**条目）而不是单独一条：
+    /// 红圈画成双圈就是在说"这一刻不止一件事"，点开只给一条等于说了一半。停留时长跟着
+    /// 条数走（见 <see cref="PeekSeconds"/>）。
     /// </summary>
     private bool OnAlarmsDotClicked()
     {
-        var next = AlarmsList.Next(ReadAlarmsList(), DateTime.Now);
-        if (next is not { } entry) return false;
-        ShowAlarmBanner([entry], DateTime.Now, TimeSpan.FromSeconds(3));
+        var next = AlarmsList.NextDue(ReadAlarmsList(), DateTime.Now);
+        if (next.Count == 0) return false;
+        ShowAlarmBanner(next, DateTime.Now, PeekSeconds(next.Count));
         return true;
     }
 
     /// <summary>
-    /// 读 <c>alarms.md</c>。程序只读不回写不清理——文件不存在（还没建过）就当空清单，
-    /// 任何读取/解析失败都安静收场，一个格式错误的清单文件绝不能把程序搞挂。
-    ///
-    /// <c>File.ReadAllText(path)</c> 默认就按 UTF-8 解码、且会自动探测并跳过开头的
-    /// BOM——Windows 记事本存的 UTF-8 经常带 BOM，不能依赖系统默认代码页（中文 Windows
-    /// 是 GBK，会话乱码）。
+    /// 瞄一眼停留多久：一条 3 秒，每多一条 +1 秒，封顶 6 秒。跟到点真触发那次的 1 分钟
+    /// 分开——那是"这件事现在该做了"，这只是扫一眼。
     /// </summary>
-    private static IReadOnlyList<AlarmEntry> ReadAlarmsList()
+    private static TimeSpan PeekSeconds(int count) => TimeSpan.FromSeconds(Math.Min(3 + (count - 1), 6));
+
+    /// <summary>
+    /// 读 <c>alarms.cron</c>（3.7.0 起是一份标准 crontab，不再是 Markdown 清单）。程序
+    /// 只读不回写不清理不生成——文件不存在（还没建过）就当空清单，任何读取/解析失败都
+    /// 安静收场，一个格式错误的清单文件绝不能把程序搞挂。
+    ///
+    /// <c>File.ReadAllText(path)</c> **跟 <c>rules.json</c>/<c>settings.json</c> 是同一条
+    /// 路**：默认按 UTF-8 解码、自动探测并跳过开头的 BOM，所以注释和提醒文字写中文跟
+    /// <c>rules.json</c> 里的中文组名是同一个机制。**刻意用宽容解码而不是严格解码**——
+    /// 万一文件被存成了 GBK，宽容解码只是中文变乱码、五个 ASCII 字段照常解析、规则照常
+    /// 触发；严格解码会在非法字节上抛异常，被下面这个 catch 吞掉之后整份文件当空清单，
+    /// 那是"一个字符存错、所有提醒集体消失"，比乱码坏得多。
+    ///
+    /// **每分钟整个重读重解析一遍，没有缓存、没有 FileSystemWatcher**（DESIGN §9.2）：
+    /// 文件几 KB、几十行，解析是微秒级，换来的是"改完最多一分钟生效、不用重启"。
+    /// </summary>
+    private static IReadOnlyList<CronEntry> ReadAlarmsList()
     {
         try
         {
-            var path = Path.Combine(AppData.Dir, "alarms.md");
+            var path = Path.Combine(AppData.Dir, "alarms.cron");
             return File.Exists(path) ? AlarmsList.Parse(File.ReadAllText(path)) : [];
         }
         catch (Exception e)
         {
-            Log.Error("Failed to read alarms.md; treating as empty for this check", e);
+            Log.Error("Failed to read alarms.cron; treating as empty for this check", e);
             return [];
         }
     }

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Packs ItamiTimer into a macOS .app and installs it to ~/Applications/.
+# Packs ItamiTimer into dist/ItamiTimer-<version>-macOS-arm64.dmg.
 # The macOS counterpart of the Windows side's:
 #     dotnet publish src/ItamiTimer.App -c Release -r win-x64 --self-contained false \
 #         -o "$LOCALAPPDATA/Programs/ItamiTimer"
@@ -20,27 +20,37 @@
 # So CFBundleName must be **pinned to ItamiTimer**, the same rule and the same reasoning as
 # pinning AssemblyName on the Windows side.
 #
-# Usage:  ./pack-macos.sh            installs to ~/Applications/ItamiTimer.app
-#         ./pack-macos.sh <dir>      installs to the given directory
-#         ./pack-macos.sh --dmg     also builds dist/ItamiTimer-<version>-macOS-arm64.dmg,
-#                                    for handing to other people (not notarized, see the
-#                                    Read Me it carries -- Apple Silicon only, framework-
-#                                    dependent: the .NET 10 Runtime must already be installed)
+# Usage:  ./pack-macos.sh [--dmg]
+#
+# ⚠️ **This script produces the release image and nothing else.** It used to also install
+# the .app to ~/Applications (or a directory given as $1), which made it double as "put a
+# runnable build somewhere for me to poke at" -- that role is gone (CLAUDE.md: local
+# testing runs the bin/Debug or bin/Release output right inside the project directory; an
+# installed copy sitting beside the one from the .dmg only creates "which one am I
+# actually running?"). The bundle is now assembled in a temp dir and thrown away with it.
+#
+# --dmg is accepted and ignored: it's what CLAUDE.md and muscle memory both say, and the
+# .dmg is the only thing this script makes either way.
+#
+# The image is not notarized and is framework-dependent (the .NET 10 Runtime must already
+# be installed) -- see the Read Me it carries. Apple Silicon only.
 set -euo pipefail
 
 cd "$(dirname "$0")"
 
-DMG=0
-DEST_DIR="$HOME/Applications"
 for arg in "$@"; do
     case "$arg" in
-        --dmg) DMG=1 ;;
-        *) DEST_DIR="$arg" ;;
+        --dmg) ;;   # accepted and ignored, see the note above
+        *) echo "usage: $0 [--dmg]   (builds dist/ItamiTimer-<version>-macOS-arm64.dmg)" >&2; exit 2 ;;
     esac
 done
-APP="$DEST_DIR/ItamiTimer.app"
+
 STAGE="$(mktemp -d)"
-trap 'rm -rf "$STAGE"' EXIT
+DMG_STAGE="$(mktemp -d)"
+trap 'rm -rf "$STAGE" "$DMG_STAGE"' EXIT
+
+# The bundle is built straight into the .dmg staging dir -- nothing is installed anywhere.
+APP="$DMG_STAGE/ItamiTimer.app"
 
 # Single source of truth for the version: Directory.Build.props, same value the app itself
 # reads at runtime (see SettingsWindow.axaml.cs). Bump it in exactly one place.
@@ -137,21 +147,15 @@ echo "==> ad-hoc signing"
 codesign --force --deep --sign - "$APP" 2>/dev/null || echo "   (signing failed; right-click -> Open the first time)"
 
 echo
-echo "Installed: $APP"
-echo "Run:       open -a \"$APP\""
+echo "==> building .dmg"
+ln -s /Applications "$DMG_STAGE/Applications"
 
-if [ "$DMG" = "1" ]; then
-    echo
-    echo "==> building .dmg"
-    DMG_STAGE="$(mktemp -d)"
-    trap 'rm -rf "$STAGE" "$DMG_STAGE"' EXIT
-    cp -R "$APP" "$DMG_STAGE/"
-    ln -s /Applications "$DMG_STAGE/Applications"
-
-    # The only thing an end user needs to know that Finder can't tell them itself:
-    # this build isn't notarized, and it's framework-dependent (needs the .NET 10
-    # Runtime already on the machine). Both are one-time, first-run problems.
-    cat > "$DMG_STAGE/Read Me.txt" <<NOTE
+# What the .dmg carries besides the app: the things Finder can't tell the user itself --
+# this build isn't notarized, it's framework-dependent (needs the .NET 10 Runtime already
+# on the machine), the itami CLI exists, and alarms.cron is hand-written.
+# ⚠️ This heredoc is **one of the four user-facing documents** (CLAUDE.md): README.md,
+# README_ZH.md, installer/README.txt, and this. It has been missed once (DECISIONS L30).
+cat > "$DMG_STAGE/Read Me.txt" <<NOTE
 ItamiTimer $VERSION for macOS (Apple Silicon)
 
 Requires the .NET 10 Runtime (not the SDK):
@@ -223,20 +227,53 @@ unanswered -- running "\$ITAMI commands --execute" once from Terminal gets it
 asked and answered while you are actually there.
 
 
+Recurring reminders (alarms.cron)
+=================================
+
+Separate from the alarm hand on the dial, ItamiTimer watches a standard crontab
+for the things that come back. Create alarms.cron in the folder below, by hand:
+
+  # m    h     dom mon dow    reminder
+    0    14    *   *   *      Take medication
+    30   21    *   *   1-5    Evening check-in
+  # 0    7     *   *   *      Commented out, stays quiet
+    @daily                    Daily review
+
+The five time fields follow crontab(5) exactly, including the classic gotcha:
+when neither the day-of-month nor the day-of-week field starts with *, they are
+OR'd, so "0 0 1 * MON" fires on the 1st OR on Mondays. Column 6 is the reminder
+text -- it is NEVER executed. This file cannot run anything.
+
+Nothing is validated. A line that doesn't parse is skipped in silence. The one
+signal you get is the opposite one: every reminder that DOES fire writes a line
+to itami.log with the expression that matched. If a reminder never arrives,
+look there -- no line means the rule never matched, so you mistyped it.
+
+The program only reads this file; it never writes it and never creates it. To
+silence a line, comment it out with #. Reminders missed while the program was
+closed are skipped, never caught up.
+
+UPGRADING FROM 3.6.x: this replaces the old alarms.md checklist, which is no
+longer read at all -- not migrated, not warned about. Move anything you still
+want into alarms.cron by hand. A genuinely one-off reminder has no crontab
+equivalent; use the dial's alarm hand for that.
+
+
 Where things live
 -----------------
 
   ~/Library/Application Support/ItamiTimer/rules.json      goals + executeCommand
+  ~/Library/Application Support/ItamiTimer/alarms.cron     recurring reminders (you write it)
   ~/Library/Application Support/ItamiTimer/settings.json   sounds, switches, theme, position
+  ~/Library/Application Support/ItamiTimer/during.json     accumulated focus time per goal
   ~/Library/Application Support/ItamiTimer/itami.log       what happened, and why
 
 The window itself never explains anything and never shows a report -- that is
 deliberate. itami.log is where you look afterwards.
 NOTE
 
-    mkdir -p dist
-    DMG_PATH="dist/ItamiTimer-$VERSION-macOS-arm64.dmg"
-    rm -f "$DMG_PATH"
-    hdiutil create -volname "ItamiTimer" -srcfolder "$DMG_STAGE" -ov -format UDZO -quiet "$DMG_PATH"
-    echo "Release image: $DMG_PATH"
-fi
+mkdir -p dist
+DMG_PATH="dist/ItamiTimer-$VERSION-macOS-arm64.dmg"
+rm -f "$DMG_PATH"
+hdiutil create -volname "ItamiTimer" -srcfolder "$DMG_STAGE" -ov -format UDZO -quiet "$DMG_PATH"
+echo "Release image: $DMG_PATH"

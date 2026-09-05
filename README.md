@@ -158,7 +158,7 @@ Runtime data:
 | `rules.json` | **you**, by hand | your goals, and optionally `executeCommand` |
 | `settings.json` | the program | sound choices, switches, the alarm time, the window position |
 | `during.json` | the program | accumulated focus seconds per goal, and how far that count has been carried |
-| `alarms.md` | **you** (or a script), by hand | scheduled reminders — see below |
+| `alarms.cron` | **you**, by hand | recurring reminders, as a standard crontab — see below |
 | `itami.log` | the program | 1 MB rolling; the UI is silent, so this is the only place to find out what happened |
 
 Task state is **never** written to disk. Closing the program abandons the current round.
@@ -182,25 +182,58 @@ Two consequences worth knowing:
 - **The first time you start a given goal, it counts your whole history** — which can take
   a moment, and makes the number jump once. After that each backfill is small.
 
-### Scheduled reminders (Alarms list)
+### Recurring reminders (Alarms list)
 
-Separate from the one-shot alarm hand on the dial, ItamiTimer can also watch a plain
-Markdown checklist for standing appointments — medication, a check-in time you set in your
-own notes or calendar, anything with a fixed moment attached. Point a script (or your own
-hand) at `alarms.md` in the data directory above:
+Separate from the one-shot alarm hand on the dial, ItamiTimer watches **a standard
+crontab** for the things that come back — medication, a nightly check-in, a monthly
+reconciliation. Write `alarms.cron` in the data directory above, by hand:
 
-```markdown
-- [ ] 2026-08-06 14:00 Take medication
-- [ ] 2026-08-06 21:30 Evening check-in
-- [x] 2026-08-05 09:00 Already done — check it off to mute a single entry
+```cron
+# ItamiTimer alarms.
+# Column 6 is reminder text, not a command. It is never executed.
+#
+# m    h     dom mon dow    reminder
+  0    14    *   *   *      Take medication
+  30   21    *   *   1-5    Evening check-in
+  */30 10-18 *   *   MON-FRI  Get up and walk
+# 0    7     *   *   *      Commented out, stays quiet
+  @daily                    Daily review
 ```
 
-The program only ever reads this file — it never writes back, never deletes a past entry,
-and never expands a recurring rule ("every day at 2pm") on its own; whatever generates the
-file is responsible for laying down each occurrence as its own line. Every minute, due
-entries raise a system notification unconditionally; whether they also play a sound is a
-toggle in Settings. A small red dot appears near the wooden rim of the dial when the next
-entry is under 12 hours away.
+The five time fields follow **crontab(5) exactly** — `*`, `5`, `1-5`, `1,3,5`, `*/15`,
+`1-9/2`, three-letter day and month names, `0` and `7` both mean Sunday, and the
+`@daily`/`@hourly`/`@weekly`/`@monthly`/`@yearly` aliases. That includes the classic
+gotcha: when **neither** the day-of-month nor the day-of-week field starts with `*`, they
+are OR'd, so `0 0 1 * MON` fires on the 1st **or** on Mondays. `@reboot` is not supported.
+
+Everything else about the file is deliberately blunt:
+
+- **Column 6 is text, never a command.** This file cannot run anything.
+- **Nothing is validated.** A line that doesn't parse is skipped in silence — no warning,
+  no log entry. The one signal you get is the opposite one: every reminder that *does* fire
+  writes a line to `itami.log` with the expression that matched
+  (`Alarms list fired 23:55 [55 23 1 * *] Monthly reconciliation`). If a reminder never arrives,
+  look there — no line means the rule never matched, which means you mistyped it.
+- **The program only reads.** It never writes back and never creates the file. To silence
+  one line, comment it out with `#`.
+- **Nothing is caught up.** Reminders missed while the program was closed are skipped;
+  it only ever looks forward from the moment it started.
+
+Every minute, due reminders raise a system notification — **one per reminder, never
+merged** — plus a banner on the dominoes; whether they also play a sound is a toggle in
+Settings. When several land on the same minute the banner shows the first two and counts
+the rest as `+N`, but the notifications and the log never elide anything.
+
+A small ring appears near the wooden rim of the dial when the next reminder is under 12
+hours away. **Red means one reminder; orange with a red dot in the middle means that
+minute holds more than one.** Click the ring to peek at what's coming.
+
+#### Upgrading from 3.6.x
+
+3.7.0 replaces the old Markdown checklist (`alarms.md`, one absolute timestamp per line)
+with the crontab above. The old file is **no longer read at all** — it is not migrated and
+not warned about. Move whatever you still want into `alarms.cron` by hand; anything that
+was genuinely one-off has no crontab equivalent, so use the dial's alarm hand for that.
 
 
 

@@ -19,7 +19,7 @@ public sealed record DialPalette(
     Color BezelLit, Color BezelMid, Color BezelDark,
     Color Focus, Color Amber, Color Slack, Color Absent, Color Pending, Color Sweep, Color Rest,
     Color DominoTop, Color DominoFace, Color DominoSide,
-    Color Alarm, Color AlarmsDot)
+    Color Alarm, Color AlarmsDot, Color AlarmsDotOuter)
 {
     /// <summary>Day face: a plain white face plus a wooden bezel (tuned against the reference photo the user provided).</summary>
     public static readonly DialPalette Light = new(
@@ -63,7 +63,13 @@ public sealed record DialPalette(
         Alarm: Color.FromRgb(0xF0, 0xC0, 0x40),
         // Alarms 清单的小红圈（DESIGN §17）：独立的一个色号，即便数值上跟 Slack 相近，
         // 也不共用同一个 token——以后想单独调其中一个都不会牵动另一个。
-        AlarmsDot: Color.FromRgb(0xD6, 0x45, 0x3F));
+        AlarmsDot: Color.FromRgb(0xD6, 0x45, 0x3F),
+        // 同一分钟不止一条时，外圈换成**橙色**、中心那点仍是上面的红（3.7.0，用户
+        // 2026-09-03：两圈同色看不出是两个）。同理另起一个 token 而不是复用 Amber
+        // (#E0A03A)——那是色环"21-40 秒专注"那一档的语义色，跟提醒没关系。
+        // 取值偏"艳橙"不是随手挑的：这个标记的圆心压在木框上（半径 1.0），淡一点的橙
+        // 会糊进木色（#B57C4C）里，红色本来就是靠对比度选的，橙色得把这份对比度接住。
+        AlarmsDotOuter: Color.FromRgb(0xE8, 0x6A, 0x16));
 
     /// <summary>
     /// Night face: a deep grey face, **the same wooden bezel**.
@@ -98,7 +104,8 @@ public sealed record DialPalette(
         DominoFace: Color.FromRgb(0x6E, 0x56, 0x3C),
         DominoSide: Color.FromRgb(0x93, 0x77, 0x57),
         Alarm: Color.FromRgb(0xF5, 0xD0, 0x50),
-        AlarmsDot: Color.FromRgb(0xE9, 0x63, 0x5C));
+        AlarmsDot: Color.FromRgb(0xE9, 0x63, 0x5C),
+        AlarmsDotOuter: Color.FromRgb(0xFA, 0x8A, 0x3C));
 
     /// <summary>
     /// 跑偏反色用的**半反色调色板**（DESIGN §8.9）：只把**钟面、刻度、指针**换成另一档，

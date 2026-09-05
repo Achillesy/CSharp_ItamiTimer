@@ -43,6 +43,26 @@ public class DialControl : Control
     private const double RAlarmsDotStroke = 0.022;
 
     /// <summary>
+    /// 同一分钟不止一条时，在圈**里面**再画一个**实心点**（3.7.0，DESIGN §9.1）。
+    /// **内缩不外扩**：外径原样不变，所以这个标记的占位、命中范围、跟木框的关系全都不用
+    /// 重算——只是圈里多了一点，读起来像个靶心。
+    ///
+    /// ⚠️ **为什么内圈是实心点而不是第二个圆环**（用户 2026-09-03 报"两圈同色看不出是
+    /// 两个"，查出来根因不止是颜色）：外圈占 <c>0.039~0.061</c>（半径 0.05 ± 半个描边
+    /// 0.011），里面只剩到 0.039 为止的空间。表盘半径实测 ≈140px，也就是外圈内缘只在
+    /// 5.5px 处——想在里面再塞一个"环 + 可见的间隙"，环的描边和间隙各只能分到 1px 出头，
+    /// 在非 Retina 屏上就是一团糊。最初那版 <c>0.032 ± 0.011 = 0.021~0.043</c> 更糟：
+    /// 0.043 &gt; 0.039，**两笔描边本来就是叠着的**，同色时必然读成一个粗环。
+    /// 实心点半径 0.020（≈2.8px）离外圈内缘还有 2.7px 空白，这个尺寸上只有它读得出来。
+    /// 想要"真的两个环"就只能整体放大，那正是 DECISIONS J21 否掉的外扩式。
+    ///
+    /// 只有"一条"和"不止一条"两态，**不数到三**：表盘是扫一眼的界面，"2 件还是 3 件"
+    /// 这个精度换不来行动上的差别，而"不止一件"能——它正好告诉你这一下值得点开看。
+    /// 真正防丢失的是点开后那条多行提示条（DECISIONS）。
+    /// </summary>
+    private const double RAlarmsDotInnerRadius = 0.020;
+
+    /// <summary>
     /// 点击命中红圈的额外容差，**固定像素，不跟着 <c>rFace</c> 缩放**（2026-08-27，
     /// DESIGN §17.1）：红圈本身在这块表盘常见尺寸下画出来大约只有 7px 半径，纯几何
     /// 精确点太挑手感。这圈容差是隐形的——不改画出来的样子，只放宽"算不算点中"。
@@ -116,6 +136,13 @@ public class DialControl : Control
     public static readonly StyledProperty<double?> AlarmsDotMinutesProperty =
         AvaloniaProperty.Register<DialControl, double?>(nameof(AlarmsDotMinutes));
 
+    /// <summary>
+    /// 下一条那一分钟上是不是**不止一条**（3.7.0）：true 就在红圈里面再画一圈。
+    /// 跟 <see cref="AlarmsDotMinutes"/> 一样由调用方每拍整个重算，不需要"清除"。
+    /// </summary>
+    public static readonly StyledProperty<bool> AlarmsDotMultipleProperty =
+        AvaloniaProperty.Register<DialControl, bool>(nameof(AlarmsDotMultiple));
+
     public DialPalette Palette { get => GetValue(PaletteProperty); set => SetValue(PaletteProperty, value); }
     public IReadOnlyList<MinuteCell> Cells { get => GetValue(CellsProperty); set => SetValue(CellsProperty, value); }
     public DateTimeOffset? StartedAt { get => GetValue(StartedAtProperty); set => SetValue(StartedAtProperty, value); }
@@ -123,11 +150,13 @@ public class DialControl : Control
     public double RestMinutes { get => GetValue(RestMinutesProperty); set => SetValue(RestMinutesProperty, value); }
     public double AlarmMinutes { get => GetValue(AlarmMinutesProperty); set => SetValue(AlarmMinutesProperty, value); }
     public double? AlarmsDotMinutes { get => GetValue(AlarmsDotMinutesProperty); set => SetValue(AlarmsDotMinutesProperty, value); }
+    public bool AlarmsDotMultiple { get => GetValue(AlarmsDotMultipleProperty); set => SetValue(AlarmsDotMultipleProperty, value); }
 
     static DialControl()
         => AffectsRender<DialControl>(PaletteProperty, CellsProperty, StartedAtProperty,
                                       RestFromProperty, RestMinutesProperty,
-                                      AlarmMinutesProperty, AlarmsDotMinutesProperty);
+                                      AlarmMinutesProperty, AlarmsDotMinutesProperty,
+                                      AlarmsDotMultipleProperty);
 
     // 12 o'clock is 0°, clockwise, minute × 6° (§8.2)
     private static Point At(Point c, double r, double deg)
@@ -212,8 +241,17 @@ public class DialControl : Control
         if (AlarmsDotMinutes is not { } minutes) return;
         var deg = (minutes % AlarmClock.FaceMinutes) / 2.0;   // 720 分钟 = 360°，跟黄针同一个换算
         var at = At(c, R(RAlarmsDot), deg);
-        var pen = new Pen(new SolidColorBrush(Palette.AlarmsDot), R(RAlarmsDotStroke));
-        ctx.DrawEllipse(null, pen, at, R(RAlarmsDotRadius), R(RAlarmsDotRadius));
+
+        // 同一分钟不止一条 -> **外圈换成橙色 + 中心补一个红色实心点**（3.7.0）。外径不变，
+        // 命中范围也就不用跟着改。两态用的是**两个独立信号**：颜色（红 vs 橙）和中心那点，
+        // 任缺一个另一个仍然读得出来——两圈同色只靠形状是读不出来的，那正是上一版的毛病。
+        var ring = AlarmsDotMultiple ? Palette.AlarmsDotOuter : Palette.AlarmsDot;
+        ctx.DrawEllipse(null, new Pen(new SolidColorBrush(ring), R(RAlarmsDotStroke)),
+                        at, R(RAlarmsDotRadius), R(RAlarmsDotRadius));
+
+        if (AlarmsDotMultiple)
+            ctx.DrawEllipse(new SolidColorBrush(Palette.AlarmsDot), null,
+                            at, R(RAlarmsDotInnerRadius), R(RAlarmsDotInnerRadius));
     }
 
     /// <summary>The clock's cast shadow on the wall. Squashed, offset downward, fading from black to transparent.</summary>

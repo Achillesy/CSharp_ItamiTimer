@@ -8,6 +8,6 @@
     bump it in exactly this one place.
   -->
   <PropertyGroup>
-    <Version>3.6.2</Version>
+    <Version>3.7.0</Version>
   </PropertyGroup>
 </Project>

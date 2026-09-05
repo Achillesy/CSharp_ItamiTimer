@@ -80,14 +80,16 @@ dotnet test ItamiTimer.slnx
 
 **本地调试验证就在项目目录内跑 Debug 或 Release 的编译产物**（`bin/Debug`、
 `bin/Release`，或直接 IDE 里跑）——**不要**执行 `dotnet publish` 把东西发到项目外部
-（比如 `%LOCALAPPDATA%\Programs\ItamiTimer`）去测试，也不要用不带 `--dmg` 的
-`pack-macos.sh` 把 `.app` 装到 `~/Applications` 去测试。`rules.json` 已经通过 csproj
+（比如 `%LOCALAPPDATA%\Programs\ItamiTimer`）去测试。`rules.json` 已经通过 csproj
 的 `Content Include`（`CopyToOutputDirectory`）跟着编译产物走，`bin/` 下的产物本身就能
 独立跑起来。
 
-**对外发布只有一条路**：`dist/` 目录里的成品——`./pack-macos.sh --dmg` 产出的 `.dmg`，
+**对外发布只有一条路**：`dist/` 目录里的成品——`./pack-macos.sh` 产出的 `.dmg`，
 `.\pack-windows.ps1` 产出的 `ItamiTimer-<版本>-win-x64.exe`。这两个脚本**只负责产出
-这一份最终安装包**，不再兼任"发一份能跑的本地测试版"这个角色。
+这一份最终安装包**，不再兼任"发一份能跑的本地测试版"这个角色。3.7.0 起
+`pack-macos.sh` **不再往 `~/Applications` 装任何东西**（用户 2026-09-03 要求删掉这个
+行为）：bundle 在临时目录里组装、跟临时目录一起扔掉，只留 `dist/` 那个 `.dmg`。
+`--dmg` 仍然收但被忽略，因为它已经是唯一的产物。
 
 Windows 安装包装机不需要预装 .NET——`installer/ItamiTimer.iss` 会检测、提示、下载官方
 运行时安装器。依赖 Inno Setup 6 的 `ISCC.exe`（`winget install --id JRSoftware.InnoSetup

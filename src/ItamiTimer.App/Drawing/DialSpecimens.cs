@@ -97,6 +97,22 @@ internal static class DialSpecimens
         Save(outDir, "13-rest-wedge-projected-pushed-back-by-slacking", t1010, slacked20, remaining: 18,
             restFrom: t1010.AddMinutes(38), restMinutes: 5);
 
+        // Alarms 清单的小圆环，一条 vs 不止一条（3.7.0）。**按表盘真实高度 330 渲染，
+        // 不是上面那些用的 480**：这一组要判断的正是"两个信号在真实尺寸下分不分得出来"
+        // （用户 2026-09-03 报同色双环看不出是两个），放大了看等于没验。
+        // 14:20 -> mod-12 换算成 (14%12)*60+20 = 140 分钟。
+        const double alarmsDotAt = (14 % 12) * 60 + 20;
+        const int realSize = 330;   // MainWindow.axaml 里 DialControl 的 Height
+        Save(outDir, "14-alarms-dot-single-light", t1010, [], remaining: 0,
+             alarmsDotMinutes: alarmsDotAt, size: realSize);
+        Save(outDir, "15-alarms-dot-multiple-light", t1010, [], remaining: 0,
+             alarmsDotMinutes: alarmsDotAt, alarmsDotMultiple: true, size: realSize);
+        Save(outDir, "16-alarms-dot-single-dark", t1010, [], remaining: 0,
+             palette: DialPalette.Dark, alarmsDotMinutes: alarmsDotAt, size: realSize);
+        Save(outDir, "17-alarms-dot-multiple-dark", t1010, [], remaining: 0,
+             palette: DialPalette.Dark, alarmsDotMinutes: alarmsDotAt, alarmsDotMultiple: true,
+             size: realSize);
+
         RenderDominoProgression(outDir);
 
         Console.WriteLine($"Dial specimens written to {outDir}");
@@ -132,7 +148,9 @@ internal static class DialSpecimens
     private static void Save(string dir, string name, DateTimeOffset startedAt,
                              IReadOnlyList<MinuteCell> cells, double remaining,
                              DateTimeOffset? restFrom = null, double restMinutes = 0,
-                             DialPalette? palette = null)
+                             DialPalette? palette = null,
+                             double? alarmsDotMinutes = null, bool alarmsDotMultiple = false,
+                             int size = Size)
     {
         // The commitment arc is no longer a scalar -- it's just the span of Gray cells in
         // the buffer (§4.5), so the specimens follow the same convention: whatever's
@@ -146,18 +164,20 @@ internal static class DialSpecimens
 
         var dial = new DialControl
         {
-            Width = Size,
-            Height = Size,
+            Width = size,
+            Height = size,
             Palette = palette ?? DialPalette.Light,
             StartedAt = startedAt,
             Cells = all,
             RestFrom = restFrom,
             RestMinutes = restMinutes,
+            AlarmsDotMinutes = alarmsDotMinutes,
+            AlarmsDotMultiple = alarmsDotMultiple,
         };
-        dial.Measure(new Size(Size, Size));
-        dial.Arrange(new Rect(0, 0, Size, Size));
+        dial.Measure(new Size(size, size));
+        dial.Arrange(new Rect(0, 0, size, size));
 
-        using var bmp = new RenderTargetBitmap(new PixelSize(Size, Size), new Vector(96, 96));
+        using var bmp = new RenderTargetBitmap(new PixelSize(size, size), new Vector(96, 96));
         bmp.Render(dial);
         // Avalonia 12 marks the parameterless Save as obsolete; the new overload wants an
         // encoder-options object. This is a debug exit, and default PNG is good enough --

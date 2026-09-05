@@ -157,7 +157,17 @@
            `Margin="-2,-2,0,0"` 让它相对深色那份往左上错开一点，跟 DialControl
            画指针阴影的手法一样（先画一份偏移的，再在真实位置画一份），只是这里
            两份都是实色文字，不是"深色文字 + 阴影"那种主次关系。时间行加粗、
-           文字行不加粗，两行同一套字号（先统一成时间的 18 号，再定稿收到 16 号）。 -->
+           文字行不加粗，两行同一套字号（先统一成时间的 18 号，再定稿收到 16 号）。
+
+           ⚠️ **`MaxLines="2"` 不是保守取值，是算出来的硬上限**（3.7.0）：这条提示条
+           跟骨牌叠在同一个 `Auto` 高的 Grid 单元格里，而下面那个 `Margin="0,2,0,-4"`
+           的 -4 是**按骨牌 76px 死算**出来的（DECISIONS K16）。正文一旦超过两行，
+           这一行就会跟着长高、把下面的卡片顶下去，那个 -4 当场作废，整个窗口会为了
+           一条提示条跳一分钟。预算：时间行 18 号 ≈22px + Spacing 2px + 正文 16 号
+           ≈20px/行 —— 两行 64px 还在 76px 内，三行 84px 就超了。
+           条数超出的部分由 `ShowAlarmBanner` 缀在**时间行**末尾（`23:55  +2`），
+           不占新的一行；`TextTrimming` 是第二道保险，管的是单条文字太长自己折成
+           两行的情况（`MaxWidth="280"` 上就会折）。 -->
       <Grid x:Name="AlarmBanner" HorizontalAlignment="Center" VerticalAlignment="Center"
             IsVisible="False">
         <StackPanel Spacing="2">
@@ -165,7 +175,7 @@
                      Foreground="{DynamicResource ItamiBannerInk}" HorizontalAlignment="Center"/>
           <TextBlock x:Name="AlarmBannerText" FontSize="16" Foreground="{DynamicResource ItamiBannerInk}"
                      HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap"
-                     MaxWidth="280"/>
+                     MaxWidth="280" MaxLines="2" TextTrimming="CharacterEllipsis"/>
         </StackPanel>
         <!-- 亮蓝色用 DialPalette.Dark.Rest 那个色号——已经是这个项目里"同一色相调亮
              一档"的现成值（该颜色本身的注释是"给夜面调亮一档"），不用另外调一个新色号。 -->
@@ -174,7 +184,7 @@
                      Foreground="#63A6E0" HorizontalAlignment="Center"/>
           <TextBlock x:Name="AlarmBannerTextBlue" FontSize="16" Foreground="#63A6E0"
                      HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap"
-                     MaxWidth="280"/>
+                     MaxWidth="280" MaxLines="2" TextTrimming="CharacterEllipsis"/>
         </StackPanel>
       </Grid>
 
