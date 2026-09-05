@@ -116,7 +116,7 @@ tests/                 xUnit，测试名是中文句子，直接陈述行为
   仓库现为 private；对外发布时用户会另建仓库拷贝内容。
 - 源码注释、提交信息、开发文档用中文；日志、异常、界面文字用英文。
 - 运行时数据在 `%LOCALAPPDATA%\ItamiTimer\`（settings.json / rules.json /
-  alarms.cron / during.json / itami.log，外加可选的 `layout`）。**只有 settings.json 和
+  alarms.cron / during.json / itami.log，外加可选的 `layout.json`）。**只有 settings.json 和
   during.json 是程序写的**，其余三个是用户手写、程序只读、永不回写（DECISIONS K25）。
   Release 也写日志——界面全程沉默，日志是唯一能事后查的地方。
 - 姊妹项目 ActivityWatchJournal（Python）是**纯参考**：搬结论不搬代码、不跨进程调用。

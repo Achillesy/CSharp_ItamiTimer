@@ -841,8 +841,13 @@ watcher 死了但服务还在 → 镜像里也全是 `AwOffline` → 同样不�
 卡片顶下去，那个负边距当场作废，整个窗口为一条提示条跳一分钟。护栏是
 `WindowLayoutTests.骨牌行必须装得下它那一档的提示条`（做过变异测试：紧凑档改成两行当场变红）。
 
-**开关是配置目录下一个 `layout` 文件**，内容一行 `compact`，认不出一律标准档。
+**开关是配置目录下的 `layout.json`**：`{ "layout": "compact" }`，认不出一律标准档。
 **只在启动时读一次**，运行中改了下次启动才生效——见 DECISIONS K25。
+
+⚠️ 它是**用户手写**的 JSON，所以解析必须跟 `rules.json` 用同一套三件套
+（`ReadCommentHandling.Skip` + `AllowTrailingCommas` + `PropertyNameCaseInsensitive`）
+——说明书里就带着注释，少了 `Skip` 写了注释整份就失效，正是 §15.4 记的那个坑。
+JSON 语法坏了会抛，由 `Load` 记一行日志再退回标准档，不在 `Parse` 里吞掉。
 
 ⚠️ **`ApplyLayout()` 必须排在 `RestoreWindowPosition()` 之前**：后者在 `Opened` 里调
 `ClampIntoScreen()`，而它读的是窗口当时的 `FrameSize`；尺寸后设就会拿旧尺寸去夹。

@@ -1,3 +1,4 @@
+using System.Text.Json;
 using ItamiTimer.App;
 
 namespace ItamiTimer.App.Tests;
@@ -7,7 +8,7 @@ namespace ItamiTimer.App.Tests;
 ///
 /// ⚠️ **这里只准碰 <see cref="WindowLayout.Parse"/> 和 <see cref="WindowLayout.Of"/>**：
 /// 它们是纯函数。<see cref="WindowLayout.Mode"/> / <see cref="WindowLayout.Current"/> 会去读
-/// 用户真实配置目录下的 `layout` 文件并写日志——单元测试碰它就等于让结果取决于跑测试那台
+/// 用户真实配置目录下的 `layout.json` 并写日志——单元测试碰它就等于让结果取决于跑测试那台
 /// 机器上有没有那个文件（`Mode` 特意用 <c>Lazy</c> 就是为了让这里不被牵连，DECISIONS I5
 /// 那类事故的形状）。
 /// </summary>
@@ -16,39 +17,56 @@ public class WindowLayoutTests
     // ---------------------------------------------------------------- 认字
 
     [Fact]
-    public void 只认得compact这一个词()
+    public void 只认得compact这一个值()
     {
-        Assert.Equal(LayoutMode.Compact, WindowLayout.Parse("compact"));
-        Assert.Equal(LayoutMode.Standard, WindowLayout.Parse("standard"));
+        Assert.Equal(LayoutMode.Compact, WindowLayout.Parse(Json("compact")));
+        Assert.Equal(LayoutMode.Standard, WindowLayout.Parse(Json("standard")));
     }
 
     [Fact]
-    public void 不分大小写也不管首尾空白()
+    public void 键名和值都不分大小写_值的首尾空白也不管()
     {
-        Assert.Equal(LayoutMode.Compact, WindowLayout.Parse("Compact"));
-        Assert.Equal(LayoutMode.Compact, WindowLayout.Parse("COMPACT"));
-        Assert.Equal(LayoutMode.Compact, WindowLayout.Parse("  compact\t"));
-        Assert.Equal(LayoutMode.Compact, WindowLayout.Parse("compact\r\n"));
+        // PropertyNameCaseInsensitive 管键名，Trim + OrdinalIgnoreCase 管值。
+        Assert.Equal(LayoutMode.Compact, WindowLayout.Parse("""{ "Layout": "Compact" }"""));
+        Assert.Equal(LayoutMode.Compact, WindowLayout.Parse("""{ "LAYOUT": "COMPACT" }"""));
+        Assert.Equal(LayoutMode.Compact, WindowLayout.Parse("""{ "layout": "  compact  " }"""));
     }
 
     [Fact]
-    public void 只看第一行_后面写什么都不管()
+    public void 手写的json_注释和尾逗号都要能过()
     {
-        Assert.Equal(LayoutMode.Compact, WindowLayout.Parse("compact\n随便写点什么\n还有一行"));
+        // ⚠️ 这是这个文件唯一真正危险的地方：说明书里带着注释，少了
+        // JsonCommentHandling.Skip 就整个解析失败——§15.4 那个「写了注释就静默失效」。
+        Assert.Equal(LayoutMode.Compact, WindowLayout.Parse("""
+            {
+              // standard 或 compact
+              "layout": "compact",
+            }
+            """));
     }
 
     [Fact]
-    public void 文件不存在_空的_写错_一律标准档()
+    public void 空的_没这个键_值写错_一律标准档()
     {
-        // 一个可选的外观开关，不值得为它拒绝启动，也不值得弹任何东西
-        // ——跟 alarms.cron「不认识的行安静跳过」同一个路数。
+        // 一个可选的外观开关，不值得为它拒绝启动，也不值得弹任何东西。
         Assert.Equal(LayoutMode.Standard, WindowLayout.Parse(null));
         Assert.Equal(LayoutMode.Standard, WindowLayout.Parse(""));
         Assert.Equal(LayoutMode.Standard, WindowLayout.Parse("   "));
-        Assert.Equal(LayoutMode.Standard, WindowLayout.Parse("紧凑"));
-        Assert.Equal(LayoutMode.Standard, WindowLayout.Parse("compactx"));   // 不做前缀匹配
-        Assert.Equal(LayoutMode.Standard, WindowLayout.Parse("# compact"));
+        Assert.Equal(LayoutMode.Standard, WindowLayout.Parse("{}"));
+        Assert.Equal(LayoutMode.Standard, WindowLayout.Parse("""{ "other": "compact" }"""));
+        Assert.Equal(LayoutMode.Standard, WindowLayout.Parse(Json("紧凑")));
+        Assert.Equal(LayoutMode.Standard, WindowLayout.Parse(Json("compactx")));   // 不做前缀匹配
     }
+
+    [Fact]
+    public void json语法坏了要抛_不在Parse里吞掉()
+    {
+        // 「值写了个错别字」和「整个文件语法坏了」是两回事：后者值得在日志里留一行，
+        // 由 WindowLayout.Load 兜住（那边照旧退回标准档）。
+        Assert.ThrowsAny<JsonException>(() => WindowLayout.Parse("{ oops"));
+    }
+
+    private static string Json(string value) => $$"""{ "layout": "{{value}}" }""";
 
     [Fact]
     public void Of把两档接起来()

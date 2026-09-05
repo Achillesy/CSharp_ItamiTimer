@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Avalonia;
 
 namespace ItamiTimer.App;
@@ -45,7 +46,14 @@ public sealed record LayoutMetrics(
 /// ## 为什么是「文件」而不是设置项、也不是命令行开关
 ///
 /// 用户 2026-09-05 定的：**单独一个 <see cref="FileName"/> 文件，只在启动时读一次**，
-/// 运行中改了要下次启动才生效。
+/// 运行中改了要下次启动才生效。内容：
+///
+/// <code>
+/// {
+///   // standard 或 compact
+///   "layout": "compact"
+/// }
+/// </code>
 ///
 /// 刻意不放进 <c>settings.json</c>——那个文件是「程序随时整份重写」的（DESIGN §11），
 /// 手改会被覆盖掉。这个文件跟 <c>alarms.cron</c> 同一类契约：**用户写、程序只读、
@@ -57,8 +65,8 @@ public sealed record LayoutMetrics(
 /// </summary>
 public static class WindowLayout
 {
-    /// <summary>配置目录下的文件名。没有扩展名，内容就一行。</summary>
-    public const string FileName = "layout";
+    /// <summary>配置目录下的文件名。</summary>
+    public const string FileName = "layout.json";
 
     /// <summary>
     /// 标准档：一直以来的样子，3.8.0 一个像素都没动。
@@ -132,17 +140,37 @@ public static class WindowLayout
         }
     }
 
+    private sealed record LayoutFile(string? Layout);
+
     /// <summary>
-    /// 认字。**只认得 <c>compact</c> 一个词**：不分大小写、忽略首尾空白、只看第一行。
-    /// 空文件、写错、整个文件不存在——一律标准档。
-    ///
-    /// 跟 <c>alarms.cron</c> 那套「不认识的行安静跳过」同一个路数：一个可选的外观开关，
-    /// 不值得为它拒绝启动，也不值得弹任何东西。**纯函数，文件读取在外面**，所以能测。
+    /// ⚠️ **这三个开关一个都不能少**，跟 <c>GroupRules</c> 读 <c>rules.json</c> 用的是同一套：
+    /// 这是一份**用户手写**的 JSON，说明书里就带着注释，少了 <c>Skip</c> 写了注释就整个
+    /// 解析失败——§15.4 记的正是这个坑（同一个文件的两条读取路径，一条开了一条没开，
+    /// 症状是「文件的一半好用、另一半安静地不工作」）。
     /// </summary>
-    public static LayoutMode Parse(string? text)
+    private static readonly JsonSerializerOptions JsonOpts = new()
     {
-        var first = text?.Split('\n', 2)[0].Trim();
-        return string.Equals(first, "compact", StringComparison.OrdinalIgnoreCase)
+        ReadCommentHandling = JsonCommentHandling.Skip,
+        AllowTrailingCommas = true,
+        PropertyNameCaseInsensitive = true,
+    };
+
+    /// <summary>
+    /// 认字。**只认得 <c>compact</c> 一个值**：不分大小写、忽略首尾空白。
+    /// 空文件、没有这个键、写别的值——一律标准档。
+    ///
+    /// ⚠️ **JSON 本身写坏了会抛 <see cref="JsonException"/>，不在这里吞掉**：
+    /// 「值写了个错别字」和「整个文件语法坏了」是两回事，后者值得在日志里留一行，
+    /// 由 <see cref="Load"/> 兜住——那边照旧退回标准档，绝不因为一个可选的外观开关起不来。
+    ///
+    /// **纯函数，文件读取在外面**，所以能测。
+    /// </summary>
+    public static LayoutMode Parse(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return LayoutMode.Standard;
+
+        var file = JsonSerializer.Deserialize<LayoutFile>(json, JsonOpts);
+        return string.Equals(file?.Layout?.Trim(), "compact", StringComparison.OrdinalIgnoreCase)
             ? LayoutMode.Compact
             : LayoutMode.Standard;
     }

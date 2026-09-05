@@ -75,15 +75,22 @@ Where things live
   %LOCALAPPDATA%\ItamiTimer\rules.json      your goals and executeCommand list
   %LOCALAPPDATA%\ItamiTimer\alarms.cron     recurring reminders (you write it)
   %LOCALAPPDATA%\ItamiTimer\settings.json   sounds, switches, theme, window position
-  %LOCALAPPDATA%\ItamiTimer\layout          optional: put "compact" in it (you write it)
+  %LOCALAPPDATA%\ItamiTimer\layout.json     optional: {"layout": "compact"} (you write it)
   %LOCALAPPDATA%\ItamiTimer\itami.log       what happened, and why
 
 A smaller window
 ----------------
 
-The window is tall. Put the single word "compact" in the layout file above and the
-dial and the dominoes shrink to about three quarters, with the window narrowed to
-match. Controls and text keep their size -- only the drawing gets smaller.
+The window is tall. Write layout.json in the folder above:
+
+    {
+      // "standard" or "compact"
+      "layout": "compact"
+    }
+
+and the dial and the dominoes shrink to about three quarters, with the window
+narrowed to match. Controls and text keep their size -- only the drawing gets
+smaller. Comments and trailing commas are fine, the same as rules.json.
 
 It is read once at startup: edit it while ItamiTimer is running and nothing happens
 until you launch it again. Delete the file to go back to the normal size.
