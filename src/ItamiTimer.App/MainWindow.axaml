@@ -3,7 +3,6 @@
         xmlns:app="using:ItamiTimer.App"
         x:Class="ItamiTimer.App.MainWindow"
         Title="一袋米要扛几楼"
-        Width="380"
         SizeToContent="Height"
         CanResize="False"
         WindowStartupLocation="CenterScreen"
@@ -114,7 +113,9 @@
          corner: speaker first, then pin (the order the user specified on 2026-07-28). The
          clock is round, so its top-right corner is empty space that fits them perfectly. -->
     <Grid Grid.Row="0">
-      <app:DialControl x:Name="Dial" Height="330"/>
+      <!-- 高度由 WindowLayout.DialHeight 在构造函数里给（3.8.0 起有标准/紧凑两档，
+           DESIGN §8.10）。这里刻意不写死，免得同一个量两处定义。 -->
+      <app:DialControl x:Name="Dial"/>
       <StackPanel Orientation="Horizontal" Spacing="2"
                   HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-4,-4,0">
         <Button x:Name="MuteBtn" Classes="chrome" ToolTip.Tip="Ticking"/>
@@ -137,10 +138,14 @@
          自己留的空白，阴影压根没画到那儿。
          -3 是按这段死区算出来的，实测还剩一丝白线（阴影渐变在底边淡出的尾巴，见
          DominoRow 里那段"最暗的一档不能落在底边"的注释），用户拍板收到 -4。
-         ⚠️ 别把这个 -4 当成"随手调的视觉微调"删掉或凑整——它跟 DominoRow 那个
-         0.965 和底边的渐变淡出绑在一起，那边动了这里要跟着重算。 -->
-    <Grid Grid.Row="1" Margin="0,2,0,-4">
-      <app:DominoRow x:Name="Dominoes" Height="76"/>
+         ⚠️ 别把这个负边距当成"随手调的视觉微调"删掉或凑整——它跟 DominoRow 那个
+         0.965 和底边的渐变淡出绑在一起，那边动了这里要跟着重算。
+
+         **上下边距和骨牌高度都在 `WindowLayout.DominoMargin` / `DominoHeight`**
+         （3.8.0 起有标准/紧凑两档，DESIGN §8.10）：标准档 76 / (2, -4)，紧凑档
+         56 / (8, -3)。上边距紧凑档特意放大到 8，是给提示条留高度，理由见那边。 -->
+    <Grid x:Name="DominoRowCell" Grid.Row="1">
+      <app:DominoRow x:Name="Dominoes"/>
 
       <!-- Alarms 清单到点时叠在骨牌上的提示条（DESIGN §9.1）：程序自己画，保证
            屏幕上一定看得见，跟 Notify.Show 弹的系统通知并存，不是二选一——中间
@@ -159,15 +164,17 @@
            两份都是实色文字，不是"深色文字 + 阴影"那种主次关系。时间行加粗、
            文字行不加粗，两行同一套字号（先统一成时间的 18 号，再定稿收到 16 号）。
 
-           ⚠️ **`MaxLines="2"` 不是保守取值，是算出来的硬上限**（3.7.0）：这条提示条
-           跟骨牌叠在同一个 `Auto` 高的 Grid 单元格里，而下面那个 `Margin="0,2,0,-4"`
-           的 -4 是**按骨牌 76px 死算**出来的（DECISIONS K16）。正文一旦超过两行，
-           这一行就会跟着长高、把下面的卡片顶下去，那个 -4 当场作废，整个窗口会为了
-           一条提示条跳一分钟。预算：时间行 18 号 ≈22px + Spacing 2px + 正文 16 号
-           ≈20px/行 —— 两行 64px 还在 76px 内，三行 84px 就超了。
+           ⚠️ **`MaxLines` / `MaxWidth` 不写在这儿，在 `WindowLayout`**（3.8.0）：
+           它们是**算出来的硬上限，不是保守取值**。这条提示条跟骨牌叠在同一个 `Auto`
+           高的 Grid 单元格里，撑高了就把下面的卡片顶下去，而那个负边距是按骨牌高度
+           死算的（DECISIONS K16），当场作废，整个窗口会为了一条提示条跳一分钟。
+
+           **实测**（headless 量的，不是估的）：一行 48px，两行 69px。
+           标准档这一行是 76+2-4 = 74px，装得下两行，**余量只有 5px**；
+           紧凑档 56+8-3 = 61px，只装得下一行，余量 13px。
+
            条数超出的部分由 `ShowAlarmBanner` 缀在**时间行**末尾（`23:55  +2`），
-           不占新的一行；`TextTrimming` 是第二道保险，管的是单条文字太长自己折成
-           两行的情况（`MaxWidth="280"` 上就会折）。 -->
+           不占新的一行；`TextTrimming` 是第二道保险，管的是单条文字太长自己折行。 -->
       <Grid x:Name="AlarmBanner" HorizontalAlignment="Center" VerticalAlignment="Center"
             IsVisible="False">
         <StackPanel Spacing="2">
@@ -175,7 +182,7 @@
                      Foreground="{DynamicResource ItamiBannerInk}" HorizontalAlignment="Center"/>
           <TextBlock x:Name="AlarmBannerText" FontSize="16" Foreground="{DynamicResource ItamiBannerInk}"
                      HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap"
-                     MaxWidth="280" MaxLines="2" TextTrimming="CharacterEllipsis"/>
+                     TextTrimming="CharacterEllipsis"/>
         </StackPanel>
         <!-- 亮蓝色用 DialPalette.Dark.Rest 那个色号——已经是这个项目里"同一色相调亮
              一档"的现成值（该颜色本身的注释是"给夜面调亮一档"），不用另外调一个新色号。 -->
@@ -184,7 +191,7 @@
                      Foreground="#63A6E0" HorizontalAlignment="Center"/>
           <TextBlock x:Name="AlarmBannerTextBlue" FontSize="16" Foreground="#63A6E0"
                      HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap"
-                     MaxWidth="280" MaxLines="2" TextTrimming="CharacterEllipsis"/>
+                     TextTrimming="CharacterEllipsis"/>
         </StackPanel>
       </Grid>
 

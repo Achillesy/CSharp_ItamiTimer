@@ -159,7 +159,30 @@ Runtime data:
 | `settings.json` | the program | sound choices, switches, the alarm time, the window position |
 | `during.json` | the program | accumulated focus seconds per goal, and how far that count has been carried |
 | `alarms.cron` | **you**, by hand | recurring reminders, as a standard crontab — see below |
+| `layout` | **you**, by hand | optional; one word, `compact`, to shrink the window — see below |
 | `itami.log` | the program | 1 MB rolling; the UI is silent, so this is the only place to find out what happened |
+
+### A smaller window
+
+The window is tall — on a 2560x1440 display at 125% it takes up about 60% of the
+screen height. The dial is half of that, so there is a compact size that shrinks the
+dial and the dominoes to roughly three quarters and narrows the window to match.
+**Controls and text are not touched** — the buttons, the slider, the goal list and the
+four corner icons keep their size, so nothing gets harder to read or to hit.
+
+Create a file named `layout` (no extension) in the data directory above, containing one
+word:
+
+```
+compact
+```
+
+Anything else — `standard`, an empty file, no file at all — is the normal size.
+
+**It is read once, when the program starts.** Editing it while ItamiTimer is running
+changes nothing until the next launch. That is also why it is its own file rather than a
+line in `settings.json`: the program rewrites `settings.json` whenever a switch changes,
+which would overwrite your edit.
 
 Task state is **never** written to disk. Closing the program abandons the current round.
 

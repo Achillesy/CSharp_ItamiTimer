@@ -266,7 +266,19 @@ Where things live
   ~/Library/Application Support/ItamiTimer/alarms.cron     recurring reminders (you write it)
   ~/Library/Application Support/ItamiTimer/settings.json   sounds, switches, theme, position
   ~/Library/Application Support/ItamiTimer/during.json     accumulated focus time per goal
+  ~/Library/Application Support/ItamiTimer/layout          optional: "compact" (you write it)
   ~/Library/Application Support/ItamiTimer/itami.log       what happened, and why
+
+A smaller window
+----------------
+
+The window is tall. Put the single word "compact" in the layout file above and the
+dial and the dominoes shrink to about three quarters, with the window narrowed to
+match. Controls and text keep their size -- only the drawing gets smaller.
+
+It is read once at startup: edit it while ItamiTimer is running and nothing happens
+until you launch it again. Delete the file to go back to the normal size.
+
 
 The window itself never explains anything and never shows a report -- that is
 deliberate. itami.log is where you look afterwards.

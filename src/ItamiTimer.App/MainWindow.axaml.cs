@@ -95,12 +95,15 @@ public partial class MainWindow : Window
     private const int AlarmsListRings = 2;
 
     /// <summary>
-    /// 提示条正文最多几行（3.7.0）。**算出来的硬上限，不是保守取值**——提示条跟骨牌叠在
-    /// 同一个 <c>Auto</c> 高的 Grid 格子里，第三行会把那一行撑高、把下面的卡片顶下去，
-    /// 而卡片那个 <c>-4</c> 的负边距是按骨牌 76px 死算的（DECISIONS K16）。完整的高度
-    /// 预算写在 <c>MainWindow.axaml</c> 提示条上面那段注释里。
+    /// 提示条最多列几条（3.7.0；3.8.0 起随尺寸档变）。**算出来的硬上限，不是保守取值**
+    /// ——提示条跟骨牌叠在同一个 <c>Auto</c> 高的 Grid 格子里，多一行就把那一行撑高、
+    /// 把下面的卡片顶下去，而那个负边距是按骨牌高度死算的（DECISIONS K16）。
+    ///
+    /// 标准档 2 条、紧凑档 1 条，跟 <c>TextBlock.MaxLines</c> 取同一个值（`ShowAlarmBanner`
+    /// 把这几条用换行拼成一段，两者不一致就会截在半路）。预算见
+    /// <see cref="WindowLayout.Compact"/> 的注释。
     /// </summary>
-    private const int BannerMaxLines = 2;
+    private static int BannerMaxLines => WindowLayout.Current.BannerMaxLines;
 
     /// <summary>
     /// Alarms 清单的去重水位线：(after, now] 区间内到点的条目才算"新到点"（见
@@ -127,6 +130,7 @@ public partial class MainWindow : Window
         Log.Info($"Started. Log: {Log.Path_}");
 
         InitializeComponent();
+        ApplyLayout();
         ApplyTheme();
 
         // 这里原来给 Window.Icon 赋一张实时重绘的进度环（RingIcon）。2026-08-10 整块删掉：
@@ -350,6 +354,35 @@ public partial class MainWindow : Window
     /// must hold for **every integer** — otherwise what gets verified in Debug isn't
     /// Release's actual behaviour, and the test range would be pointless.
     /// </summary>
+    /// <summary>
+    /// 把这一次启动的尺寸档套上去（DESIGN §8.10，3.8.0）。六个数字全部来自
+    /// <see cref="WindowLayout"/>，XAML 里一个都不写死——同一个量只有一处定义。
+    ///
+    /// ⚠️ **必须排在 <see cref="RestoreWindowPosition"/> 之前**：那边在 <c>Opened</c>
+    /// 里会调 <see cref="ClampIntoScreen"/>，而它读的是窗口当时的 <c>FrameSize</c>。
+    /// 尺寸后设就会拿旧尺寸去夹，紧凑档从标准档的位置启动时会被推错地方。
+    ///
+    /// ⚠️ **只在启动时跑这一次**（用户 2026-09-05 定的语义）：运行中改 `layout` 文件
+    /// 不生效，下次启动才算。这顺带免掉了「运行中换档要重新夹屏、要重算负边距、
+    /// 提示条正显示着怎么办」的一整类边界情况。
+    /// </summary>
+    private void ApplyLayout()
+    {
+        var m = WindowLayout.Current;
+        Width = m.WindowWidth;
+        F<DialControl>("Dial").Height = m.DialHeight;
+        F<DominoRow>("Dominoes").Height = m.DominoHeight;
+        F<Grid>("DominoRowCell").Margin = m.DominoMargin;
+
+        // 深色打底那份和蓝色错位那份，内容完全一样，两边都要设（DECISIONS J11）。
+        foreach (var name in new[] { "AlarmBannerText", "AlarmBannerTextBlue" })
+        {
+            var tb = F<TextBlock>(name);
+            tb.MaxLines = m.BannerMaxLines;
+            tb.MaxWidth = m.BannerMaxWidth;
+        }
+    }
+
     private void ApplySliderRange()
     {
 #if DEBUG
