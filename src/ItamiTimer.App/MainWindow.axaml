@@ -109,17 +109,18 @@
   <Grid Margin="18,14,18,16" RowDefinitions="Auto,Auto,Auto">
 
     <!-- The dial. While a task is running, it's the whole story; an empty dial is the
-         invitation for the next round (§8.4.5a). Two instant toggles sit in the top-right
-         corner: pin on top, speaker below (3.8.0; user, 2026-09-05). The clock is round, so
-         its top-right corner is empty space that fits them perfectly. -->
+         invitation for the next round (§8.4.5a). Three chrome icons sit in the top-right
+         corner, left to right: theme, speaker, pin (3.8.0; user, 2026-09-06). The clock is
+         round, so its top-right corner is empty space that fits them. -->
     <Grid Grid.Row="0">
       <!-- 高度由 WindowLayout.DialHeight 在构造函数里给（3.8.0 起有标准/紧凑两档，
            DESIGN §8.10）。这里刻意不写死，免得同一个量两处定义。 -->
       <app:DialControl x:Name="Dial"/>
-      <StackPanel Orientation="Vertical" Spacing="2"
+      <StackPanel Orientation="Horizontal" Spacing="2"
                   HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-4,-4,0">
-        <Button x:Name="PinBtn" Classes="chrome" ToolTip.Tip="Always on top"/>
+        <Button x:Name="ThemeBtn" Classes="chrome"/>
         <Button x:Name="MuteBtn" Classes="chrome" ToolTip.Tip="Ticking"/>
+        <Button x:Name="PinBtn" Classes="chrome" ToolTip.Tip="Always on top"/>
       </StackPanel>
     </Grid>
 
@@ -195,36 +196,34 @@
         </StackPanel>
       </Grid>
 
-      <!-- 四个 chrome 图标排成**一竖列**（3.8.0，用户 2026-09-05 定；推翻 v3.0.0 的
-           "右上角凑成 2×2"）：上面一组在表盘右上角是图钉 + 喇叭，中间这组在骨牌这一行
-           是主题 + 设置，两组共用同一列（右边距都是 -4）。标准档和紧凑档**完全一致**，
-           不分档。
+      <!-- **骨牌这一行只留齿轮一个**（3.8.0，用户 2026-09-06 定；推翻 v3.0.0 的
+           "右上角凑成 2×2"）。另外三个（主题 / 喇叭 / 图钉）横排在表盘右上角。标准档和
+           紧凑档**完全一致，不分档**。
 
-           ⚠️ **改成竖排不是为了好看，是为了不遮骨牌**：四个图标固定 28px、不跟着缩放，
-           横排时这一组占 58px 宽，紧凑档骨牌行只有 56px 高、图标占了一半（标准档 76px
-           里占 37%），会压住骨牌——**而且是"看星期几"的遮**：骨牌从右往左倒，周一到周三
-           右边那块还立着/正在倒的会被齿轮压住，周四以后倒平了反而不遮，时有时无最难查
-           （用户 2026-09-05 实机发现）。竖排把横向占位**减半到 28px**，只压最右边一小条，
-           而最右边正好是倒下去的那几块（最矮），两档都清爽。DECISIONS K27。
+           ⚠️ **这一行放不下两个图标**：chrome 图标固定 28px、不跟着缩放，一对横排占
+           58px 宽，而紧凑档骨牌行只有 56px 高、图标占了一半（标准档 76px 里只占 37%），
+           会压住骨牌——**而且是"看星期几"的遮**：骨牌从右往左倒，周一到周三右边那块还
+           立着/正在倒的会被齿轮压住，周四以后倒平了反而不遮，时有时无最难查
+           （用户 2026-09-05 实机发现）。只留一个就只占 28px，两档都清爽。DECISIONS K27。
 
-           ⚠️ 齿轮"看起来像是它把骨牌推倒的"这个观感**保住了**（DECISIONS D6）：它仍然在
-           骨牌这一行、压在骨牌上方。中途试过"把这两个抬进表盘底部"，那样也不遮，但齿轮
-           就离开骨牌了，这条观感当场丢掉——竖排两者兼得。
+           ⚠️ **留下的必须是齿轮**：它"看起来像是它把骨牌推倒的"这个观感来自压在骨牌
+           上方这个位置（DECISIONS D6：把功能按钮塞进骨牌行，让人更猜不出那七块是什么）。
+           中途试过"把这一组整个抬进表盘底部"和"四个排成一竖列"，都不遮，但前者让齿轮
+           离开了骨牌、这条观感当场丢掉。
 
-           ⚠️ 齿轮原来是单独一个按钮、右边距写死 30，那个 30 是**用眼睛量出来的**
-           （"落在喇叭正下方"，用户 2026-07-28）。跟上面那组共用同一列之后是**几何上精确**
-           的对齐，30 那个经验值早已作废，别再照它去调。
+           ⚠️ 齿轮原来右边距写死 30，那个 30 是**用眼睛量出来的**（"落在喇叭正下方"，
+           用户 2026-07-28）。现在跟上面那排共用同一个 -4 是**几何上精确**的右对齐，
+           30 那个经验值早已作废，别再照它去调。
 
            There used to be an AlarmBtn here (removed 2026-07-30, see the note outside this
            XAML): the alarm's press interaction moved directly onto the clock face itself
            (DialControl), no longer occupying its own icon.
 
-           ⚠️ 齿轮上没有 ToolTip.Tip，跟另外两个 chrome 按钮不一样——它打开的模态框会把
-           tooltip 留在屏幕上（DECISIONS E10），别给它加回来。**主题按钮同理不加**：
-           它虽然不开模态框，但一点就重画整扇窗口，tooltip 挂在旧的一版上，同一类麻烦。 -->
-      <StackPanel Orientation="Vertical" Spacing="2"
+           ⚠️ 齿轮上没有 ToolTip.Tip，跟喇叭/图钉不一样——它打开的模态框会把 tooltip
+           留在屏幕上（DECISIONS E10），别给它加回来。**主题按钮同理不加**：它虽然不开
+           模态框，但一点就重画整扇窗口，tooltip 挂在旧的一版上，同一类麻烦。 -->
+      <StackPanel Orientation="Horizontal" Spacing="2"
                   HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-6,-4,0">
-        <Button x:Name="ThemeBtn" Classes="chrome"/>
         <Button x:Name="SettingsBtn" Classes="chrome"/>
       </StackPanel>
     </Grid>
