@@ -214,8 +214,11 @@
            ⚠️ 齿轮上没有 ToolTip.Tip，跟另外两个 chrome 按钮不一样——它打开的模态框会把
            tooltip 留在屏幕上（DECISIONS E10），别给它加回来。**主题按钮同理不加**：
            它虽然不开模态框，但一点就重画整扇窗口，tooltip 挂在旧的一版上，同一类麻烦。 -->
-      <StackPanel Orientation="Horizontal" Spacing="2"
-                  HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-6,-4,0">
+      <!-- 边距由 WindowLayout.ChromeRowMargin 在构造函数里给（3.8.0）：标准档 -6 压在
+           骨牌行右上角，紧凑档 -28 抬进表盘底部的右下角，否则会遮住骨牌——而且是
+           "看星期几"的遮，见那边的注释。 -->
+      <StackPanel x:Name="ChromeRow2" Orientation="Horizontal" Spacing="2"
+                  HorizontalAlignment="Right" VerticalAlignment="Top">
         <Button x:Name="SettingsBtn" Classes="chrome"/>
         <Button x:Name="ThemeBtn" Classes="chrome"/>
       </StackPanel>

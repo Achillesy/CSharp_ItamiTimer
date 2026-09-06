@@ -373,6 +373,7 @@ public partial class MainWindow : Window
         F<DialControl>("Dial").Height = m.DialHeight;
         F<DominoRow>("Dominoes").Height = m.DominoHeight;
         F<Grid>("DominoRowCell").Margin = m.DominoMargin;
+        F<StackPanel>("ChromeRow2").Margin = m.ChromeRowMargin;
 
         // 深色打底那份和蓝色错位那份，内容完全一样，两边都要设（DECISIONS J11）。
         foreach (var name in new[] { "AlarmBannerText", "AlarmBannerTextBlue" })

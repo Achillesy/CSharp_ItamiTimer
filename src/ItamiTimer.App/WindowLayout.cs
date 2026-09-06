@@ -16,13 +16,15 @@ public enum LayoutMode { Standard, Compact }
 /// <param name="DominoMargin">骨牌行的外边距，**下边是负的**（DECISIONS K16）。</param>
 /// <param name="BannerMaxLines">提示条最多列几条，同时也是 <c>TextBlock.MaxLines</c>。</param>
 /// <param name="BannerMaxWidth">提示条正文的折行宽度。</param>
+/// <param name="ChromeRowMargin">齿轮/主题那一排相对骨牌行的外边距，理由见两档各自的注释。</param>
 public sealed record LayoutMetrics(
     double WindowWidth,
     double DialHeight,
     double DominoHeight,
     Thickness DominoMargin,
     int BannerMaxLines,
-    double BannerMaxWidth)
+    double BannerMaxWidth,
+    Thickness ChromeRowMargin)
 {
     /// <summary>骨牌那一行实际占多高——提示条能不能塞进去，比的就是这个数。</summary>
     public double DominoRowHeight => DominoHeight + DominoMargin.Top + DominoMargin.Bottom;
@@ -73,11 +75,16 @@ public static class WindowLayout
     ///
     /// 骨牌行 76+2−4 = 74px，装得下两行提示条（实测 69px），**余量只有 5px**
     /// ——比 3.7.0 那段注释估的还紧。
+    ///
+    /// 齿轮/主题那一排边距 −6：正常压在骨牌行的右上角。⚠️ **这个位置是故意的**——齿轮
+    /// 压在骨牌上方，观感上"像是它把骨牌推倒的"，跟「骨牌不解释、滑块不给数字」是同一套
+    /// 设计语言（DECISIONS D6）。
     /// </summary>
     public static readonly LayoutMetrics Standard = new(
         WindowWidth: 380, DialHeight: 330, DominoHeight: 76,
         DominoMargin: new Thickness(0, 2, 0, -4),
-        BannerMaxLines: 2, BannerMaxWidth: 280);
+        BannerMaxLines: 2, BannerMaxWidth: 280,
+        ChromeRowMargin: new Thickness(0, -6, -4, 0));
 
     /// <summary>
     /// 紧凑档。
@@ -98,11 +105,24 @@ public static class WindowLayout
     /// <c>Auto</c> 格子里，撑高了就把卡片顶下去。56+2−3 = 55 连一行（48px）都贴边；
     /// 改成 8 之后 61px，装一行还剩 13px。用户 2026-09-05 在「上边距 +16 装两行」和
     /// 「+6 装一行」之间选了后者——多出来的条数照旧缀在时间行末尾（<c>23:55 +2</c>）。
+    ///
+    /// **齿轮/主题那一排抬到 −28**，也就是从骨牌行的右上角挪进**表盘底部的右下角**，
+    /// 落在骨牌正上方那块空白里。
+    ///
+    /// ⚠️ **不抬就会遮住骨牌，而且是「看星期几」的遮**（用户 2026-09-05 实机发现）：
+    /// 图标固定 28px 不缩放，在 56px 高的骨牌行里占了一半（标准档 76px 里只占 37%），
+    /// 周一到周三右边那块还立着/正在倒的骨牌会被齿轮压住，周四以后倒平了反而不遮
+    /// ——一个随日期时有时无的毛病。−28 让图标落在 y=228~256：表盘外圈底边在这个横向
+    /// 位置是 y≈221，骨牌从 y=264 起画，两头都留得开。
+    ///
+    /// ⚠️ **不要改成「四个并成一排挪到表盘顶上」**：那样也不遮，但齿轮就离开骨牌上方了，
+    /// D6 那条"像是它把骨牌推倒的"观感当场丢掉。抬到表盘底部两者兼得。
     /// </summary>
     public static readonly LayoutMetrics Compact = new(
         WindowWidth: 292, DialHeight: 256, DominoHeight: 56,
         DominoMargin: new Thickness(0, 8, 0, -3),
-        BannerMaxLines: 1, BannerMaxWidth: 220);
+        BannerMaxLines: 1, BannerMaxWidth: 220,
+        ChromeRowMargin: new Thickness(0, -28, -4, 0));
 
     public static LayoutMetrics Of(LayoutMode mode) => mode == LayoutMode.Compact ? Compact : Standard;
 
