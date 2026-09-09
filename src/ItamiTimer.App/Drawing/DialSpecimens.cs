@@ -113,6 +113,12 @@ internal static class DialSpecimens
              palette: DialPalette.Dark, alarmsDotMinutes: alarmsDotAt, alarmsDotMultiple: true,
              size: realSize);
 
+        // 半透明表盘（3.9.1）。⚠️ **必须用 OpacityMask 渲染，不是 Opacity**——后者在
+        // Avalonia 里是**逐个绘制操作**各自半透，白色钟面会跟它底下那个木色填充圆盘
+        // 混成米黄（用户 2026-09-08 一眼看出"泛黄"）。实测见 DECISIONS K29。
+        // 这张样张就是那条护栏的眼看回归：白面必须是白的。
+        Save(outDir, "18-dial-half-transparent", t1010, [], remaining: 0, size: 330, mask: 0.5);
+
         RenderDominoProgression(outDir);
 
         Console.WriteLine($"Dial specimens written to {outDir}");
@@ -150,7 +156,7 @@ internal static class DialSpecimens
                              DateTimeOffset? restFrom = null, double restMinutes = 0,
                              DialPalette? palette = null,
                              double? alarmsDotMinutes = null, bool alarmsDotMultiple = false,
-                             int size = Size)
+                             int size = Size, double mask = 1.0)
     {
         // The commitment arc is no longer a scalar -- it's just the span of Gray cells in
         // the buffer (§4.5), so the specimens follow the same convention: whatever's
@@ -173,6 +179,7 @@ internal static class DialSpecimens
             RestMinutes = restMinutes,
             AlarmsDotMinutes = alarmsDotMinutes,
             AlarmsDotMultiple = alarmsDotMultiple,
+            OpacityMask = mask < 1.0 ? new Avalonia.Media.SolidColorBrush(Avalonia.Media.Colors.White, mask) : null,
         };
         dial.Measure(new Size(size, size));
         dial.Arrange(new Rect(0, 0, size, size));

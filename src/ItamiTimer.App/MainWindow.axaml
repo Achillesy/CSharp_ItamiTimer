@@ -236,8 +236,20 @@
          **卡片内部只有一个间距数字 8**：`Border.Padding`（四边内边距）和 StackPanel
          的 `Spacing`（控件之间）取同一个值，卡片边框到控件的距离 = 控件与控件之间的
          距离，整张卡片一套节奏。中间试过 12/12（用户："内边界显大"）和 8/12（边距
-         和控件间距不一致），定稿是两边都取 8。 -->
-    <Border Grid.Row="2" Background="{DynamicResource ItamiCardBackground}" CornerRadius="10" Padding="8">
+         和控件间距不一致），定稿是两边都取 8。
+
+         ⚠️ **3.9.0 起卡片拆成两层**（底色层 + 内容层，同一个 Grid 格子里的两个兄弟）：
+         `layout.json` 的 `opacity` 只作用在**底色**上，卡片里的按钮和文字保持实心。
+         这是用户 2026-09-08 点名的形态——真正挡住后面的是那块实心底色，细细的文字
+         挡不住什么，而把文字一起调淡只会让低透明度下没法读。
+         **底色层必须声明在内容层之前**：Grid 子元素的层叠顺序看声明顺序，跟 Grid.Row
+         无关（DECISIONS K15 同一条）。
+         ⚠️ **`Padding="8"` 仍然留在包内容的那个 Border 上**，没有改成 StackPanel 的
+         Margin——DECISIONS K17 明确写了内边距的正主是 `Border.Padding`，那个 Margin
+         写法是上一版换掉的东西，别借着这次拆层把它捡回来。 -->
+    <Border x:Name="CardBackdrop" Grid.Row="2"
+            Background="{DynamicResource ItamiCardBackground}" CornerRadius="10"/>
+    <Border Grid.Row="2" CornerRadius="10" Padding="8">
       <StackPanel x:Name="Controls" Spacing="8">
 
         <Button x:Name="StartBtn" Classes="start" Click="OnStart" Content="Start"/>

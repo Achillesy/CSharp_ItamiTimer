@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using Avalonia;
 
@@ -110,6 +111,39 @@ public static class WindowLayout
         DominoMargin: new Thickness(0, 8, 0, -3),
         BannerMaxLines: 1, BannerMaxWidth: 220);
 
+    /// <summary>
+    /// 表盘、骨牌、卡片底色**共用的一档不透明度**，百分数写在 <see cref="FileName"/> 里
+    /// （3.9.0，用户 2026-09-08）。
+    ///
+    /// 起因：单屏，窗口要置顶、又不想完全挡住后面的东西。原来只有卡片底色是 90%
+    /// （<c>#E6...</c>，DECISIONS K18），表盘和骨牌是实心的——用户要三者统一，并且
+    /// 由一个可配的数说了算。
+    ///
+    /// ⚠️ **透明 ≠ 点击穿透**：窗口再淡也照样吃鼠标事件，后面的窗口仍然点不到。
+    /// 用户 2026-09-08 明确只要「看得见」，不要穿透——穿透会让表盘拖动、Start、滚轮
+    /// 拨针全废（§9「表盘即输入设备」）。
+    ///
+    /// ⚠️ **只作用在卡片的底色上，不作用在卡片里的按钮和文字上**（用户点名）：真正挡住
+    /// 后面的是那块实心底色，细细的文字挡不住什么，而把文字一起调淡只会让低透明度下
+    /// 没法读。实现上卡片拆成了「底色层 + 内容层」两个兄弟 Border，见 MainWindow.axaml。
+    ///
+    /// ⚠️ **下限存在的理由不是好看**：Avalonia 里 <c>Opacity = 0</c> 的控件连命中测试
+    /// 一起失效——表盘拖不动、右键菜单也点不出来，而窗口还占着位置，等于把自己锁在外面。
+    /// </summary>
+    public const double MinOpacityPercent = 10;
+
+    /// <inheritdoc cref="MinOpacityPercent"/>
+    public const double MaxOpacityPercent = 100;
+
+    /// <summary>
+    /// 没写、写错、超出 <see cref="MinOpacityPercent"/>~<see cref="MaxOpacityPercent"/>
+    /// 时一律用这个数（用户 2026-09-08 定：**强制 90，不是夹到边界**）。
+    /// 90 也正是 3.9.0 之前卡片底色那个 <c>#E6</c> 的值——默认档下观感一个像素没变。
+    /// </summary>
+    public const double DefaultOpacityPercent = 90;
+
+    private const double DefaultOpacity = DefaultOpacityPercent / 100.0;
+
     public static LayoutMetrics Of(LayoutMode mode) => mode == LayoutMode.Compact ? Compact : Standard;
 
     /// <summary>
@@ -120,33 +154,78 @@ public static class WindowLayout
     /// 用 <see cref="Lazy{T}"/> 而不是字段初始化器：后者会在**类型初始化**时就去碰文件
     /// 系统和日志，那样单元测试只要碰一下 <see cref="Of"/> 就被拖下水。
     /// </summary>
-    public static LayoutMode Mode => LazyMode.Value;
+    public static LayoutMode Mode => LazyFile.Value.Mode;
+
+    /// <summary>这一次启动的不透明度（0~1）。见 <see cref="MinOpacityPercent"/>。</summary>
+    public static double Opacity => LazyFile.Value.Opacity;
 
     /// <summary>这一次启动的尺寸。<see cref="MainWindow"/> 只读这一个。</summary>
     public static LayoutMetrics Current => Of(Mode);
 
-    private static readonly Lazy<LayoutMode> LazyMode = new(Load);
+    /// <summary>这一次启动从 <see cref="FileName"/> 读出来的全部内容。</summary>
+    public sealed record LayoutSettings(LayoutMode Mode, double Opacity);
 
-    private static LayoutMode Load()
+    /// <summary>**文件只读一次**，档位和透明度一起出来——不是两个 Lazy 各读一遍。</summary>
+    private static readonly Lazy<LayoutSettings> LazyFile = new(Load);
+
+    private static LayoutSettings Load()
     {
         var path = Path.Combine(AppData.Dir, FileName);
         try
         {
             var exists = File.Exists(path);
-            var mode = Parse(exists ? File.ReadAllText(path) : null);
-            Log.Info($"Layout: {mode.ToString().ToLowerInvariant()}"
+            var text = exists ? File.ReadAllText(path) : null;
+            var settings = new LayoutSettings(Parse(text), ParseOpacity(text));
+            Log.Info($"Layout: {settings.Mode.ToString().ToLowerInvariant()}, "
+                   + $"opacity {settings.Opacity * 100:0}%"
                    + (exists ? $" (from {path})" : " (no layout file)"));
-            return mode;
+            return settings;
         }
         catch (Exception e)
         {
-            // 读不到就用标准档，绝不因为一个可选的外观开关起不来。
+            // 读不到就用标准档 + 默认透明度，绝不因为一个可选的外观开关起不来。
             Log.Error($"Failed to read {path}; using the standard layout", e);
-            return LayoutMode.Standard;
+            return new LayoutSettings(LayoutMode.Standard, DefaultOpacity);
         }
     }
 
-    private sealed record LayoutFile(string? Layout);
+    /// <summary>
+    /// 认那个百分数。**不在 10~100 里、没写、写成别的类型——一律 <see cref="DefaultOpacityPercent"/>**
+    /// （用户 2026-09-08：不对就强制 90，不夹到边界）。
+    ///
+    /// ⚠️ <c>Opacity</c> 声明成 <see cref="JsonElement"/> 而不是 <c>double?</c>，是为了
+    /// **一个字段写错不牵连另一个字段**：这是份手写 JSON，有人把它写成 <c>"50"</c>
+    /// （带引号）完全可能；声明成 <c>double?</c> 的话反序列化整个抛异常，连 <c>layout</c>
+    /// 那一档也跟着丢了。现在数字和数字字符串都认，别的类型安静退回默认值。
+    ///
+    /// **纯函数，文件读取在外面**，所以能测。
+    /// </summary>
+    public static double ParseOpacity(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return DefaultOpacity;
+        return FromPercent(JsonSerializer.Deserialize<LayoutFile>(json, JsonOpts)?.Opacity);
+    }
+
+    private static double FromPercent(JsonElement? raw)
+    {
+        if (raw is not { } e) return DefaultOpacity;
+
+        double pct;
+        switch (e.ValueKind)
+        {
+            case JsonValueKind.Number when e.TryGetDouble(out pct):
+                break;
+            case JsonValueKind.String when double.TryParse(
+                    e.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out pct):
+                break;
+            default:
+                return DefaultOpacity;
+        }
+
+        return pct >= MinOpacityPercent && pct <= MaxOpacityPercent ? pct / 100.0 : DefaultOpacity;
+    }
+
+    private sealed record LayoutFile(string? Layout, JsonElement? Opacity);
 
     /// <summary>
     /// ⚠️ **这三个开关一个都不能少**，跟 <c>GroupRules</c> 读 <c>rules.json</c> 用的是同一套：

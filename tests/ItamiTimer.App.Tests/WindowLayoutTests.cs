@@ -68,6 +68,82 @@ public class WindowLayoutTests
 
     private static string Json(string value) => $$"""{ "layout": "{{value}}" }""";
 
+    // ---------------------------------------------------------------- 不透明度（3.9.0）
+
+    private const double Default = WindowLayout.DefaultOpacityPercent / 100.0;
+
+    [Fact]
+    public void 百分数直接换算成零到一()
+    {
+        Assert.Equal(0.50, WindowLayout.ParseOpacity("""{ "opacity": 50 }"""), 6);
+        Assert.Equal(0.75, WindowLayout.ParseOpacity("""{ "opacity": 75 }"""), 6);
+    }
+
+    [Fact]
+    public void 上下界都是闭区间()
+    {
+        Assert.Equal(0.10, WindowLayout.ParseOpacity("""{ "opacity": 10 }"""), 6);
+        Assert.Equal(1.00, WindowLayout.ParseOpacity("""{ "opacity": 100 }"""), 6);
+    }
+
+    [Fact]
+    public void 超出范围一律强制默认值_不是夹到边界()
+    {
+        // 用户 2026-09-08 定的语义：不对就是 90，不要"帮他"夹成 10 或 100
+        Assert.Equal(Default, WindowLayout.ParseOpacity("""{ "opacity": 9 }"""), 6);
+        Assert.Equal(Default, WindowLayout.ParseOpacity("""{ "opacity": 101 }"""), 6);
+        Assert.Equal(Default, WindowLayout.ParseOpacity("""{ "opacity": 0 }"""), 6);
+        Assert.Equal(Default, WindowLayout.ParseOpacity("""{ "opacity": -50 }"""), 6);
+    }
+
+    [Fact]
+    public void 没写这个键_空文件_都用默认值()
+    {
+        Assert.Equal(Default, WindowLayout.ParseOpacity(null), 6);
+        Assert.Equal(Default, WindowLayout.ParseOpacity("   "), 6);
+        Assert.Equal(Default, WindowLayout.ParseOpacity("{}"), 6);
+        Assert.Equal(Default, WindowLayout.ParseOpacity("""{ "layout": "compact" }"""), 6);
+    }
+
+    [Fact]
+    public void 带引号的数字也认_手写json常见写法()
+        => Assert.Equal(0.40, WindowLayout.ParseOpacity("""{ "opacity": "40" }"""), 6);
+
+    [Fact]
+    public void 小数也认()
+        => Assert.Equal(0.425, WindowLayout.ParseOpacity("""{ "opacity": 42.5 }"""), 6);
+
+    [Fact]
+    public void 键名不分大小写_跟layout那一档一个待遇()
+        => Assert.Equal(0.30, WindowLayout.ParseOpacity("""{ "Opacity": 30 }"""), 6);
+
+    [Fact]
+    public void 注释和尾逗号照样过()
+        => Assert.Equal(0.50, WindowLayout.ParseOpacity("""
+            {
+              // 百分数，10~100
+              "opacity": 50,
+            }
+            """), 6);
+
+    [Fact]
+    public void 写成别的类型时安静退回默认值_而且不牵连layout那一档()
+    {
+        // ⚠️ 这条是 Opacity 声明成 JsonElement 而不是 double? 的全部理由：
+        // 手写文件里一个字段写错，不该把另一个字段也带走。
+        const string json = """{ "layout": "compact", "opacity": true }""";
+        Assert.Equal(Default, WindowLayout.ParseOpacity(json), 6);
+        Assert.Equal(LayoutMode.Compact, WindowLayout.Parse(json));
+    }
+
+    [Fact]
+    public void 下限不为零_零会连命中测试一起废掉()
+    {
+        // Avalonia 里 Opacity=0 的控件点不中：表盘拖不动、右键菜单也出不来，
+        // 而窗口还占着位置——等于把自己锁在外面。
+        Assert.True(WindowLayout.MinOpacityPercent > 0);
+    }
+
     [Fact]
     public void Of把两档接起来()
     {

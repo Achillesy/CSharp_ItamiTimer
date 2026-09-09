@@ -374,6 +374,38 @@ public partial class MainWindow : Window
         F<DominoRow>("Dominoes").Height = m.DominoHeight;
         F<Grid>("DominoRowCell").Margin = m.DominoMargin;
 
+        // 表盘、骨牌、卡片底色统一吃 layout.json 那一档不透明度（3.9.0，用户 2026-09-08）。
+        // **只有这三处**：
+        // - 卡片里的按钮和文字保持实心——挡住后面的是那块实心底色，不是细细的文字，
+        //   而低透明度下把文字一起调淡就没法读了（所以卡片拆成了底色层 + 内容层）。
+        // - 提示条也不跟着淡：它跟骨牌叠在同一格，但那是只显示一分钟的提醒，该最清楚，
+        //   所以 Opacity 设在 DominoRow 上，不是设在 DominoRowCell 那个 Grid 上。
+        // ⚠️ **用 OpacityMask，不是 Opacity**（3.9.1，DECISIONS K29）。Avalonia 里
+        // `Visual.Opacity` 是**逐个绘制操作**各自半透，不是"整个控件先合成成一层再降透"：
+        // 表盘的白色钟面画在一个木色**填充圆盘**之上，逐笔半透会让木色透过钟面混上来，
+        // 出来是米黄——用户 2026-09-08 一眼看出"表盘泛黄"。headless 实测：Opacity=0.5 时
+        // 白面净区是 (207,189,176,A=201)，OpacityMask=0.5 是 (255,255,255,A=127)。
+        // OpacityMask 强制渲染器先合成一层再套遮罩，所以颜色不串、alpha 也均匀。
+        // 顺带的好处：控件的 Opacity 保持 1，命中测试完全不受影响（拖表盘照常）。
+        var opacity = WindowLayout.Opacity;
+        Fade(F<DialControl>("Dial"), opacity);
+        Fade(F<DominoRow>("Dominoes"), opacity);
+        Fade(F<Border>("CardBackdrop"), opacity);
+
+        // Start 按钮也跟着淡（3.9.2，用户 2026-09-08 说它「比较突兀」）。**它跟卡片底色
+        // 是同一类东西——一块饱和的实心色块**，周围全淡下去之后就它没淡，成了整扇窗最跳
+        // 的一处。
+        // ⚠️ 绿色本身不能动：`#2FA36B` 是色环的 Focus 语义色，Give up 那个红同理来自
+        // Slack 红（§8.2.3，「红色唯一一次离开表盘」），改色相等于改语义。所以调的是透明度。
+        // ⚠️ 这一处**修正了 3.9.0 时「卡片里的按钮和文字保持实心」那句**：滑块、单选框、
+        // 目标列表、版本号仍然实心——它们是细线条和文字，挡不住后面也不扎眼；只有这一块
+        // 是实心色块。
+        Fade(F<Button>("StartBtn"), opacity);
+
+        // 满不透明时不挂遮罩：不多分配一层，行为跟 3.9.0 之前逐字节一致。
+        static void Fade(Visual v, double opacity)
+            => v.OpacityMask = opacity >= 1.0 ? null : new Avalonia.Media.SolidColorBrush(Avalonia.Media.Colors.White, opacity);
+
         // 深色打底那份和蓝色错位那份，内容完全一样，两边都要设（DECISIONS J11）。
         foreach (var name in new[] { "AlarmBannerText", "AlarmBannerTextBlue" })
         {

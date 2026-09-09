@@ -276,15 +276,28 @@ The window is tall. Write layout.json in the folder above:
 
     {
       // "standard" or "compact"
-      "layout": "compact"
+      "layout": "compact",
+
+      // 10-100: dial, dominoes and the card's background
+      "opacity": 50
     }
 
 and the dial and the dominoes shrink to about three quarters, with the window
 narrowed to match. Controls and text keep their size -- only the drawing gets
 smaller. Comments and trailing commas are fine, the same as rules.json.
 
-It is read once at startup: edit it while ItamiTimer is running and nothing happens
-until you launch it again. Delete the file to go back to the normal size.
+"opacity" is a percentage from 10 to 100, default 90, so you can keep the window
+on top without hiding what is behind it. It applies to the dial, the dominoes and
+the card's BACKGROUND -- the buttons, the slider and the goal list stay solid,
+because what actually covers things up is that filled card, not the thin text.
+A value the program cannot use falls back to 90 rather than being clamped.
+
+Note that see-through is not click-through: a faint window still swallows the
+mouse, so the window behind it is visible but not clickable.
+
+Both keys are read once at startup: edit the file while ItamiTimer is running and
+nothing happens until you launch it again. Delete the file to go back to the
+normal size at 90%.
 
 
 The window itself never explains anything and never shows a report -- that is

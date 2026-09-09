@@ -175,12 +175,29 @@ Write `layout.json` in the data directory above:
 ```json
 {
   // "standard" or "compact"
-  "layout": "compact"
+  "layout": "compact",
+
+  // 10-100. How opaque the dial, the dominoes and the card's background are.
+  "opacity": 50
 }
 ```
 
 Comments and trailing commas are fine, the same as `rules.json`. Anything else —
 `"standard"`, a missing key, an empty file, no file at all — is the normal size.
+
+### Seeing through it
+
+`opacity` is a percentage from **10 to 100**, default **90**. It applies to three things:
+the dial, the dominoes, and the **card's background**. The buttons, the slider and the
+goal list stay fully solid — what actually hides the window behind is that filled card,
+not the thin text, and fading the text too would just make it unreadable.
+
+Anything the program cannot use — out of range, a typo, the wrong kind of value — falls
+back to 90 rather than being clamped to the nearest edge.
+
+⚠️ **See-through is not click-through.** A faint window still swallows the mouse; the
+window behind it is visible but not clickable. That is deliberate: click-through would
+also disable dragging the dial, pressing Start, and the scroll-wheel alarm hand.
 
 **It is read once, when the program starts.** Editing it while ItamiTimer is running
 changes nothing until the next launch. That is also why it is its own file rather than a
