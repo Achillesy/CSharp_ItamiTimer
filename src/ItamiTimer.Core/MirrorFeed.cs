@@ -43,8 +43,33 @@ public sealed class MirrorFeed
     /// </summary>
     public const int PollSeconds = 5;
 
-    /// <summary>每次取数拿几条。十几秒内正常最多几条，20 是很大的余量。</summary>
+    /// <summary>**窗口桶**每次取最近几条。窗口事件互不重叠，十几秒内正常最多几条，20 是很大的余量。</summary>
     private const int FetchLimit = 20;
+
+    /// <summary>
+    /// **afk 桶单独一个、大得多的上限**（3.9.3，DECISIONS O10）。
+    ///
+    /// ⚠️ **别跟 <see cref="FetchLimit"/> 合成一个数**。afk 桶跟窗口桶的形状完全不同：
+    /// `aw-watcher-afk` 每次心跳**新写一行**，而不是延长已有那条——一次离开会在桶里留下
+    /// 几十条 <b>start 完全相同、duration 各不相同</b>的独立事件（实测 30 条，30 个不同
+    /// id）。更要命的是 <b>id 顺序跟时长不相关</b>（实测 id=131044 是 1310.8s，更晚的
+    /// id=131060 只有 1296.1s），所以"最新的 N 条"里**可能恰好没有最长的那条**。
+    ///
+    /// 后果是 afk 只覆盖到某个中途的时刻，再往后的秒仍由窗口事件说了算——锁屏离开会被
+    /// 判成跑偏，正是 O9 说的"冤枉人"。用户 2026-09-09 报的就是这个：离开 19 分钟
+    /// （`loginwindow "Login"`），afk 桶全程正确，表盘却大片红格。实测同一次查询：
+    /// <c>limit=20</c> 只覆盖到 09:07:53，<c>limit=60</c> 才够到真正的终点 09:08:17。
+    ///
+    /// 取 500：实测副本约 **1.4 条/分钟**，500 条够连续离开约 6 小时。响应只在 afk 桶的
+    /// `last_updated` 真的前进时才拉，而它写得很稀疏（实测卡住 38 秒还不写）。
+    ///
+    /// ⚠️ **别改成按区间查**（2026-09-09 试过并否掉）：AW 的 <c>end=</c> 会把事件**裁到
+    /// 那个时刻**——实测头查询无论 limit 5/20/100，覆盖都停在区间起点 09:00:56 一秒不多；
+    /// 而区间查询本身只按事件自己的 start 过滤（Note T1），那条 08:46:26 开始的离开事件
+    /// 压根不在返回里。结果 afk 会停在 <c>now-244s</c>，最后 4 分钟全归窗口管，**比现在
+    /// 更糟**。不带 <c>end</c> 的"最近 N 条"能拿到**正在进行中那条**，这正是它存在的理由。
+    /// </summary>
+    private const int AfkFetchLimit = 500;
 
     private readonly AwClient _aw;
     private readonly AwMirror _mirror;
@@ -113,8 +138,8 @@ public sealed class MirrorFeed
                 if (now.Second % PollSeconds == 0)
                 {
                     var seen = await _aw.FetchLastUpdatedAsync();
-                    win = await PullIfChangedAsync(_winBucket, seen, _winSeen);
-                    afk = await PullIfChangedAsync(_afkBucket, seen, _afkSeen);
+                    win = await PullIfChangedAsync(_winBucket, seen, _winSeen, FetchLimit);
+                    afk = await PullIfChangedAsync(_afkBucket, seen, _afkSeen, AfkFetchLimit);
                     if (seen.TryGetValue(_winBucket, out var w)) _winSeen = w;
                     if (seen.TryGetValue(_afkBucket, out var a)) _afkSeen = a;
                 }
@@ -141,9 +166,9 @@ public sealed class MirrorFeed
 
     /// <summary>某个桶的 <c>last_updated</c> 前进了才去拉事件，否则连请求都不发。</summary>
     private async Task<List<AwEvent>> PullIfChangedAsync(
-        string bucket, IReadOnlyDictionary<string, DateTimeOffset> seen, DateTimeOffset last)
+        string bucket, IReadOnlyDictionary<string, DateTimeOffset> seen, DateTimeOffset last, int limit)
         => seen.TryGetValue(bucket, out var lu) && lu > last
-            ? await _aw.FetchLatestAsync(bucket, FetchLimit)
+            ? await _aw.FetchLatestAsync(bucket, limit)
             : [];
 
     /// <summary>
