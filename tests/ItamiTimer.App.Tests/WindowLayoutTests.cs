@@ -173,6 +173,48 @@ public class WindowLayoutTests
                 $"骨牌行只有 {m.DominoRowHeight}px，装不下 {Need(m)}px 的提示条");
     }
 
+    // ---------------------------------------------------------------- 拨针标签（3.9.4）
+
+    /// <summary>
+    /// <c>14:30</c> 18 号加粗的 <c>DesiredSize</c>，**headless 实测**（2026-09-11，
+    /// 跟上面 <see cref="BannerOneLine"/> 那两个数同一个来路）：47.0 × 18.0。
+    /// <c>23:59</c> 一样宽（数字等宽），所以一个数就够。
+    /// </summary>
+    private const double ScrubWidth = 47, ScrubHeight = 18;
+
+    /// <summary>
+    /// ⚠️ 这三个是 <c>DialControl</c> **私有常量的副本**：<c>RBezelOut = 1.075</c>、
+    /// <c>rFace = box / 2 / (RBezelOut + 0.10)</c>、圆心 y 上移 <c>rFace * 0.03</c>。
+    /// 它们在另一个类里而且是 private，测试拿不到——**那边改了这里必须跟着改**，
+    /// 这条注释是 §15.4「同一个量两处定义」在这里唯一的兜底。
+    /// </summary>
+    private const double RBezelOut = 1.075, FaceDivisor = 1.175, CenterYLift = 0.03;
+
+    [Fact]
+    public void 左上角那块空白要放得下拨针标签_两档都要()
+    {
+        // 拨针时刻显示在表盘那一行的左上角（圆盘之外）。⚠️ 这是会"安静坏掉"的一类：
+        // 表盘再缩一点、或者字号再调大一点，标签就压到木框上了——编译不报，
+        // 而且只有真去滚轮拨针才看得见。
+        foreach (var (name, m) in new[] { ("标准", WindowLayout.Standard), ("紧凑", WindowLayout.Compact) })
+        {
+            var contentW = m.WindowWidth - 36;            // Grid.Margin 左右各 18
+            var box = Math.Min(contentW, m.DialHeight);   // DialControl 的 box
+            var rFace = box / 2 / FaceDivisor;
+            var cx = contentW / 2;
+            var cy = m.DialHeight / 2 - rFace * CenterYLift;
+            var bezel = rFace * RBezelOut;
+
+            // 标签贴着左上角 (0,0)，离圆心最近的是它的右下角
+            var dx = ScrubWidth - cx;
+            var dy = ScrubHeight - cy;
+            var gap = Math.Sqrt(dx * dx + dy * dy) - bezel;
+
+            Assert.True(gap > 0,
+                $"{name}档：{ScrubWidth}×{ScrubHeight} 的标签压到木框上了（还差 {-gap:0.0}px）");
+        }
+    }
+
     [Fact]
     public void 紧凑档的表盘正好等于内容宽度()
     {

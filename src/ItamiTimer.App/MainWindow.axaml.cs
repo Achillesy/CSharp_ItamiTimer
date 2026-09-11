@@ -535,6 +535,15 @@ public partial class MainWindow : Window
         var ticking = _settings.ForceTicking || (_settings.TickEnabled && _drifting);
         if (ticking) Tick.Play(sec, _settings.TickVolume);
 
+        // 拨针的时刻标签停手就收（3.9.4）。**复用 `_alarmQuietUntil`**：拨针的每一格
+        // 都把它刷成 `now + 2s`（E6 的调整期静默截止时刻），所以「停手 2 秒后收起」跟
+        // 「调整期结束」天然是同一个时刻，不需要第二个计时量。
+        // ⚠️ **这里是每秒判断，跟提示条那条（OnMinute 第 ① 步）不是一回事**：那条按
+        // 分钟收，因为它的时长本来就是整分钟；这个标签是秒级的，挂在分钟节拍上会一直
+        // 糊到下一个整分钟。放在这里也就完全不用碰 DECISIONS L13 定死的分钟序列。
+        if (F<TextBlock>("AlarmScrub").IsVisible && DateTime.Now >= _alarmQuietUntil)
+            F<TextBlock>("AlarmScrub").IsVisible = false;
+
         // 每一秒：把 AW 内存镜像推到此刻（DESIGN §7.5）。**这是常驻期唯一还在碰 AW
         // 的地方**——判定、诊断、以后的反色全部从镜像读。挂在同一个 `_frame` 上，
         // **不新开定时器**（DECISIONS L8：这个程序里只有一个钟）；跟下面的 OnMinute
@@ -902,6 +911,22 @@ public partial class MainWindow : Window
         // 换主题时必须整排重新画一遍。齿轮没有开关态，主题图标**画的是当前状态**
         // （夜间显示月亮），所以它也不挂 `on` 这个 class——那一档是给"开/关"用的，
         // 这里两个态一样重要，用 Opacity 分主次会读成"主题被关掉了"。
+        // 拨针标签的墨色和光晕跟图标同一套（M4：墨 = Palette.Ink、光晕 = Palette.Face）。
+        // ⚠️ **光晕不是装饰**：这个标签坐在卡片以外、圆盘以外，背后是完全透明的窗口
+        // ——直接就是壁纸，而且 opacity 可以低到 10%。跟 §8.7 里"卡片外的三个图标各自
+        // 描一圈浅色轮廓"是同一个处境，没有光晕在深色壁纸上就读不出来。
+        // 零偏移的 drop-shadow 就是文字版的那一圈描边。
+        var scrub = F<TextBlock>("AlarmScrub");
+        scrub.Foreground = new Avalonia.Media.SolidColorBrush(_palette.Ink);
+        scrub.Effect = new Avalonia.Media.DropShadowEffect
+        {
+            // ⚠️ **BlurRadius = 3 是看图定的，别随手调大**（2026-09-11 headless 渲了
+            // 0/2/3/4/6 五档并排比）：0 完全没用（字色跟主题走、壁纸不跟，撞色时读不出来）；
+            // 2~3 是干净的一圈描边；**4 以上化成一团糊斑**，看着像被荧光笔涂过。
+            // 取 3 不取 2：壁纸是有纹理的照片，宽一点更稳。
+            OffsetX = 0, OffsetY = 0, BlurRadius = 3, Color = _palette.Face, Opacity = 1,
+        };
+
         F<Button>("SettingsBtn").Content = ChromeIcons.Gear(_palette);
         F<Button>("ThemeBtn").Content = ChromeIcons.Theme(_settings.DarkTheme, _palette);
 
@@ -1416,8 +1441,12 @@ public partial class MainWindow : Window
         dial.AlarmMinutes = _alarm.Position;
         if (_alarm.FireAt is { } at)
         {
-            ToolTip.SetTip(dial, at.ToString("HH:mm"));
-            ToolTip.SetIsOpen(dial, true);
+            // 3.9.4：从「跟着鼠标走的 ToolTip」换成表盘左上角那块空白里的大字
+            // （用户 2026-09-11：原来那个「字有点小」）。顺带消掉 E10 记的那类风险
+            // ——ToolTip 在模态窗前会卡住不走，齿轮那个当年就是为此删掉的，而这里
+            // 「拨完针再点齿轮开 Settings」正好是同一条路。
+            F<TextBlock>("AlarmScrub").Text = at.ToString("HH:mm");
+            F<TextBlock>("AlarmScrub").IsVisible = true;
         }
     }
 

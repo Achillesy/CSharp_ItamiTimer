@@ -116,6 +116,24 @@
       <!-- 高度由 WindowLayout.DialHeight 在构造函数里给（3.8.0 起有标准/紧凑两档，
            DESIGN §8.10）。这里刻意不写死，免得同一个量两处定义。 -->
       <app:DialControl x:Name="Dial"/>
+
+      <!-- 滚轮拨闹钟时显示的时刻（3.9.4，用户 2026-09-11：原来那个跟着鼠标走的
+           ToolTip「字有点小」）。**放在表盘那一行的左上角**——圆盘之外的空白，右上角
+           被三个 chrome 图标占着，左边是空的。
+           实测可用宽度（行高 24px、不碰木框）：标准档 108px、紧凑档 68px，而 18 号
+           加粗的 "14:30" 约 48px，两档都放得下。
+           ⚠️ **IsHitTestVisible="False"**：拖窗口和滚轮都挂在 Dial 上，而命中测试按
+           实际画出来的像素走（DECISIONS K10/K21）——左上角这片透明区本来就拖不动、
+           滚不动，这个标签绝不能把它变成能挡事件的东西。
+           ⚠️ 墨色和光晕在 ApplyChrome 里按主题设（M4 同一套：墨 = Palette.Ink、
+           光晕 = Palette.Face）。**这里没有任何底**，背后直接是壁纸，所以光晕不是
+           装饰、是可读性的唯一依靠——跟卡片外那三个图标同一个处境（§8.7）。
+           ⚠️ **不跟着 opacity 淡**：3.9.2 定的划线是「实心色块跟着淡，细线条和文字
+           保持实心」，它是文字。 -->
+      <TextBlock x:Name="AlarmScrub" IsVisible="False" IsHitTestVisible="False"
+                 HorizontalAlignment="Left" VerticalAlignment="Top"
+                 FontSize="18" FontWeight="Bold"/>
+
       <StackPanel Orientation="Horizontal" Spacing="2"
                   HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-4,-4,0">
         <Button x:Name="ThemeBtn" Classes="chrome"/>
