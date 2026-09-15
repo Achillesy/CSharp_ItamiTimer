@@ -91,6 +91,9 @@ screen it mostly landed on.
   `aw-watcher-window` (what's focused) and `aw-watcher-afk` (are you there). The afk watcher
   is not optional — window events keep growing via heartbeats even when nobody is at the desk,
   so without afk data "walk away with the right window focused" would be invisible free time.
+  (Since 3.10.0 the *clock face* reads your away time from local keyboard/mouse idle instead,
+  using the same 3-minute threshold. The **ledger** still comes from `aw-watcher-afk` alone —
+  only ActivityWatch can be asked about hours when ItamiTimer wasn't running.)
 - .NET 10 runtime (SDK to build).
 
 ## Build & run

@@ -104,7 +104,7 @@ async Task<int> StartAsync()
     // ---- 镜像：跟界面**同一份驱动**（Core 的 MirrorFeed）。§15.7 要的"验证工具和被验证
     // 对象是同一个引擎、同一个节拍"，从这一版起连"怎么取数"都统一了——干跑不再自己
     // 查 AW，而是跟 App 一样每秒喂镜像、每分钟从镜像读。
-    var feed = new MirrorFeed(aw, task.StartedAt, rules, group)
+    var feed = new MirrorFeed(aw, task.StartedAt, rules, group, InputIdle.Elapsed)
     {
         OnInitialized = (w, a) => Console.WriteLine($"Mirror initialized: {AwMirror.Capacity}s, {w} window / {a} afk events"),
         OnUnavailable = why => Console.WriteLine($"       ⚠ ActivityWatch unreachable (fail-open, counts as focus): {why}"),

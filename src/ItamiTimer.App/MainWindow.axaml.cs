@@ -392,15 +392,17 @@ public partial class MainWindow : Window
         Fade(F<DominoRow>("Dominoes"), opacity);
         Fade(F<Border>("CardBackdrop"), opacity);
 
-        // Start 按钮也跟着淡（3.9.2，用户 2026-09-08 说它「比较突兀」）。**它跟卡片底色
-        // 是同一类东西——一块饱和的实心色块**，周围全淡下去之后就它没淡，成了整扇窗最跳
-        // 的一处。
-        // ⚠️ 绿色本身不能动：`#2FA36B` 是色环的 Focus 语义色，Give up 那个红同理来自
-        // Slack 红（§8.2.3，「红色唯一一次离开表盘」），改色相等于改语义。所以调的是透明度。
-        // ⚠️ 这一处**修正了 3.9.0 时「卡片里的按钮和文字保持实心」那句**：滑块、单选框、
-        // 目标列表、版本号仍然实心——它们是细线条和文字，挡不住后面也不扎眼；只有这一块
-        // 是实心色块。
-        Fade(F<Button>("StartBtn"), opacity);
+        // Start 按钮：**只有底色跟着淡，文字保持实心**（3.9.6，用户 2026-09-12
+        // ——"就像列表选项文字一样，不要透明度"）。
+        // ⚠️ 3.9.2~3.9.5 是给整个按钮套 OpacityMask，白字跟着一起淡；这一版改掉。
+        // 实现上没别的路：Fluent 的 Button 模板里**底色和文字在同一个 ContentPresenter
+        // 上**，套任何控件级的透明度都会把两者一起带走。只能把透明度放进**底色画刷**
+        // ——文字是前景色，压根不是画刷，天然不受影响。
+        // 5 处底色（正常绿 / 悬停 / danger 红 / danger 悬停 / 禁用）都在 MainWindow.axaml
+        // 里改成了带 `Opacity="{DynamicResource ItamiFillOpacity}"` 的内联画刷，这里只负责
+        // 把那个资源设上。⚠️ **颜色本身仍然写在 XAML 里**，没搬进代码——`#2FA36B` 是色环的
+        // Focus 语义色、`#D6453F` 是 Slack 红（§8.2.3），它们该跟那段解释性注释待在一起。
+        Resources["ItamiFillOpacity"] = opacity;
 
         // 满不透明时不挂遮罩：不多分配一层，行为跟 3.9.0 之前逐字节一致。
         static void Fade(Visual v, double opacity)
@@ -825,22 +827,39 @@ public partial class MainWindow : Window
     /// 挡掉了这一条分支，这里理论上不会走到，多一层判断只是防御性的。
     ///
     /// 拿的是 <see cref="AlarmsList.NextDue"/>（那一分钟上的**全部**条目）而不是单独一条：
-    /// 红圈画成双圈就是在说"这一刻不止一件事"，点开只给一条等于说了一半。停留时长跟着
-    /// 条数走（见 <see cref="PeekSeconds"/>）。
+    /// 红圈画成双圈就是在说"这一刻不止一件事"，点开只给一条等于说了一半。停留时长是**定值**
+    /// （<see cref="PeekDwell"/>，3.9.5 起不再跟条数走）。
     /// </summary>
     private bool OnAlarmsDotClicked()
     {
         var next = AlarmsList.NextDue(ReadAlarmsList(), DateTime.Now);
         if (next.Count == 0) return false;
-        ShowAlarmBanner(next, DateTime.Now, PeekSeconds(next.Count));
+        ShowAlarmBanner(next, DateTime.Now, PeekDwell);
         return true;
     }
 
     /// <summary>
-    /// 瞄一眼停留多久：一条 3 秒，每多一条 +1 秒，封顶 6 秒。跟到点真触发那次的 1 分钟
+    /// 瞄一眼停留多久：**5 秒**（3.9.5，用户 2026-09-11 定）。跟到点真触发那次的 1 分钟
     /// 分开——那是"这件事现在该做了"，这只是扫一眼。
+    ///
+    /// ⚠️ **收起检查一分钟才跑一次**（<c>OnMinute</c> 第 ① 步，§9.2），所以真实时长是
+    /// 「从点击到 ≥ 截止时刻的第一个整分钟」，5~65 秒不等、平均 35 秒。
+    ///
+    /// **为什么取 5 而不是 30 或 60**（用户的理由，比"让 D 接近真实时长"那套更对）：
+    /// 用户的期待不是"停 D 秒"，是**"到整点它就该没了"**。D 越小，符合这个期待的点击
+    /// 比例越高——D=5 时点在第 0~54 秒（**91.7%**）都是下一个整分钟消失，只有最后 5 秒
+    /// 那 8.3% 会拖到再下一分钟。而 5 秒是"看得清"的地板（3 秒那版的比例更高，95%，
+    /// 但读不清，正是这轮要解决的问题）。
+    ///
+    /// ⚠️ **别指望换个数能把误差变小**：令 <c>u = (t + D) mod 60</c>，误差就是
+    /// <c>60 − u</c>；点击时刻 `t` 均匀则 `u` 均匀（加常数再取模不改变均匀分布），所以
+    /// **误差恒为 Uniform(0,60]、平均 30 秒、均方误差 1200**，D 取多少都一样。D 能换到的
+    /// 是**别的东西**：符合"到整点消失"那个期待的比例，以及停留的地板。见 DECISIONS J25。
+    ///
+    /// ⚠️ 原来那套"一条 3 秒、每多一条 +1 秒、封顶 6 秒"**已删除**：条数递增会让上面
+    /// 那个比例和边界随条数漂移，而一两秒的差别在这个量级上是噪声。
     /// </summary>
-    private static TimeSpan PeekSeconds(int count) => TimeSpan.FromSeconds(Math.Min(3 + (count - 1), 6));
+    private static readonly TimeSpan PeekDwell = TimeSpan.FromSeconds(5);
 
     /// <summary>
     /// 读 <c>alarms.cron</c>（3.7.0 起是一份标准 crontab，不再是 Markdown 清单）。程序

@@ -46,40 +46,17 @@ public sealed class MirrorFeed
     /// <summary>**窗口桶**每次取最近几条。窗口事件互不重叠，十几秒内正常最多几条，20 是很大的余量。</summary>
     private const int FetchLimit = 20;
 
-    /// <summary>
-    /// **afk 桶单独一个、大得多的上限**（3.9.3，DECISIONS O10）。
-    ///
-    /// ⚠️ **别跟 <see cref="FetchLimit"/> 合成一个数**。afk 桶跟窗口桶的形状完全不同：
-    /// `aw-watcher-afk` 每次心跳**新写一行**，而不是延长已有那条——一次离开会在桶里留下
-    /// 几十条 <b>start 完全相同、duration 各不相同</b>的独立事件（实测 30 条，30 个不同
-    /// id）。更要命的是 <b>id 顺序跟时长不相关</b>（实测 id=131044 是 1310.8s，更晚的
-    /// id=131060 只有 1296.1s），所以"最新的 N 条"里**可能恰好没有最长的那条**。
-    ///
-    /// 后果是 afk 只覆盖到某个中途的时刻，再往后的秒仍由窗口事件说了算——锁屏离开会被
-    /// 判成跑偏，正是 O9 说的"冤枉人"。用户 2026-09-09 报的就是这个：离开 19 分钟
-    /// （`loginwindow "Login"`），afk 桶全程正确，表盘却大片红格。实测同一次查询：
-    /// <c>limit=20</c> 只覆盖到 09:07:53，<c>limit=60</c> 才够到真正的终点 09:08:17。
-    ///
-    /// 取 500：实测副本约 **1.4 条/分钟**，500 条够连续离开约 6 小时。响应只在 afk 桶的
-    /// `last_updated` 真的前进时才拉，而它写得很稀疏（实测卡住 38 秒还不写）。
-    ///
-    /// ⚠️ **别改成按区间查**（2026-09-09 试过并否掉）：AW 的 <c>end=</c> 会把事件**裁到
-    /// 那个时刻**——实测头查询无论 limit 5/20/100，覆盖都停在区间起点 09:00:56 一秒不多；
-    /// 而区间查询本身只按事件自己的 start 过滤（Note T1），那条 08:46:26 开始的离开事件
-    /// 压根不在返回里。结果 afk 会停在 <c>now-244s</c>，最后 4 分钟全归窗口管，**比现在
-    /// 更糟**。不带 <c>end</c> 的"最近 N 条"能拿到**正在进行中那条**，这正是它存在的理由。
-    /// </summary>
-    private const int AfkFetchLimit = 500;
-
     private readonly AwClient _aw;
     private readonly AwMirror _mirror;
+    private readonly Func<TimeSpan> _idle;
+    private readonly IdleAfk _idleAfk = new();
 
-    private string? _winBucket, _afkBucket;
+    private string? _winBucket;
     private bool _ready;
     private bool _down;
 
-    /// <summary>上一次探到的两个桶的 <c>last_updated</c>：既是"有没有新东西"的游标，也是陈旧诊断的依据。</summary>
-    private DateTimeOffset _winSeen, _afkSeen;
+    /// <summary>上一次探到的窗口桶的 <c>last_updated</c>：既是"有没有新东西"的游标，也是陈旧诊断的依据。</summary>
+    private DateTimeOffset _winSeen;
 
     /// <summary>镜像本体。判定、反色、滴答、跑偏归因都从它读。</summary>
     public AwMirror Mirror => _mirror;
@@ -96,9 +73,19 @@ public sealed class MirrorFeed
     /// <summary>AW 从"不能用"恢复。同样只在状态变化时调。</summary>
     public Action? OnRestored;
 
-    public MirrorFeed(AwClient aw, DateTimeOffset start, GroupRules rules, string? selectedGroup)
+    /// <param name="idle">
+    /// 「距上次键鼠输入多久」。**注进来而不是直接调**，因为它必然是平台调用
+    /// （<c>App/Platform/InputIdle.cs</c>），而 Core 一句平台代码都不许有。
+    ///
+    /// ⚠️ 两个前端**必须传同一个实现**——`itami start` 的全部意义就是"验的是界面跑的
+    /// 那台引擎"（§15.7）。CLI 那边靠 csproj 的 `<Compile Include>` 把同一个源文件 link
+    /// 进去，跟 `Command.cs` 一样的路数（DECISIONS L5/L25）。测试传假的。
+    /// </param>
+    public MirrorFeed(AwClient aw, DateTimeOffset start, GroupRules rules, string? selectedGroup,
+                      Func<TimeSpan> idle)
     {
         _aw = aw;
+        _idle = idle;
         _mirror = new AwMirror(start, rules, selectedGroup);
     }
 
@@ -107,12 +94,15 @@ public sealed class MirrorFeed
     /// 要不要真的跟 AW 说话：
     ///
     /// <list type="bullet">
-    ///   <item><b>每一秒</b>：把镜像推进到 <paramref name="now"/> 并跑预测。**纯内存、
-    ///         零成本**——反色要的 1 秒粒度全靠它，跟通信频率无关。</item>
-    ///   <item><b>只在 <see cref="PollSeconds"/> 的整数倍那一秒</b>：探一次两个桶的
+    ///   <item><b>每一秒</b>：读一次本机键鼠空闲、把镜像推进到 <paramref name="now"/> 并跑
+    ///         预测。**纯内存、零成本**——反色要的 1 秒粒度全靠它，跟通信频率无关。</item>
+    ///   <item><b>只在 <see cref="PollSeconds"/> 的整数倍那一秒</b>：探一次**窗口桶**的
     ///         `last_updated`（实测 739 字节，一个请求同时给出"活着没"和"变了没"），
     ///         **前进了才**去拉事件。</item>
     /// </list>
+    ///
+    /// **3.10.0 起只有窗口桶要取数**：afk 那一半改由 <see cref="IdleAfk"/> 从本机键鼠空闲
+    /// 算出来（DESIGN §7.5.1）。所以这里也不再需要 afk 桶的游标和 bucket id。
     ///
     /// 所以对外只有**一个节拍**（每秒），不多出时间点；而稳态下真正的事件查询约每
     /// 10 秒才发生一次。
@@ -122,28 +112,33 @@ public sealed class MirrorFeed
     /// </summary>
     public async Task RefreshAsync(DateTimeOffset now)
     {
+        // **在 try 外面、在任何网络调用之前**：离开与否是本机自己的事，AW 连不上也照算。
+        // 下面两条路（正常 Apply / 掉线 MarkUnavailable）都要用它。
+        _idleAfk.Track(now, _idle());
+        var afk = _idleAfk.Events();
+
         try
         {
-            if (_winBucket is null || _afkBucket is null)
-                (_winBucket, _afkBucket) = await _aw.FindWatcherBucketsAsync();
+            _winBucket ??= await _aw.FindBucketIdAsync(AwClient.WindowBucketType);
 
             if (!_ready)
             {
-                await InitializeAsync(now);
+                await InitializeAsync(now, afk);
                 _ready = true;
             }
             else
             {
-                List<AwEvent> win = [], afk = [];
+                List<AwEvent> win = [];
                 if (now.Second % PollSeconds == 0)
                 {
                     var seen = await _aw.FetchLastUpdatedAsync();
                     win = await PullIfChangedAsync(_winBucket, seen, _winSeen, FetchLimit);
-                    afk = await PullIfChangedAsync(_afkBucket, seen, _afkSeen, AfkFetchLimit);
                     if (seen.TryGetValue(_winBucket, out var w)) _winSeen = w;
-                    if (seen.TryGetValue(_afkBucket, out var a)) _afkSeen = a;
                 }
-                // 空列表也要 Apply：镜像仍然要推进到 now，让预测把空隙和末尾填上
+                // 窗口那半是空列表也要 Apply：镜像仍然要推进到 now，让预测把空隙和末尾填上。
+                // ⚠️ afk 那半**每一拍都是完整的当前区间集**，不是"这一拍新取到的"——正因如此，
+                //    窗口事件重刷整段（锁屏那条 loginwindow 横跨两小时）也盖不掉它。3.9.x 那个
+                //    大 bug 的根因就在这里：从前 afk 靠取数，"这一拍没取到"就等于没人盖回来。
                 _mirror.Apply(win, afk, now);
             }
 
@@ -155,7 +150,8 @@ public sealed class MirrorFeed
         }
         catch (AwUnavailableException ex)
         {
-            _mirror.MarkUnavailable(now);
+            // AW 掉线也照画 afk：那个信号根本不经过 AW（见 MarkUnavailable 的注释）
+            _mirror.MarkUnavailable(now, afk);
             if (!_down)
             {
                 _down = true;
@@ -177,13 +173,14 @@ public sealed class MirrorFeed
     /// "跨进区间的那几条"由 <see cref="AwClient.FetchEventsAsync"/> 自己负责（§7.6 的
     /// "头 + 精确区间"），所以这里不用再自己拼一遍——你可能六个小时前就开着那个窗口
     /// 没动过，而 AW 只按事件自己的 start 过滤（T1）。
+    ///
+    /// **afk 那半不查 AW**（3.10.0）：第一拍的 <see cref="IdleAfk"/> 已经能给出"此刻这次
+    /// 离开是从什么时候开始的"（起点回填到输入停止那一刻），超出环的部分 <c>PaintAfk</c>
+    /// 自己裁掉。程序刚起来时更早的离开确实无从得知——但那几秒也早就滚出这 245 秒的环了。
     /// </summary>
-    private async Task InitializeAsync(DateTimeOffset now)
+    private async Task InitializeAsync(DateTimeOffset now, IReadOnlyList<AwEvent> afk)
     {
-        var from = _mirror.Oldest;
-
-        var win = await _aw.FetchEventsAsync(_winBucket!, from, now);
-        var afk = await _aw.FetchEventsAsync(_afkBucket!, from, now);
+        var win = await _aw.FetchEventsAsync(_winBucket!, _mirror.Oldest, now);
 
         _mirror.Apply(win, afk, now);
         OnInitialized?.Invoke(win.Count, afk.Count);

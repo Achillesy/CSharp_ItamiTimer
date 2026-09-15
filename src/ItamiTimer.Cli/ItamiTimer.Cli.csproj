@@ -20,9 +20,12 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Keyboard/mouse idle reading (§8.3.6) is needed by both App and Cli. The source
-         lives in App (§8.5: platform-specific code belongs to that layer), and is linked
-         in here — the same file compiled on both sides, not copied. -->
+    <!-- 键鼠空闲时长（§8.3.6）。3.10.0 起它同时是**表盘上「人不在」那一格的唯一来源**
+         （Core 的 IdleAfk，DESIGN §7.5），所以干跑不 link 它就等于 `itami start` 画的
+         afk 跟界面画的不是一回事——而干跑存在的全部意义就是"同一台引擎"（§15.7）。
+         源文件住在 App（§8.5：平台代码归那一层），这里 link 同一份，不抄。 -->
+    <Compile Include="..\ItamiTimer.App\Platform\InputIdle.cs" Link="Shared\InputIdle.cs" />
+
 
     <!-- executeCommand 的执行、日志、数据目录：`itami commands` 试跑功能的**全部价值**
          就在于它跑的必须是 App 到点时跑的那一条路径。这里 link 的是同一份源文件，不是抄

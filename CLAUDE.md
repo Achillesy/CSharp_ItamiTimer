@@ -9,7 +9,13 @@ Avalonia 12 / .NET 10）。勾选允许的小目标后提交任务，程序拿�
 的事件历史重放整段——只有命中规则且人在座的时间计入。偷懒不弹窗不出声，只有表盘上
 的红格和越滑越远的截止弧。**没有退化模式**——AW 不可用由判定模型自己吸收（DESIGN §3.1）。
 
-**功能已完整，真机验证过多轮。当前工作模式是改进和修 bug**，不是从设计推进实现。
+**⚠️ 2026-09-15 起，这个仓库定版了**（DECISIONS O23）：功能完整、真机验证过多轮，
+**不再加功能，也不再修"跟 AW 相处"这一类 bug**。最后一条查清但决定不修的缺陷记在
+DESIGN §16.6（全屏应用害 `aw-watcher-window` 停写，表盘跟着白送几分钟）。
+
+跟 AW 耦合这套架构的下一步不在这里：用户 2026-09-15 定了方向——**另起一个换名字、
+完全不依赖 AW 的项目**，靠本机自己读前台窗口和标题判定（DESIGN §18 记着已经量到的
+结论和核心设计）。**要改的东西请去那个新项目，不要动这里。**
 
 ## 三份文档，各司其职
 
@@ -38,8 +44,9 @@ DECISIONS.md 有没有这条；有，就先跟用户确认再动；没有，也�
 - 仓库不放位图和音频；界面文字英文（窗口标题中文是产品名）；`rules.json` 是用户数据
   不翻译。
 - **CLI 跑的必须是 App 跑的那份代码**：`Command.cs` / `Log.cs` / `AppData.cs` /
-  `Settings.cs` / `During.cs` 由 Cli 的 csproj 用 `<Compile Include>` **link** 进去，
-  不是抄一份。抄一份 = CLI 测过了 App 照样能坏（DECISIONS L5），这个工具就没意义了。
+  `Settings.cs` / `During.cs` / `Platform/InputIdle.cs` 由 Cli 的 csproj 用
+  `<Compile Include>` **link** 进去，不是抄一份。抄一份 = CLI 测过了 App 照样能坏
+  （DECISIONS L5），这个工具就没意义了。
   ⚠️ CLI 对 `during.json` **只读**：推进 checkpoint 是界面点 Start 那一刻唯一的写入点
   （DESIGN §11.2）。
 

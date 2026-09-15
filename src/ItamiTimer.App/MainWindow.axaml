@@ -40,16 +40,35 @@
       <Setter Property="CornerRadius" Value="6"/>
     </Style>
     <Style Selector="Button.start /template/ ContentPresenter">
-      <Setter Property="Background" Value="#2FA36B"/>
-      <Setter Property="Foreground" Value="#FFFFFF"/>
+      <Setter Property="Background">
+        <SolidColorBrush Color="#2FA36B" Opacity="{DynamicResource ItamiFillOpacity}"/>
+      </Setter>
+      <Setter Property="Foreground" Value="{DynamicResource TextControlForeground}"/>
     </Style>
     <Style Selector="Button.start:pointerover /template/ ContentPresenter">
-      <Setter Property="Background" Value="#3BBA7D"/>
-      <Setter Property="Foreground" Value="#FFFFFF"/>
+      <Setter Property="Background">
+        <SolidColorBrush Color="#3BBA7D" Opacity="{DynamicResource ItamiFillOpacity}"/>
+      </Setter>
+      <Setter Property="Foreground" Value="{DynamicResource TextControlForeground}"/>
     </Style>
-    <!-- 禁用态是中性色，跟着主题走（v3.0.0，DESIGN §8.8）；绿和红是语义色，不跟。 -->
+    <!-- ⚠️ **按钮文字跟着主题走，底色不跟**（3.9.7，用户 2026-09-12）。看着矛盾，其实
+         各有各的道理：底色（绿/红）是**语义色**，反了就把"绿=专注、红=偷懒"那套拆了
+         （§8.2.3、DECISIONS M）；而文字要解决的是"读不读得清"，在低 opacity 下按钮底色
+         几乎不存在，文字的真实背景跟目标列表是同一个（卡片透出来的壁纸）——用户正是靠
+         切主题把文字和壁纸分开的，所以按钮文字必须跟上这个动作。
+         实测（opacity=15、浅主题+浅壁纸那格最糟）：白字 1.95:1，跟主题走 8.23:1。
+         ⚠️ 用 `TextControlForeground` 而不是 `RadioButtonForeground`：运行时查过，
+         两者**取值完全相同**（浅 Black / 深 White），目标列表用的正是后者——取前者只是
+         因为键名挂在 Button 上读得通。别改成写死的色号，那就又跟主题脱钩了。
+         ⚠️ 知情代价：opacity=100 时 Start 变成"绿底深字"（浅主题），不是常见的绿底白字，
+         但对比度反而更高（6.57:1 vs 3.20:1）；唯一变差的一格是"深主题 + 不透明"的
+         Give up 红底（3.57:1，原来白字 4.39:1），仍过大文本 3:1 的线。
+         禁用态是中性色，跟着主题走（v3.0.0，DESIGN §8.8）——它**本来就是**跟的，
+         改完之后五个态终于统一。 -->
     <Style Selector="Button.start:disabled /template/ ContentPresenter">
-      <Setter Property="Background" Value="{DynamicResource ItamiStartDisabledBackground}"/>
+      <Setter Property="Background">
+        <SolidColorBrush Color="{DynamicResource ItamiStartDisabledColor}" Opacity="{DynamicResource ItamiFillOpacity}"/>
+      </Setter>
       <Setter Property="Foreground" Value="{DynamicResource ItamiStartDisabledForeground}"/>
     </Style>
 
@@ -68,12 +87,16 @@
          off-task", here it means "this click voids the whole round" — both are "this
          isn't the outcome you wanted", so the meaning still lines up. -->
     <Style Selector="Button.start.danger /template/ ContentPresenter">
-      <Setter Property="Background" Value="#D6453F"/>
-      <Setter Property="Foreground" Value="#FFFFFF"/>
+      <Setter Property="Background">
+        <SolidColorBrush Color="#D6453F" Opacity="{DynamicResource ItamiFillOpacity}"/>
+      </Setter>
+      <Setter Property="Foreground" Value="{DynamicResource TextControlForeground}"/>
     </Style>
     <Style Selector="Button.start.danger:pointerover /template/ ContentPresenter">
-      <Setter Property="Background" Value="#E15C56"/>
-      <Setter Property="Foreground" Value="#FFFFFF"/>
+      <Setter Property="Background">
+        <SolidColorBrush Color="#E15C56" Opacity="{DynamicResource ItamiFillOpacity}"/>
+      </Setter>
+      <Setter Property="Foreground" Value="{DynamicResource TextControlForeground}"/>
     </Style>
 
 

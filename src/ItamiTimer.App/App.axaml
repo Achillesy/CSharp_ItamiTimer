@@ -49,6 +49,9 @@
           <!-- Start 按钮以下那张半透明卡片（DECISIONS K16）：90% 不透明度 + 浅灰 -->
           <SolidColorBrush x:Key="ItamiCardBackground">#D7DBE0</SolidColorBrush>
           <SolidColorBrush x:Key="ItamiStartDisabledBackground">#AEB6BF</SolidColorBrush>
+          <!-- 同一个色的 Color 形态：Start 按钮的底色要套 ItamiFillOpacity，而那只能写在
+               画刷上，所以 MainWindow 那边要现搭一个内联画刷、需要拿到 Color 而不是 Brush。 -->
+          <Color x:Key="ItamiStartDisabledColor">#AEB6BF</Color>
           <SolidColorBrush x:Key="ItamiStartDisabledForeground">#E4E8EC</SolidColorBrush>
           <!-- Alarms 提示条的**底层**那份文字（DECISIONS J12 的双层错位）。蓝色那层
                是固定的 #63A6E0，不进这张表：它两个模式下都一样。 -->
@@ -64,6 +67,7 @@
           <!-- 比夜面盘面 #20272F 亮一档：卡片得读成"盖在上面的一层"，不是背景本身 -->
           <SolidColorBrush x:Key="ItamiCardBackground">#222A33</SolidColorBrush>
           <SolidColorBrush x:Key="ItamiStartDisabledBackground">#3A434E</SolidColorBrush>
+          <Color x:Key="ItamiStartDisabledColor">#3A434E</Color>
           <SolidColorBrush x:Key="ItamiStartDisabledForeground">#8A94A0</SolidColorBrush>
           <!-- 提示条底层继续压深（用户 2026-08-29 在两版之间选的 A）：保持"深底 +
                亮蓝"这个原有关系。翻成浅色的那版（B）试过——浅色那层在深背景上太抢，

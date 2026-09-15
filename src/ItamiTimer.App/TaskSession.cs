@@ -29,7 +29,13 @@ public sealed class TaskSession : IDisposable
 
     public const int NudgeFloorSeconds = 5;
     public const int IdleNudgeSeconds = 60;
-    private const int AwAfkTimeoutSeconds = 180;
+    /// <summary>
+    /// 提醒的上界：超过这个秒数，那段时间已经被判成「离开」，再戳人就没意义了。
+    /// **借用 <see cref="IdleAfk.ThresholdSeconds"/>，不另写一个 180**——3.10.0 之前这里
+    /// 是个独立的字面量，跟 aw-watcher-afk 的默认超时靠人记着对齐；现在表盘的离开判定
+    /// 就在那个常量上，两处再分家就会出现「提醒说还有 20 秒」而格子早已变空白。
+    /// </summary>
+    private const int AwAfkTimeoutSeconds = IdleAfk.ThresholdSeconds;
 
     /// <summary>
     /// A diagnostic threshold, not part of judgment (DESIGN §16.5): as long as a bucket's
@@ -118,7 +124,8 @@ public sealed class TaskSession : IDisposable
         _buffer = new JudgmentBuffer(task.StartedAt, task.FocusMinutes);
         // 镜像跟任务同生共死：Focused/OffTask 相对于选中的小目标才有意义，而目标恰好在
         // 点 Start 这一刻锁定（之后单选框就禁用了）。DECISIONS O2。
-        _feed = new MirrorFeed(_aw, task.StartedAt, rules, task.Group)
+        // 最后那个参数：表盘的 afk 从本机键鼠空闲算，不再问 AW（3.10.0，Core 的 IdleAfk）
+        _feed = new MirrorFeed(_aw, task.StartedAt, rules, task.Group, InputIdle.Elapsed)
         {
             // Core 不打日志，状态变化用回调抛出来（跟 Backfill 的 progress 同一路数）
             OnInitialized = (win, afk) =>
@@ -239,9 +246,10 @@ public sealed class TaskSession : IDisposable
             var winSeen = _feed.WindowLastUpdated;
             if (winSeen != default && queryEnd - winSeen > TimeSpan.FromSeconds(AwStaleSeconds))
                 Log.Warn($"aw-watcher-window hasn't written for {(queryEnd - winSeen).TotalSeconds:F0}s - it may be stuck (or the machine just woke up)");
-            // ⚠️ afk 桶**故意不判**（DECISIONS O9）：实测它的 last_updated 卡住 38 秒还在涨，
-            // 正常节奏就比 window 慢得多，同一个阈值会误报；而误判成"死了"的代价是 afk
-            // 覆盖失效 → 离开被算成跑偏 → 冤枉人。阈值要先实测再定。
+            // ⚠️ afk 桶**根本不判**：3.10.0 起表盘这条路一个字节都不读它（离开由本机键鼠
+            // 算出来，DESIGN §7.5.1），没有可判的东西。原来的理由（DECISIONS O9：它的
+            // last_updated 卡住 38 秒还在涨，同一个阈值会误报，而误判成"死了"的代价是
+            // afk 覆盖失效 → 离开被算成跑偏）现在只对 `Backfill` 那条路仍然成立。
             var outcome = _buffer.Tick(minute, win, afk, _rules, Task.Group);
             _deficitSeconds = outcome.DeficitSeconds;
 

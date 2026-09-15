@@ -119,8 +119,22 @@ public sealed class AwMirror
     /// ⚠️ **不新增码是有硬理由的**：<see cref="JudgmentCode"/> 的数值大小是「覆盖优先级」，
     /// 而且「算专注 ⟺ <c>&gt;= Focused</c>」——`AwOffline = 5 &gt; Focused = 4` 正是靠这个
     /// 才让「无记录算专注」成立。新插一个码，插在哪儿都会动到这两条规则（DECISIONS H1）。
+    ///
+    /// **3.10.0 起多了一条例外**（<paramref name="afkEvents"/>，推翻 DECISIONS H2 的一半）：
+    /// 「离开」这个信号 <see cref="IdleAfk"/> 是**本机自己算的**，AW 死活跟它无关。AW 掉线
+    /// 的同时人又不在座——这两件事同时成立时，从前整段算专注（因为"没有记录算专注"），
+    /// 而现在本机明明知道人不在。既然知道，就画空白。**知道却装作不知道才是错的。**
+    ///
+    /// 传 null（或不传）＝没有这个信号，退回纯粹的「只推进、不预测」。
     /// </summary>
-    public void MarkUnavailable(DateTimeOffset now) => Advance(Floor(now), carryForward: false);
+    public void MarkUnavailable(DateTimeOffset now, IReadOnlyList<AwEvent>? afkEvents = null)
+    {
+        Advance(Floor(now), carryForward: false);
+        if (afkEvents is null) return;
+        foreach (var e in afkEvents)
+            if (e.Status == "afk")
+                PaintAfk(e);
+    }
 
     /// <summary>
     /// 把这一批事件吸收进来，并把镜像推进到 <paramref name="now"/>。
@@ -321,8 +335,14 @@ public sealed class AwMirror
     /// <see cref="JudgmentCode.AwOffline"/> 的秒，一律沿用**前一秒**。
     ///
     /// 这同时吃掉两种洞：切窗口时事件之间那 ~1 秒空隙，以及末尾 3~10 秒 AW 还没吐出来的
-    /// 部分。⚠️ 预测**只往后传**，不会跨过环的起点——所以 watcher 死掉时它最多把最后那个
-    /// 窗口延续 <see cref="Capacity"/> 秒，不会像无上限外推那样画出几小时。
+    /// 部分。⚠️ 预测**只往后传**，不会跨过环的起点——所以 watcher 死掉时**这一步**最多把
+    /// 最后那个窗口延续 <see cref="Capacity"/> 秒。
+    ///
+    /// ⚠️ **但这个上界保护不了整个镜像**（2026-09-15 证伪，DESIGN §16.6 / DECISIONS O22）：
+    /// 本方法要 <c>_observedThrough</c> 前进才会被 <see cref="Apply"/> 调用，而两次取数之间
+    /// 真正在动的是 <see cref="Advance"/> 的 <c>carryForward</c>——它每秒把前一格抄到后一格，
+    /// **抄的是抄来的**，于是「watcher 活着但停写」时外推没有任何上限。实测一次全屏游戏
+    /// 让窗口桶停写 402 秒，这条外推一路把任务推到了「达成」。**v3 决定不修**。
     /// </summary>
     /// <summary>
     /// 规则 3 的两步，**只在这一拍真的取到了新数据时才跑**（`Apply` 用

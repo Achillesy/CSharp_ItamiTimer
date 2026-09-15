@@ -241,9 +241,5 @@ public sealed class AwClient : IDisposable
         return events;
     }
 
-    /// <summary>窗口/afk 两个 bucket 的 id，一次问齐（<see cref="AwMirror"/> 那条路每秒都要用）。</summary>
-    public async Task<(string Window, string Afk)> FindWatcherBucketsAsync()
-        => (await FindBucketIdAsync(WindowBucketType), await FindBucketIdAsync(AfkBucketType));
-
     public void Dispose() => _http.Dispose();
 }

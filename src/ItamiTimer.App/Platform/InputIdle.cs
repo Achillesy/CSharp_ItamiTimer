@@ -6,26 +6,39 @@ namespace ItamiTimer;
 /// <summary>
 /// System-wide keyboard/mouse idle time.
 ///
-/// **This signal only decides when to nudge the user, and never participates in any
-/// accounting.** Judgment's input is still exclusively ActivityWatch's two buckets
-/// (Principle 0). So this belongs to layer 9, and lives here rather than in Core -- Core's
-/// net10.0 blocks UI frameworks, but not P/Invoke; that half is enforced by discipline
-/// alone.
+/// **This signal never participates in any accounting.** Judgment's input is still
+/// exclusively ActivityWatch's two buckets (Principle 0). So this belongs to layer 9, and
+/// lives here rather than in Core -- Core's net10.0 blocks UI frameworks, but not P/Invoke;
+/// that half is enforced by discipline alone.
 ///
 /// The file lives in App (§8.5: platform-specific code belongs to this layer).
 ///
-/// ⚠️ **It is NOT linked into ItamiTimer.Cli** -- this comment used to claim it was, and
-/// that was simply false (2026-08-30: the csproj links Command.cs / Log.cs / AppData.cs /
-/// Settings.cs, never this one). The consequence is real and intended: `itami start` has
-/// no idle nudge. That is fine -- it is a dry run of **the engine**, and poking a human to
-/// come back to work has no meaning there. The neutral `ItamiTimer` namespace is a leftover
-/// from when linking was planned; harmless, so left alone.
+/// Two callers, both display-only:
+/// <list type="number">
+///   <item>the idle nudge (§8.3.6);</item>
+///   <item>since 3.10.0, <see cref="ItamiTimer.Core.IdleAfk"/> -- the dial's away cells.</item>
+/// </list>
 ///
-/// Why not just treat this as the presence signal and drop afk entirely: **ActivityWatch
-/// keeps recording even while ItamiTimer is closed; this program's own sampling doesn't**.
-/// Principle 3 requires that closing the UI not affect the outcome -- if presence data came
-/// from this program's own polling, closing it would leave a permanent hole (unlike
-/// ActivityWatch, which can be queried retroactively).
+/// ⚠️ **It IS linked into ItamiTimer.Cli, as of 3.10.0** -- and the history here is worth
+/// keeping. This comment once claimed it was linked when it was not (2026-08-30); the claim
+/// was then corrected to a flat "it is NOT", on the reasoning that `itami start` is a dry
+/// run of the engine and nudging a human has no meaning there. That reasoning was sound for
+/// the nudge and became wrong the moment caller #2 appeared: the dry run would then paint a
+/// *different dial* from the GUI, which is exactly the failure §15.7 exists to prevent. So
+/// the csproj now links it. The neutral `ItamiTimer` namespace finally earns its keep.
+///
+/// ## Why this does NOT replace afk in the ledger
+///
+/// **ActivityWatch keeps recording while ItamiTimer is closed; this program's own sampling
+/// doesn't.** Principle 3 requires that closing the UI not affect the outcome -- if the
+/// *ledger's* presence data came from this program's polling, closing it would leave a
+/// permanent hole. <see cref="ItamiTimer.Core.Backfill"/> must therefore stay on AW, and
+/// this signal must never be wired into it.
+///
+/// ⚠️ That argument is about the **ledger**, and for a while it was misapplied to the dial
+/// as well. The dial is a live mirror that only exists while the program runs -- "no record
+/// while closed" costs it nothing, because it has no history to lose. See
+/// <see cref="ItamiTimer.Core.IdleAfk"/> for why the dial moved off AW's afk bucket.
 /// </summary>
 public static class InputIdle
 {
